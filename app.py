@@ -204,7 +204,7 @@ def get_market_status():
 st.sidebar.title("⚙️ V3.1 Inputs")
 
 with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
-        live_nifty_data = get_live_nifty_price()
+    live_nifty_data = get_live_nifty_price()
 
     use_live_nifty = st.checkbox("Use Live Nifty Price", value=True)
 
@@ -226,13 +226,13 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
         price = manual_price
         if use_live_nifty:
             st.warning("Live price unavailable. Manual price is being used.")
+
     ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
     ema50 = st.number_input("EMA 50", value=24900.0, step=1.0)
     vwap = st.number_input("VWAP", value=24940.0, step=1.0)
     atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
     atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
     vix = st.number_input("India VIX", value=13.5, step=0.1)
-
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
     put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
