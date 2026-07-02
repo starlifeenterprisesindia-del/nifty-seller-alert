@@ -174,7 +174,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
     atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
 
-        live_vix_data = get_live_india_vix()
+    live_vix_data = get_live_india_vix()
 
     use_live_vix = st.checkbox("Use Live India VIX", value=True)
 
@@ -197,6 +197,8 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
             st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
         else:
             st.warning("Live India VIX unavailable. Manual VIX is being used.")
+
+
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
     put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
@@ -205,7 +207,6 @@ with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     ce_strike = st.number_input("CE Sell Strike", value=25100, step=50)
     pe_strike = st.number_input("PE Sell Strike", value=24900, step=50)
     hedge_gap = st.number_input("Hedge Gap", value=100, step=50)
-
 with st.sidebar.expander("3️⃣ Price Action / Support-Resistance", expanded=False):
     previous_day_high = st.number_input("Previous Day High", value=25150.0, step=1.0)
     previous_day_low = st.number_input("Previous Day Low", value=24850.0, step=1.0)
