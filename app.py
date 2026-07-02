@@ -147,6 +147,16 @@ st.sidebar.title("⚙️ V3.1 Inputs")
 with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     live_nifty_data = get_live_nifty_price()
 
+    if not isinstance(live_nifty_data, dict):
+        live_nifty_data = {
+            "success": False,
+            "price": None,
+            "change": None,
+            "change_pct": None,
+            "last_update": "Not Available",
+            "message": "Invalid live Nifty data"
+        }
+
     use_live_nifty = st.checkbox("Use Live Nifty Price", value=True)
 
     manual_price = st.number_input(
@@ -155,7 +165,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
         step=1.0
     )
 
-    if use_live_nifty and live_nifty_data["success"]:
+    if use_live_nifty and live_nifty_data.get("success", False):
         price = live_nifty_data["price"]
         st.success(
             f"Live Nifty: {price} | "
@@ -166,7 +176,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     else:
         price = manual_price
         if use_live_nifty:
-            st.warning("Live price unavailable. Manual price is being used.")
+            st.warning("Live Nifty unavailable. Manual price is being used.")
 
     ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
     ema50 = st.number_input("EMA 50", value=24900.0, step=1.0)
@@ -175,6 +185,16 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
 
     live_vix_data = get_live_india_vix()
+
+    if not isinstance(live_vix_data, dict):
+        live_vix_data = {
+            "success": False,
+            "vix": None,
+            "change": None,
+            "change_pct": None,
+            "last_update": "Not Available",
+            "message": "Invalid live VIX data"
+        }
 
     use_live_vix = st.checkbox("Use Live India VIX", value=True)
 
@@ -186,16 +206,16 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
 
     vix = manual_vix
 
-    if use_live_vix:
-        if live_vix_data["success"]:
-            vix = live_vix_data["vix"]
-            st.success(
-                f"Live India VIX: {vix} | "
-                f"{live_vix_data['change']} "
-                f"({live_vix_data['change_pct']}%)"
-            )
-            st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
-        else:
+    if use_live_vix and live_vix_data.get("success", False):
+        vix = live_vix_data["vix"]
+        st.success(
+            f"Live India VIX: {vix} | "
+            f"{live_vix_data['change']} "
+            f"({live_vix_data['change_pct']}%)"
+        )
+        st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
+    else:
+        if use_live_vix:
             st.warning("Live India VIX unavailable. Manual VIX is being used.")
 
 
@@ -207,6 +227,8 @@ with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     ce_strike = st.number_input("CE Sell Strike", value=25100, step=50)
     pe_strike = st.number_input("PE Sell Strike", value=24900, step=50)
     hedge_gap = st.number_input("Hedge Gap", value=100, step=50)
+
+
 with st.sidebar.expander("3️⃣ Price Action / Support-Resistance", expanded=False):
     previous_day_high = st.number_input("Previous Day High", value=25150.0, step=1.0)
     previous_day_low = st.number_input("Previous Day Low", value=24850.0, step=1.0)
@@ -215,6 +237,7 @@ with st.sidebar.expander("3️⃣ Price Action / Support-Resistance", expanded=F
     opening_range_high = st.number_input("Opening Range High", value=25060.0, step=1.0)
     opening_range_low = st.number_input("Opening Range Low", value=24940.0, step=1.0)
 
+
 with st.sidebar.expander("4️⃣ Volume AI", expanded=False):
     current_volume = st.number_input("Current Volume", value=120000, step=1000)
     average_volume = st.number_input("Average Volume", value=80000, step=1000)
@@ -222,6 +245,7 @@ with st.sidebar.expander("4️⃣ Volume AI", expanded=False):
         "Breakout / Breakdown",
         ["No Breakout", "Resistance Breakout", "Support Breakdown"]
     )
+
 
 with st.sidebar.expander("5️⃣ FII / DII Smart Money", expanded=False):
     fii_today = st.number_input("FII Today ₹ Cr", value=0.0, step=100.0)
@@ -233,6 +257,7 @@ with st.sidebar.expander("5️⃣ FII / DII Smart Money", expanded=False):
         ["Neutral", "Bullish", "Bearish"]
     )
 
+
 with st.sidebar.expander("6️⃣ Confirmation Panel", expanded=False):
     rsi = st.number_input("RSI", value=55.0, step=0.5)
     macd = st.selectbox("MACD", ["Neutral", "Bullish", "Bearish"])
@@ -242,15 +267,13 @@ with st.sidebar.expander("6️⃣ Confirmation Panel", expanded=False):
     )
     supertrend = st.selectbox("Supertrend", ["Neutral", "Bullish", "Bearish"])
 
+
 with st.sidebar.expander("7️⃣ Risk / Position", expanded=True):
     news_risk = st.selectbox("News Risk", ["Low", "Medium", "High"])
     capital = st.number_input("Capital ₹", value=500000, step=10000)
     margin_per_lot = st.number_input("Margin Per Lot ₹", value=100000, step=5000)
     current_lots = st.number_input("Current Lots Holding", value=0, step=1)
     lot_size = st.number_input("Lot Size", value=50, step=25)
-
-
-# =========================================================
 # CORE CALCULATIONS
 # =========================================================
 pcr = safe_divide(total_put_oi, total_call_oi, 0.0)
