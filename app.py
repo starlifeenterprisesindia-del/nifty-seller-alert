@@ -164,3 +164,201 @@ if score >= 80:
     st.success("🔊 Sound Alert Active")
 else:
     st.info("No sound alert - setup weak")
+    st.markdown("---")
+st.markdown("## 📂 CSV Upload Analysis")
+
+uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+
+if uploaded_file is not None:
+    import pandas as pd
+
+    df = pd.read_csv(uploaded_file)
+
+    st.write("CSV Data Preview")
+    st.dataframe(df.head())
+
+    if "Close" in df.columns:
+        df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+        df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+
+        latest_close = df["Close"].iloc[-1]
+        latest_ema20 = df["EMA20"].iloc[-1]
+        latest_ema50 = df["EMA50"].iloc[-1]
+
+        st.write(f"Latest Close: {latest_close:.2f}")
+        st.write(f"EMA20: {latest_ema20:.2f}")
+        st.write(f"EMA50: {latest_ema50:.2f}")
+
+        if latest_close > latest_ema20 and latest_close > latest_ema50:
+            st.success("🟢 CSV Signal: Bullish - PE Sell Watch")
+        elif latest_close < latest_ema20 and latest_close < latest_ema50:
+            st.error("🔴 CSV Signal: Bearish - CE Sell Watch")
+        else:
+            st.warning("🟡 CSV Signal: Wait")
+    else:
+        st.error("CSV me 'Close' column hona chahiye")
+        st.markdown("---")
+st.markdown("## 📊 Option Chain Strike & Hedge Finder")
+
+spot = st.number_input("Nifty Spot Price", value=25000, key="spot_oc")
+strike_gap = st.number_input("Strike Gap", value=50, key="strike_gap")
+hedge_gap = st.number_input("Hedge Gap", value=100, key="hedge_gap")
+
+st.markdown("### PE Side")
+pe_support_strike = st.number_input("Strong PE Support Strike", value=24900, key="pe_support")
+pe_premium = st.number_input("PE Sell Premium", value=120, key="pe_premium")
+
+st.markdown("### CE Side")
+ce_resistance_strike = st.number_input("Strong CE Resistance Strike", value=25100, key="ce_resistance")
+ce_premium = st.number_input("CE Sell Premium", value=115, key="ce_premium")
+
+st.markdown("### Hedge Suggestion")
+
+pe_hedge = pe_support_strike - hedge_gap
+ce_hedge = ce_resistance_strike + hedge_gap
+
+if score >= 80 and put_oi > call_oi and price > ema20 and price > ema50:
+    st.success("✅ Best Trade: PE SELL")
+    st.info(f"""
+    Sell PE Strike: {pe_support_strike} PE  
+    Buy Hedge: {pe_hedge} PE  
+    Sell Premium: ₹{pe_premium}  
+    Hedge Gap: {hedge_gap} points  
+    Confidence: {score}%
+    """)
+
+elif score >= 80 and call_oi > put_oi and price < ema20 and price < ema50:
+    st.error("✅ Best Trade: CE SELL")
+    st.info(f"""
+    Sell CE Strike: {ce_resistance_strike} CE  
+    Buy Hedge: {ce_hedge} CE  
+    Sell Premium: ₹{ce_premium}  
+    Hedge Gap: {hedge_gap} points  
+    Confidence: {score}%
+    """)
+
+else:
+    st.warning("⏳ No clear strike selection - Wait")
+
+
+st.markdown("---")
+st.markdown("## 💰 Position Size & Risk")
+
+capital = st.number_input("Capital", value=400000, key="capital")
+risk_percent = st.number_input("Risk % Per Trade", value=1.0, key="risk_percent")
+lot_size = st.number_input("Lot Size", value=50, key="lot_size2")
+
+risk_amount = capital * risk_percent / 100
+
+st.write(f"Maximum Risk Allowed: ₹{risk_amount:,.0f}")
+
+suggested_lots = max(1, int(risk_amount / 2500))
+
+st.write(f"Suggested Lots: {suggested_lots}")
+
+st.warning("⚠️ Final trade lene se pehle real option chain, spread aur liquidity zaroor check karo.")
+from datetime import datetime
+import streamlit as st
+
+st.markdown("---")
+st.markdown("## 📅 Market Session & Expiry AI")
+
+today = datetime.now()
+
+days = [
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday"
+]
+
+day_name = days[today.weekday()]
+current_time = today.strftime("%H:%M")
+
+st.write(f"### 📅 Today : {day_name}")
+st.write(f"### ⏰ Time : {current_time}")
+
+market_open = today.hour > 9 or (today.hour == 9 and today.minute >= 15)
+market_close = today.hour >= 15 and today.minute >= 30
+
+if market_open and not market_close:
+    st.success("🟢 MARKET OPEN")
+else:
+    st.error("🔴 MARKET CLOSED")
+
+# Expiry Mode
+if day_name == "Thursday":
+    st.warning("🔥 WEEKLY EXPIRY MODE")
+    expiry = True
+else:
+    st.info("📈 NORMAL TRADING DAY")
+    expiry = False
+
+st.markdown("---")
+st.markdown("## 🌙 Carry Forward AI")
+
+carry_score = 0
+
+if score >= 80:
+    carry_score += 30
+
+if price > ema20:
+    carry_score += 20
+
+if price > ema50:
+    carry_score += 20
+
+if not expiry:
+    carry_score += 30
+
+st.progress(carry_score)
+
+if carry_score >= 80:
+    st.success("✅ Carry Forward Possible")
+elif carry_score >= 60:
+    st.warning("⚠️ Carry Only With Hedge")
+else:
+    st.error("❌ Exit Today Better")
+
+st.write(f"Carry Confidence : {carry_score}%")
+
+st.markdown("---")
+st.markdown("## 🚨 News Risk Alert")
+
+news_mode = st.selectbox(
+    "Today's News Impact",
+    [
+        "No Major News",
+        "RBI Policy",
+        "Fed Meeting",
+        "US CPI",
+        "Budget",
+        "Election",
+        "War / Geopolitical",
+        "Company Results"
+    ]
+)
+
+if news_mode == "No Major News":
+    st.success("🟢 Safe for Option Selling")
+
+elif news_mode in ["Company Results"]:
+    st.warning("🟡 Trade Carefully")
+
+else:
+    st.error("🔴 High Impact News - Reduce Position Size")
+
+st.markdown("---")
+st.markdown("## 🤖 Final AI Decision")
+
+if score >= 90 and carry_score >= 80 and news_mode == "No Major News":
+    st.success("✅ FULL CONFIDENCE TRADE")
+
+elif score >= 75:
+    st.warning("⚠️ Moderate Confidence")
+
+else:
+    st.error("❌ WAIT FOR BETTER SETUP")
