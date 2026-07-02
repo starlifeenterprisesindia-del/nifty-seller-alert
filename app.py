@@ -231,8 +231,9 @@ def get_live_india_vix():
             "message": "Live India VIX fetched successfully."
         }
 
-    except Exception as e:
-                }
+        except Exception as e:
+        }
+
         return {
             "success": False,
             "vix": None,
@@ -240,9 +241,7 @@ def get_live_india_vix():
             "change_pct": None,
             "last_update": "Error",
             "message": f"Live India VIX fetch error: {e}"
-        def clamp(value, low=0, high=98):
-    """Convert score to safe integer percentage."""
-    try:
+    def clamp(value, low=0, high=98):    try:
         value = int(round(float(value)))
     except Exception:
         value = 0
