@@ -173,8 +173,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     vwap = st.number_input("VWAP", value=24940.0, step=1.0)
     atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
     atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
-        live_vix_data = get_live_india_vix()
-
+    live_vix_data = get_live_india_vix()
     use_live_vix = st.checkbox("Use Live India VIX", value=True)
 
     manual_vix = st.number_input(
