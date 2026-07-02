@@ -694,7 +694,14 @@ with b2:
 # =========================================================
 with st.expander("📊 Market Snapshot", expanded=True):
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Nifty", f"{price:.2f}")
+   if use_live_nifty and live_nifty_data["success"]:
+    m1.metric(
+        "Nifty Live",
+        f"{price:.2f}",
+        f"{live_nifty_data['change']} pts / {live_nifty_data['change_pct']}%"
+    )
+else:
+    m1.metric("Nifty Manual", f"{price:.2f}")
     m2.metric("EMA20", f"{ema20:.2f}")
     m3.metric("EMA50", f"{ema50:.2f}")
     m4.metric("VWAP", f"{vwap:.2f}")
