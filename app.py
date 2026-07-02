@@ -192,7 +192,7 @@ if use_live_vix and live_vix_data["success"]:
             f"({live_vix_data['change_pct']}%)"
         )
         st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
-    else:
+        else:
         vix = manual_vix
         if use_live_vix:
             st.warning("Live India VIX unavailable. Manual VIX is being used.")
