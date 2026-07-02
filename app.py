@@ -244,17 +244,27 @@ def get_live_india_vix():
 def clamp(value, low=0, high=98):
     """Convert score to safe integer percentage."""
     try:
-        value = int(round(float(value)))    except Exception:
+        value = int(round(float(value)))
+    except Exception:
         value = 0
+
     return max(low, min(high, value))
 
 
 def safe_divide(a, b, default=0.0):
-    return a / b if b else default
+    """Safely divide two numbers."""
+    try:
+        if b == 0:
+            return default
+        return a / b
+    except Exception:
+        return default
 
 
 def score_label(score):
+    """Convert numeric score into text label."""
     score = clamp(score)
+
     if score >= 75:
         return "Strong"
     if score >= 60:
@@ -263,11 +273,14 @@ def score_label(score):
         return "Neutral"
     if score >= 30:
         return "Weak"
+
     return "Very Weak"
 
 
 def get_market_status():
+    """Return current market status based on India time."""
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
+
     open_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
     close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
 
@@ -277,8 +290,8 @@ def get_market_status():
     day_name = now.strftime("%A")
     market_text = "Market Open" if is_open else "Market Closed"
     expiry_text = "Weekly Expiry" if day_name == "Thursday" else "Normal Day"
-    return now, day_name, market_text, expiry_text
 
+    return now, day_name, market_text, expiry_text
 
 # =========================================================
 # SIDEBAR INPUTS
