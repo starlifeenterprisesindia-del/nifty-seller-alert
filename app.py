@@ -173,7 +173,6 @@ def get_live_india_vix():
     """
     try:
         ticker = yf.Ticker("^INDIAVIX")
-
         intraday = ticker.history(period="2d", interval="1m")
 
         if intraday is None or intraday.empty:
@@ -231,8 +230,7 @@ def get_live_india_vix():
             "message": "Live India VIX fetched successfully."
         }
 
-        except Exception as e:
-
+    except Exception as e:
         return {
             "success": False,
             "vix": None,
@@ -240,7 +238,7 @@ def get_live_india_vix():
             "change_pct": None,
             "last_update": "Error",
             "message": f"Live India VIX fetch error: {e}"
-    def clamp(value, low=0, high=98):    try:
+        }    def clamp(value, low=0, high=98):    try:
         value = int(round(float(value)))
     except Exception:
         value = 0
