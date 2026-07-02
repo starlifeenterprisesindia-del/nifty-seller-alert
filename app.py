@@ -520,14 +520,54 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
 
 
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
-    call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
-    put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
-    total_call_oi = st.number_input("Total Call OI", value=1500000, step=10000)
-    total_put_oi = st.number_input("Total Put OI", value=1800000, step=10000)
-    ce_strike = st.number_input("CE Sell Strike", value=25100, step=50)
-    pe_strike = st.number_input("PE Sell Strike", value=24900, step=50)
+    use_live_option_chain = st.checkbox("Use Live Option Chain", value=False)
+
+    live_option_chain_data = get_live_option_chain(
+        spot_price=price,
+        strike_gap=50,
+        strikes_each_side=4
+    )
+
+    manual_call_oi_change = st.number_input("Manual Call OI Change", value=150000, step=1000)
+    manual_put_oi_change = st.number_input("Manual Put OI Change", value=180000, step=1000)
+    manual_total_call_oi = st.number_input("Manual Total Call OI", value=1500000, step=10000)
+    manual_total_put_oi = st.number_input("Manual Total Put OI", value=1800000, step=10000)
+    manual_ce_strike = st.number_input("Manual CE Sell Strike", value=25100, step=50)
+    manual_pe_strike = st.number_input("Manual PE Sell Strike", value=24900, step=50)
     hedge_gap = st.number_input("Hedge Gap", value=100, step=50)
 
+    call_oi_change = manual_call_oi_change
+    put_oi_change = manual_put_oi_change
+    total_call_oi = manual_total_call_oi
+    total_put_oi = manual_total_put_oi
+    ce_strike = manual_ce_strike
+    pe_strike = manual_pe_strike
+
+    if use_live_option_chain and live_option_chain_data.get("success", False):
+        call_oi_change = live_option_chain_data["call_oi_change"]
+        put_oi_change = live_option_chain_data["put_oi_change"]
+        total_call_oi = live_option_chain_data["total_call_oi"]
+        total_put_oi = live_option_chain_data["total_put_oi"]
+        ce_strike = live_option_chain_data["ce_sell_strike"]
+        pe_strike = live_option_chain_data["pe_sell_strike"]
+
+        st.success(
+            f"Live OC: Expiry {live_option_chain_data['expiry']} | "
+            f"ATM {live_option_chain_data['atm_strike']} | "
+            f"PCR {live_option_chain_data['pcr']}"
+        )
+        st.caption(f"OC Last Update: {live_option_chain_data['last_update']}")
+        st.caption(
+            f"Rows used near ATM: {live_option_chain_data['rows_count']} | "
+            f"Underlying: {live_option_chain_data['underlying']}"
+        )
+
+    elif use_live_option_chain:
+        st.warning("Live Option Chain unavailable. Manual OI/PCR values are being used.")
+        st.caption(live_option_chain_data.get("message", "No live option chain message."))
+
+    else:
+        st.info("Manual Option Chain values are being used.")
 
 with st.sidebar.expander("3️⃣ Price Action / Support-Resistance", expanded=False):
     previous_day_high = st.number_input("Previous Day High", value=25150.0, step=1.0)
