@@ -239,7 +239,7 @@ def get_live_india_vix():
             "change_pct": None,
             "last_update": "Error",
             "message": f"Live India VIX fetch error: {e}"
-        }def clamp(value, low=0, high=98):
+        def clamp(value, low=0, high=98):
     """Convert score to safe integer percentage."""
     try:
         value = int(round(float(value)))
