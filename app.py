@@ -174,7 +174,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
     atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
 
-    live_vix_data = get_live_india_vix()
+        live_vix_data = get_live_india_vix()
 
     use_live_vix = st.checkbox("Use Live India VIX", value=True)
 
@@ -184,19 +184,19 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
         step=0.1
     )
 
-if use_live_vix and live_vix_data["success"]:
-        vix = live_vix_data["vix"]
-        st.success(
-            f"Live India VIX: {vix} | "
-            f"{live_vix_data['change']} "
-            f"({live_vix_data['change_pct']}%)"
-        )
-        st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
-        else:
-        vix = manual_vix
-        if use_live_vix:
-            st.warning("Live India VIX unavailable. Manual VIX is being used.")
+    vix = manual_vix
 
+    if use_live_vix:
+        if live_vix_data["success"]:
+            vix = live_vix_data["vix"]
+            st.success(
+                f"Live India VIX: {vix} | "
+                f"{live_vix_data['change']} "
+                f"({live_vix_data['change_pct']}%)"
+            )
+            st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
+        else:
+            st.warning("Live India VIX unavailable. Manual VIX is being used.")
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
     put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
