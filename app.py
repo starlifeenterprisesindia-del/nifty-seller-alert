@@ -204,7 +204,28 @@ def get_market_status():
 st.sidebar.title("⚙️ V3.1 Inputs")
 
 with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
-    price = st.number_input("Nifty Price", value=25000.0, step=1.0)
+        live_nifty_data = get_live_nifty_price()
+
+    use_live_nifty = st.checkbox("Use Live Nifty Price", value=True)
+
+    manual_price = st.number_input(
+        "Manual Nifty Price",
+        value=25000.0,
+        step=1.0
+    )
+
+    if use_live_nifty and live_nifty_data["success"]:
+        price = live_nifty_data["price"]
+        st.success(
+            f"Live Nifty: {price} | "
+            f"{live_nifty_data['change']} pts "
+            f"({live_nifty_data['change_pct']}%)"
+        )
+        st.caption(f"Last Update: {live_nifty_data['last_update']}")
+    else:
+        price = manual_price
+        if use_live_nifty:
+            st.warning("Live price unavailable. Manual price is being used.")
     ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
     ema50 = st.number_input("EMA 50", value=24900.0, step=1.0)
     vwap = st.number_input("VWAP", value=24940.0, step=1.0)
