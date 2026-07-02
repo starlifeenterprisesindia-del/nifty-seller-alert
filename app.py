@@ -5,12 +5,12 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V3.1
+# NIFTY SELLER AI DASHBOARD V4
 # Clean Professional Version
 # =========================================================
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V3.1",
+    page_title="Nifty Seller AI Dashboard V4",
     page_icon="🧠",
     layout="wide"
 )
