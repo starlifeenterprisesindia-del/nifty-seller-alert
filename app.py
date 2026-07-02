@@ -296,7 +296,7 @@ def get_market_status():
 # =========================================================
 # SIDEBAR INPUTS
 # =========================================================
-st.sidebar.title("⚙️ V3.1 Inputs")
+st.sidebar.title("⚙️ V4 Inputs")
 
 with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     live_nifty_data = get_live_nifty_price()
@@ -693,7 +693,7 @@ else:
 # =========================================================
 # HEADER
 # =========================================================
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V3.1</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V4</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Option Seller Decision Engine: Price Action + Support/Resistance + Volume + OI + PCR + VIX + FII/DII + News</div>",
     unsafe_allow_html=True
