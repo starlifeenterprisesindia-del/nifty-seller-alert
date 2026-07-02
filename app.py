@@ -242,6 +242,151 @@ def get_live_india_vix():
         }
 
 
+# =========================================================
+# LIVE DATA - FEATURE 3: LIVE OPTION CHAIN / OI / PCR
+# =========================================================
+@st.cache_data(ttl=60)
+def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
+    """
+    Fetch live NIFTY option chain from NSE.
+    It returns OI, OI Change, PCR, support/resistance and suggested strikes.
+    If NSE blocks or data is unavailable, it returns success=False.
+    """
+    try:
+        url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept-Encoding": "gzip, deflate, br",
+            "Referer": "https://www.nseindia.com/option-chain",
+            "Connection": "keep-alive",
+        }
+
+        session = requests.Session()
+        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+        response = session.get(url, headers=headers, timeout=10)
+
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "message": f"NSE option chain request failed. Status: {response.status_code}"
+            }
+
+        data = response.json()
+
+        records = data.get("records", {})
+        option_data = records.get("data", [])
+
+        if not option_data:
+            return {
+                "success": False,
+                "message": "NSE option chain data empty."
+            }
+
+        underlying_value = records.get("underlyingValue", None)
+
+        if underlying_value is None:
+            underlying_value = spot_price
+
+        if underlying_value is None:
+            return {
+                "success": False,
+                "message": "Underlying value not available."
+            }
+
+        underlying_value = float(underlying_value)
+
+        expiry_dates = records.get("expiryDates", [])
+        selected_expiry = expiry_dates[0] if expiry_dates else None
+
+        if not selected_expiry:
+            return {
+                "success": False,
+                "message": "Expiry date not available."
+            }
+
+        atm_strike = int(round(underlying_value / strike_gap) * strike_gap)
+
+        lower_strike = atm_strike - (strikes_each_side * strike_gap)
+        upper_strike = atm_strike + (strikes_each_side * strike_gap)
+
+        filtered_rows = []
+
+        for row in option_data:
+            if row.get("expiryDate") != selected_expiry:
+                continue
+
+            strike_price = row.get("strikePrice")
+
+            if strike_price is None:
+                continue
+
+            if lower_strike <= int(strike_price) <= upper_strike:
+                ce = row.get("CE", {})
+                pe = row.get("PE", {})
+
+                filtered_rows.append({
+                    "strike": int(strike_price),
+                    "ce_oi": int(ce.get("openInterest", 0) or 0),
+                    "pe_oi": int(pe.get("openInterest", 0) or 0),
+                    "ce_change_oi": int(ce.get("changeinOpenInterest", 0) or 0),
+                    "pe_change_oi": int(pe.get("changeinOpenInterest", 0) or 0),
+                    "ce_volume": int(ce.get("totalTradedVolume", 0) or 0),
+                    "pe_volume": int(pe.get("totalTradedVolume", 0) or 0),
+                })
+
+        if not filtered_rows:
+            return {
+                "success": False,
+                "message": "No option chain rows found near ATM."
+            }
+
+        total_call_oi = sum(row["ce_oi"] for row in filtered_rows)
+        total_put_oi = sum(row["pe_oi"] for row in filtered_rows)
+
+        call_oi_change = sum(row["ce_change_oi"] for row in filtered_rows)
+        put_oi_change = sum(row["pe_change_oi"] for row in filtered_rows)
+
+        pcr_value = total_put_oi / total_call_oi if total_call_oi else 0.0
+
+        ce_candidates = [row for row in filtered_rows if row["strike"] >= atm_strike]
+        pe_candidates = [row for row in filtered_rows if row["strike"] <= atm_strike]
+
+        strongest_ce = max(ce_candidates, key=lambda x: x["ce_oi"], default=None)
+        strongest_pe = max(pe_candidates, key=lambda x: x["pe_oi"], default=None)
+
+        ce_sell_strike = strongest_ce["strike"] if strongest_ce else atm_strike + strike_gap
+        pe_sell_strike = strongest_pe["strike"] if strongest_pe else atm_strike - strike_gap
+
+        last_update = datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%d-%m-%Y %I:%M:%S %p")
+
+        return {
+            "success": True,
+            "underlying": round(underlying_value, 2),
+            "expiry": selected_expiry,
+            "atm_strike": atm_strike,
+            "call_oi_change": int(call_oi_change),
+            "put_oi_change": int(put_oi_change),
+            "total_call_oi": int(total_call_oi),
+            "total_put_oi": int(total_put_oi),
+            "pcr": round(pcr_value, 2),
+            "ce_sell_strike": int(ce_sell_strike),
+            "pe_sell_strike": int(pe_sell_strike),
+            "rows_count": len(filtered_rows),
+            "last_update": last_update,
+            "message": "Live option chain fetched successfully."
+        }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Live option chain fetch error: {e}"
+        }
 def clamp(value, low=0, high=98):
     """Convert score to safe integer percentage."""
     try:
