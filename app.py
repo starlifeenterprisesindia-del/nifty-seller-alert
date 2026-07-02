@@ -362,3 +362,288 @@ elif score >= 75:
 
 else:
     st.error("❌ WAIT FOR BETTER SETUP")
+    st.markdown("---")
+st.markdown("## 📊 Volume AI Panel")
+
+current_volume = st.number_input("Current Candle Volume", value=120000, key="current_volume")
+avg_volume = st.number_input("Average Volume", value=80000, key="avg_volume")
+
+rvol = current_volume / avg_volume if avg_volume > 0 else 0
+
+st.write(f"Relative Volume: {rvol:.2f}x")
+
+if rvol >= 2:
+    st.success("🟢 High Volume - Strong Move Possible")
+elif rvol >= 1:
+    st.warning("🟡 Normal Volume")
+else:
+    st.error("🔴 Low Volume - Weak Move / Avoid Breakout Trade")
+
+st.markdown("### 🚨 Volume Spike Alert")
+
+if rvol >= 2:
+    st.error("🚨 Volume Spike Detected")
+else:
+    st.info("No major volume spike")
+
+st.markdown("### Breakout Quality")
+
+breakout = st.selectbox(
+    "Price Action",
+    ["No Breakout", "Resistance Breakout", "Support Breakdown"],
+    key="breakout_type"
+)
+
+if breakout == "Resistance Breakout" and rvol >= 1.5:
+    st.success("✅ Strong Bullish Breakout Confirmed")
+elif breakout == "Support Breakdown" and rvol >= 1.5:
+    st.error("✅ Strong Bearish Breakdown Confirmed")
+elif breakout != "No Breakout" and rvol < 1.5:
+    st.warning("⚠️ Weak Breakout - Fake Move Risk")
+else:
+    st.info("No breakout detected")
+
+st.markdown("### Volume Strength Score")
+
+volume_score = 0
+
+if rvol >= 2:
+    volume_score = 100
+elif rvol >= 1.5:
+    volume_score = 80
+elif rvol >= 1:
+    volume_score = 60
+else:
+    volume_score = 30
+
+st.progress(volume_score)
+st.write(f"Volume Score: {volume_score}/100")
+st.markdown("---")
+st.markdown("## 🧠 AI Position Manager")
+
+capital_pm = st.number_input("Total Capital", value=500000, key="capital_pm")
+margin_per_lot = st.number_input("Approx Margin Per Lot", value=100000, key="margin_per_lot")
+current_lots = st.number_input("Current Lots Holding", value=0, key="current_lots")
+trade_confidence = st.number_input("Trade Confidence %", value=80, key="trade_confidence_pm")
+vix_level = st.number_input("India VIX", value=13.5, key="vix_pm")
+
+news_risk_pm = st.selectbox(
+    "News Risk",
+    ["Low", "Medium", "High"],
+    key="news_risk_pm"
+)
+
+expiry_mode_pm = st.selectbox(
+    "Expiry Mode",
+    ["Normal Day", "Expiry Day"],
+    key="expiry_mode_pm"
+)
+
+max_lots_by_margin = int(capital_pm / margin_per_lot) if margin_per_lot > 0 else 0
+
+risk_lot_factor = 1.0
+
+if trade_confidence >= 90:
+    risk_lot_factor += 0.30
+elif trade_confidence >= 75:
+    risk_lot_factor += 0.00
+else:
+    risk_lot_factor -= 0.40
+
+if vix_level <= 14:
+    risk_lot_factor += 0.20
+elif vix_level <= 18:
+    risk_lot_factor += 0.00
+else:
+    risk_lot_factor -= 0.40
+
+if news_risk_pm == "Low":
+    risk_lot_factor += 0.10
+elif news_risk_pm == "Medium":
+    risk_lot_factor -= 0.20
+else:
+    risk_lot_factor -= 0.60
+
+if expiry_mode_pm == "Expiry Day":
+    risk_lot_factor -= 0.25
+
+risk_lot_factor = max(0, min(risk_lot_factor, 1.5))
+
+suggested_lots_ai = int(max_lots_by_margin * risk_lot_factor)
+suggested_lots_ai = max(0, min(suggested_lots_ai, max_lots_by_margin))
+
+st.write(f"Maximum Lots by Margin: {max_lots_by_margin}")
+st.write(f"AI Suggested Lots: {suggested_lots_ai}")
+
+if suggested_lots_ai == 0:
+    st.error("❌ No Trade / Avoid Position")
+elif current_lots == suggested_lots_ai:
+    st.success("✅ Current Position Perfect")
+elif current_lots < suggested_lots_ai:
+    add_lots = suggested_lots_ai - current_lots
+    st.success(f"➕ Add Possible: {add_lots} lot(s)")
+else:
+    reduce_lots = current_lots - suggested_lots_ai
+    st.error(f"➖ Reduce Position: {reduce_lots} lot(s)")
+
+st.markdown("### Risk Status")
+
+if trade_confidence >= 90 and vix_level <= 14 and news_risk_pm == "Low":
+    st.success("🟢 Aggressive Setup Possible")
+elif trade_confidence >= 75 and news_risk_pm != "High":
+    st.warning("🟡 Normal Setup - Controlled Lots")
+else:
+    st.error("🔴 Risky Setup - Small Size / Avoid")
+
+st.warning("⚠️ Ye lot suggestion risk management ke liye hai. Final order se pehle broker margin, spread, liquidity aur hedge zaroor check karo.")
+st.markdown("---")
+st.markdown("## 📍 Support & Resistance AI")
+
+current_price_sr = st.number_input("Current Price", value=25000, key="current_price_sr")
+pdh = st.number_input("Previous Day High", value=25150, key="pdh")
+pdl = st.number_input("Previous Day Low", value=24850, key="pdl")
+today_high = st.number_input("Today High", value=25080, key="today_high")
+today_low = st.number_input("Today Low", value=24920, key="today_low")
+opening_high = st.number_input("Opening Range High", value=25060, key="opening_high")
+opening_low = st.number_input("Opening Range Low", value=24940, key="opening_low")
+
+resistance_levels = [pdh, today_high, opening_high]
+support_levels = [pdl, today_low, opening_low]
+
+nearest_resistance = min([r for r in resistance_levels if r >= current_price_sr], default=max(resistance_levels))
+nearest_support = max([s for s in support_levels if s <= current_price_sr], default=min(support_levels))
+
+res_distance = nearest_resistance - current_price_sr
+sup_distance = current_price_sr - nearest_support
+
+st.write(f"Nearest Resistance: {nearest_resistance}")
+st.write(f"Distance from Resistance: {res_distance} points")
+
+st.write(f"Nearest Support: {nearest_support}")
+st.write(f"Distance from Support: {sup_distance} points")
+
+st.markdown("### AI Level Analysis")
+
+if res_distance <= 30:
+    st.error("🔴 Price resistance ke bahut paas hai - PE Sell avoid / careful")
+elif sup_distance <= 30:
+    st.success("🟢 Price support ke paas hai - PE Sell better ho sakti hai")
+else:
+    st.info("🟡 Price middle zone me hai - confirmation ka wait")
+
+st.markdown("### Breakout / Breakdown Alert")
+
+if current_price_sr > nearest_resistance:
+    st.success("🚀 Resistance Breakout")
+elif current_price_sr < nearest_support:
+    st.error("📉 Support Breakdown")
+else:
+    st.warning("⏳ No clear breakout yet")
+    st.markdown("---")
+st.markdown("## ✅ Confirmation Panel")
+
+rsi = st.number_input("RSI", value=55, key="rsi_confirm")
+macd_signal = st.selectbox(
+    "MACD Signal",
+    ["Bullish", "Bearish", "Neutral"],
+    key="macd_confirm"
+)
+bollinger_status = st.selectbox(
+    "Bollinger Band Status",
+    ["Normal", "Squeeze", "Upper Breakout", "Lower Breakdown"],
+    key="bb_confirm"
+)
+supertrend_signal = st.selectbox(
+    "Supertrend",
+    ["Bullish", "Bearish", "Neutral"],
+    key="supertrend_confirm"
+)
+
+confirm_score = 0
+
+if 45 <= rsi <= 65:
+    confirm_score += 20
+elif rsi > 65:
+    st.warning("⚠️ RSI high hai - PE sell me thoda caution")
+elif rsi < 35:
+    st.warning("⚠️ RSI low hai - CE sell me thoda caution")
+
+if macd_signal == "Bullish":
+    confirm_score += 20
+elif macd_signal == "Bearish":
+    confirm_score += 20
+
+if bollinger_status == "Squeeze":
+    st.warning("⚠️ Bollinger Squeeze - Big move aa sakta hai")
+    confirm_score += 10
+elif bollinger_status in ["Upper Breakout", "Lower Breakdown"]:
+    confirm_score += 20
+
+if supertrend_signal != "Neutral":
+    confirm_score += 20
+
+st.progress(confirm_score)
+st.write(f"Confirmation Score: {confirm_score}/80")
+
+if confirm_score >= 60:
+    st.success("✅ Strong Confirmation")
+elif confirm_score >= 40:
+    st.warning("🟡 Average Confirmation")
+else:
+    st.error("🔴 Weak Confirmation - Avoid Blind Trade")
+    st.markdown("---")
+st.markdown("## 🏛️ Smart Money: FII / DII Analysis")
+
+fii_today = st.number_input("FII Today Cash Flow (₹ Cr)", value=0, key="fii_today")
+dii_today = st.number_input("DII Today Cash Flow (₹ Cr)", value=0, key="dii_today")
+
+fii_5day = st.number_input("FII Last 5 Days Net (₹ Cr)", value=0, key="fii_5day")
+dii_5day = st.number_input("DII Last 5 Days Net (₹ Cr)", value=0, key="dii_5day")
+
+fii_index_fut = st.selectbox(
+    "FII Index Futures Bias",
+    ["Bullish", "Bearish", "Neutral"],
+    key="fii_index_fut"
+)
+
+smart_money_score = 0
+
+if fii_today > 0:
+    smart_money_score += 25
+elif fii_today < 0:
+    smart_money_score -= 25
+
+if dii_today > 0:
+    smart_money_score += 15
+elif dii_today < 0:
+    smart_money_score -= 15
+
+if fii_5day > 0:
+    smart_money_score += 25
+elif fii_5day < 0:
+    smart_money_score -= 25
+
+if fii_index_fut == "Bullish":
+    smart_money_score += 25
+elif fii_index_fut == "Bearish":
+    smart_money_score -= 25
+
+st.write(f"Smart Money Score: {smart_money_score}")
+
+if smart_money_score >= 50:
+    st.success("🟢 Institutional Bias: Bullish")
+elif smart_money_score <= -50:
+    st.error("🔴 Institutional Bias: Bearish")
+else:
+    st.warning("🟡 Institutional Bias: Neutral / Mixed")
+
+st.markdown("### AI Interpretation")
+
+if fii_today > 0 and fii_5day > 0:
+    st.success("✅ FII buying short-term aur 5-day dono me positive hai.")
+elif fii_today < 0 and fii_5day < 0:
+    st.error("⚠️ FII selling short-term aur 5-day dono me negative hai.")
+else:
+    st.warning("🟡 FII data mixed hai. Sirf is basis par trade mat lo.")
+
+st.info("Note: Final decision me FII/DII ko Price Action, OI, Volume, VIX aur News ke saath combine karna hai.")
