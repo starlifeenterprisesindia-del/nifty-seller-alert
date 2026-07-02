@@ -184,7 +184,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
         step=0.1
     )
 
-    if use_live_vix and live_vix_data["success"]:
+        if use_live_vix and live_vix_data["success"]:
         vix = live_vix_data["vix"]
         st.success(
             f"Live India VIX: {vix} | "
@@ -192,10 +192,12 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
             f"({live_vix_data['change_pct']}%)"
         )
         st.caption(f"VIX Last Update: {live_vix_data['last_update']}")
-        else:
+    else:
         vix = manual_vix
         if use_live_vix:
             st.warning("Live India VIX unavailable. Manual VIX is being used.")
+
+with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):            st.warning("Live India VIX unavailable. Manual VIX is being used.")
 
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
