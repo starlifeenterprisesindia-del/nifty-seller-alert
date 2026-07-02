@@ -232,6 +232,7 @@ def get_live_india_vix():
         }
 
     except Exception as e:
+                }
         return {
             "success": False,
             "vix": None,
