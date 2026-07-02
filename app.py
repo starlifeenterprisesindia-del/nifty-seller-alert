@@ -1,649 +1,778 @@
 import streamlit as st
-import streamlit.components.v1 as components
-
-st.set_page_config(page_title="Nifty Seller Alert")
-
-st.title("📈 Nifty Seller Alert")
-
-st.write("Welcome Sony!")
-price = st.number_input("Nifty Price", value=25000)
-ema20 = st.number_input("EMA 20", value=24950)
-if price > ema20:
-    st.success("🟢 Bullish - PE Sell Watch")
-else:
-    st.error("🔴 Bearish - CE Sell Watch")
-
-st.markdown("---")
-ema50 = st.number_input("EMA 50", value=24880)
-atr5 = st.number_input("ATR (5 Min)", value=45)
-atr15 = st.number_input("ATR (15 Min)", value=90)
-confidence = 92
-st.markdown("## 🤖 AI Analysis")
-
-if price > ema20 and price > ema50:
-    st.success("🟢 STRONG PE SELL")
-elif price < ema20 and price < ema50:
-    st.error("🔴 STRONG CE SELL")
-else:
-    st.warning("🟡 WAIT - NO TRADE")
-
-st.markdown("## 🎯 AI Confidence")
-st.progress(confidence)
-st.write(f"Confidence : {confidence}%")
-
-st.markdown("## 📌 ATR Stop Loss & Target")
-
-sl_5min = atr5 * 1.5
-target_5min = atr5 * 1
-
-sl_15min = atr15 * 1.5
-target_15min = atr15 * 1
-
-st.write(f"5 Min ATR SL: {sl_5min} points")
-st.write(f"5 Min ATR Target: {target_5min} points")
-
-st.write(f"15 Min ATR SL: {sl_15min} points")
-st.write(f"15 Min ATR Target: {target_15min} points")
-
-st.markdown("---")
-st.markdown("## 📋 Final Trade Plan")
-
-entry = price
-sl = price + sl_5min
-target = price - target_5min
-
-st.info(f"""
-🎯 Entry : {entry}
-
-🛑 Stop Loss : {sl}
-
-💰 Target : {target}
-
-📈 Risk Reward : 1 : 1.5
-""")
-
-option_price = st.number_input("Option Premium", value=180)
-
-qty = st.number_input("Lots", value=1)
-
-lot_size = 75
-
-st.markdown("## 💰 Profit / Loss Calculator")
-
-risk = (67.5 * qty * lot_size)
-reward = (45 * qty * lot_size)
-
-st.write(f"Maximum Risk : ₹{risk:,.0f}")
-st.write(f"Expected Profit : ₹{reward:,.0f}")
-
-st.markdown("---")
-st.markdown("## 📊 OI Change")
-
-call_oi = st.number_input("Call OI Change", value=150000, key="call_oi_1")
-put_oi = st.number_input("Put OI Change", value=180000, key="put_oi_1")
-
-if put_oi > call_oi:
-    st.success("🟢 Buyers Strong - PE Side Strong")
-elif call_oi > put_oi:
-    st.error("🔴 Sellers Strong - CE Side Strong")
-else:
-    st.warning("🟡 OI Equal - Wait")
-
-    st.markdown("---")
-
-st.markdown("---")
-st.markdown("## ⚡ VIX Analysis")
-
-vix = st.number_input("India VIX", value=13.5, key="vix_input")
-
-if vix < 14:
-    st.success("🟢 VIX Low - Option Selling Friendly")
-elif vix <= 18:
-    st.warning("🟡 VIX Normal - Caution")
-else:
-    st.error("🔴 VIX High - Avoid Aggressive Selling")
-
-
-st.markdown("---")
-st.markdown("## 📈 PCR Analysis")
-
-total_put_oi = st.number_input("Total Put OI", value=1800000, key="total_put_oi")
-total_call_oi = st.number_input("Total Call OI", value=1500000, key="total_call_oi")
-
-pcr = total_put_oi / total_call_oi
-
-st.write(f"PCR : {pcr:.2f}")
-
-if pcr > 1:
-    st.success("🟢 PCR Bullish")
-elif pcr < 0.8:
-    st.error("🔴 PCR Bearish")
-else:
-    st.warning("🟡 PCR Neutral")
-
-
-st.markdown("---")
-st.markdown("## 🚦 Trade Quality Score")
-
-score = 0
-
-if price > ema20:
-    score += 20
-
-if price > ema50:
-    score += 20
-
-if put_oi > call_oi:
-    score += 20
-
-if vix < 14:
-    score += 20
-
-if pcr > 1:
-    score += 20
-
-st.progress(score)
-st.write(f"Trade Score : {score}/100")
-
-if score >= 80:
-    st.success("✅ HIGH QUALITY TRADE - PE SELL POSSIBLE")
-elif score >= 60:
-    st.warning("🟡 AVERAGE TRADE - WAIT FOR CONFIRMATION")
-else:
-    st.error("❌ NO TRADE - SETUP WEAK")
-    st.markdown("---")
-st.markdown("## 🔊 Sound Alert")
-
-if score >= 80:
-    components.html("""
-    <script>
-    var msg = new SpeechSynthesisUtterance("Strong trade setup ready");
-    window.speechSynthesis.speak(msg);
-    </script>
-    """, height=0)
-    st.success("🔊 Sound Alert Active")
-else:
-    st.info("No sound alert - setup weak")
-    st.markdown("---")
-st.markdown("## 📂 CSV Upload Analysis")
-
-uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
-
-if uploaded_file is not None:
-    import pandas as pd
-
-    df = pd.read_csv(uploaded_file)
-
-    st.write("CSV Data Preview")
-    st.dataframe(df.head())
-
-    if "Close" in df.columns:
-        df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
-        df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
-
-        latest_close = df["Close"].iloc[-1]
-        latest_ema20 = df["EMA20"].iloc[-1]
-        latest_ema50 = df["EMA50"].iloc[-1]
-
-        st.write(f"Latest Close: {latest_close:.2f}")
-        st.write(f"EMA20: {latest_ema20:.2f}")
-        st.write(f"EMA50: {latest_ema50:.2f}")
-
-        if latest_close > latest_ema20 and latest_close > latest_ema50:
-            st.success("🟢 CSV Signal: Bullish - PE Sell Watch")
-        elif latest_close < latest_ema20 and latest_close < latest_ema50:
-            st.error("🔴 CSV Signal: Bearish - CE Sell Watch")
-        else:
-            st.warning("🟡 CSV Signal: Wait")
-    else:
-        st.error("CSV me 'Close' column hona chahiye")
-        st.markdown("---")
-st.markdown("## 📊 Option Chain Strike & Hedge Finder")
-
-spot = st.number_input("Nifty Spot Price", value=25000, key="spot_oc")
-strike_gap = st.number_input("Strike Gap", value=50, key="strike_gap")
-hedge_gap = st.number_input("Hedge Gap", value=100, key="hedge_gap")
-
-st.markdown("### PE Side")
-pe_support_strike = st.number_input("Strong PE Support Strike", value=24900, key="pe_support")
-pe_premium = st.number_input("PE Sell Premium", value=120, key="pe_premium")
-
-st.markdown("### CE Side")
-ce_resistance_strike = st.number_input("Strong CE Resistance Strike", value=25100, key="ce_resistance")
-ce_premium = st.number_input("CE Sell Premium", value=115, key="ce_premium")
-
-st.markdown("### Hedge Suggestion")
-
-pe_hedge = pe_support_strike - hedge_gap
-ce_hedge = ce_resistance_strike + hedge_gap
-
-if score >= 80 and put_oi > call_oi and price > ema20 and price > ema50:
-    st.success("✅ Best Trade: PE SELL")
-    st.info(f"""
-    Sell PE Strike: {pe_support_strike} PE  
-    Buy Hedge: {pe_hedge} PE  
-    Sell Premium: ₹{pe_premium}  
-    Hedge Gap: {hedge_gap} points  
-    Confidence: {score}%
-    """)
-
-elif score >= 80 and call_oi > put_oi and price < ema20 and price < ema50:
-    st.error("✅ Best Trade: CE SELL")
-    st.info(f"""
-    Sell CE Strike: {ce_resistance_strike} CE  
-    Buy Hedge: {ce_hedge} CE  
-    Sell Premium: ₹{ce_premium}  
-    Hedge Gap: {hedge_gap} points  
-    Confidence: {score}%
-    """)
-
-else:
-    st.warning("⏳ No clear strike selection - Wait")
-
-
-st.markdown("---")
-st.markdown("## 💰 Position Size & Risk")
-
-capital = st.number_input("Capital", value=400000, key="capital")
-risk_percent = st.number_input("Risk % Per Trade", value=1.0, key="risk_percent")
-lot_size = st.number_input("Lot Size", value=50, key="lot_size2")
-
-risk_amount = capital * risk_percent / 100
-
-st.write(f"Maximum Risk Allowed: ₹{risk_amount:,.0f}")
-
-suggested_lots = max(1, int(risk_amount / 2500))
-
-st.write(f"Suggested Lots: {suggested_lots}")
-
-st.warning("⚠️ Final trade lene se pehle real option chain, spread aur liquidity zaroor check karo.")
+import pandas as pd
 from datetime import datetime
-import streamlit as st
+from zoneinfo import ZoneInfo
 
-st.markdown("---")
-st.markdown("## 📅 Market Session & Expiry AI")
+# =========================================================
+# NIFTY SELLER AI DASHBOARD V3.1
+# Clean Professional Version
+# =========================================================
 
-today = datetime.now()
-
-days = [
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-    "Sunday"
-]
-
-day_name = days[today.weekday()]
-current_time = today.strftime("%H:%M")
-
-st.write(f"### 📅 Today : {day_name}")
-st.write(f"### ⏰ Time : {current_time}")
-
-market_open = today.hour > 9 or (today.hour == 9 and today.minute >= 15)
-market_close = today.hour >= 15 and today.minute >= 30
-
-if market_open and not market_close:
-    st.success("🟢 MARKET OPEN")
-else:
-    st.error("🔴 MARKET CLOSED")
-
-# Expiry Mode
-if day_name == "Thursday":
-    st.warning("🔥 WEEKLY EXPIRY MODE")
-    expiry = True
-else:
-    st.info("📈 NORMAL TRADING DAY")
-    expiry = False
-
-st.markdown("---")
-st.markdown("## 🌙 Carry Forward AI")
-
-carry_score = 0
-
-if score >= 80:
-    carry_score += 30
-
-if price > ema20:
-    carry_score += 20
-
-if price > ema50:
-    carry_score += 20
-
-if not expiry:
-    carry_score += 30
-
-st.progress(carry_score)
-
-if carry_score >= 80:
-    st.success("✅ Carry Forward Possible")
-elif carry_score >= 60:
-    st.warning("⚠️ Carry Only With Hedge")
-else:
-    st.error("❌ Exit Today Better")
-
-st.write(f"Carry Confidence : {carry_score}%")
-
-st.markdown("---")
-st.markdown("## 🚨 News Risk Alert")
-
-news_mode = st.selectbox(
-    "Today's News Impact",
-    [
-        "No Major News",
-        "RBI Policy",
-        "Fed Meeting",
-        "US CPI",
-        "Budget",
-        "Election",
-        "War / Geopolitical",
-        "Company Results"
-    ]
+st.set_page_config(
+    page_title="Nifty Seller AI Dashboard V3.1",
+    page_icon="🧠",
+    layout="wide"
 )
 
-if news_mode == "No Major News":
-    st.success("🟢 Safe for Option Selling")
+# =========================================================
+# STYLE
+# =========================================================
+st.markdown("""
+<style>
+.main-title {
+    font-size: 2.15rem;
+    font-weight: 850;
+    margin-bottom: 0.2rem;
+}
+.sub-title {
+    font-size: 0.96rem;
+    opacity: 0.75;
+    margin-bottom: 1.1rem;
+}
+.advisor-card {
+    padding: 24px;
+    border-radius: 20px;
+    margin-bottom: 18px;
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 8px 26px rgba(0,0,0,0.18);
+}
+.card-green {
+    background: linear-gradient(135deg, rgba(0,135,75,0.96), rgba(0,82,58,0.96));
+}
+.card-red {
+    background: linear-gradient(135deg, rgba(160,38,38,0.96), rgba(92,24,24,0.96));
+}
+.card-yellow {
+    background: linear-gradient(135deg, rgba(170,126,22,0.96), rgba(105,76,18,0.96));
+}
+.card-wait {
+    background: linear-gradient(135deg, rgba(82,88,99,0.96), rgba(43,48,58,0.96));
+}
+.advisor-card h1 {
+    color: white;
+    font-size: 3.1rem;
+    margin: 4px 0 8px 0;
+}
+.advisor-card h3 {
+    color: white;
+    margin: 0;
+    opacity: 0.96;
+}
+.advisor-card p {
+    color: white;
+    font-size: 1rem;
+    margin: 7px 0;
+}
+.ribbon {
+    padding: 11px 14px;
+    border-radius: 14px;
+    background: rgba(255,255,255,0.075);
+    border: 1px solid rgba(255,255,255,0.10);
+    text-align: center;
+    font-weight: 750;
+    margin-bottom: 8px;
+}
+.small-note {
+    opacity: 0.76;
+    font-size: 0.88rem;
+}
+</style>
+""", unsafe_allow_html=True)
 
-elif news_mode in ["Company Results"]:
-    st.warning("🟡 Trade Carefully")
 
-else:
-    st.error("🔴 High Impact News - Reduce Position Size")
+# =========================================================
+# HELPERS
+# =========================================================
+def clamp(value, low=0, high=98):
+    """Convert score to safe integer percentage."""
+    try:
+        value = int(round(float(value)))
+    except Exception:
+        value = 0
+    return max(low, min(high, value))
 
-st.markdown("---")
-st.markdown("## 🤖 Final AI Decision")
 
-if score >= 90 and carry_score >= 80 and news_mode == "No Major News":
-    st.success("✅ FULL CONFIDENCE TRADE")
+def safe_divide(a, b, default=0.0):
+    return a / b if b else default
 
-elif score >= 75:
-    st.warning("⚠️ Moderate Confidence")
 
-else:
-    st.error("❌ WAIT FOR BETTER SETUP")
-    st.markdown("---")
-st.markdown("## 📊 Volume AI Panel")
+def score_label(score):
+    score = clamp(score)
+    if score >= 75:
+        return "Strong"
+    if score >= 60:
+        return "Positive"
+    if score >= 45:
+        return "Neutral"
+    if score >= 30:
+        return "Weak"
+    return "Very Weak"
 
-current_volume = st.number_input("Current Candle Volume", value=120000, key="current_volume")
-avg_volume = st.number_input("Average Volume", value=80000, key="avg_volume")
 
-rvol = current_volume / avg_volume if avg_volume > 0 else 0
+def get_market_status():
+    now = datetime.now(ZoneInfo("Asia/Kolkata"))
+    open_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
+    close_time = now.replace(hour=15, minute=30, second=0, microsecond=0)
 
-st.write(f"Relative Volume: {rvol:.2f}x")
+    is_weekday = now.weekday() < 5
+    is_open = is_weekday and open_time <= now <= close_time
+
+    day_name = now.strftime("%A")
+    market_text = "Market Open" if is_open else "Market Closed"
+    expiry_text = "Weekly Expiry" if day_name == "Thursday" else "Normal Day"
+    return now, day_name, market_text, expiry_text
+
+
+# =========================================================
+# SIDEBAR INPUTS
+# =========================================================
+st.sidebar.title("⚙️ V3.1 Inputs")
+
+with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
+    price = st.number_input("Nifty Price", value=25000.0, step=1.0)
+    ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
+    ema50 = st.number_input("EMA 50", value=24900.0, step=1.0)
+    vwap = st.number_input("VWAP", value=24940.0, step=1.0)
+    atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
+    atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
+    vix = st.number_input("India VIX", value=13.5, step=0.1)
+
+with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
+    call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
+    put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
+    total_call_oi = st.number_input("Total Call OI", value=1500000, step=10000)
+    total_put_oi = st.number_input("Total Put OI", value=1800000, step=10000)
+    ce_strike = st.number_input("CE Sell Strike", value=25100, step=50)
+    pe_strike = st.number_input("PE Sell Strike", value=24900, step=50)
+    hedge_gap = st.number_input("Hedge Gap", value=100, step=50)
+
+with st.sidebar.expander("3️⃣ Price Action / Support-Resistance", expanded=False):
+    previous_day_high = st.number_input("Previous Day High", value=25150.0, step=1.0)
+    previous_day_low = st.number_input("Previous Day Low", value=24850.0, step=1.0)
+    today_high = st.number_input("Today High", value=25080.0, step=1.0)
+    today_low = st.number_input("Today Low", value=24920.0, step=1.0)
+    opening_range_high = st.number_input("Opening Range High", value=25060.0, step=1.0)
+    opening_range_low = st.number_input("Opening Range Low", value=24940.0, step=1.0)
+
+with st.sidebar.expander("4️⃣ Volume AI", expanded=False):
+    current_volume = st.number_input("Current Volume", value=120000, step=1000)
+    average_volume = st.number_input("Average Volume", value=80000, step=1000)
+    breakout_type = st.selectbox(
+        "Breakout / Breakdown",
+        ["No Breakout", "Resistance Breakout", "Support Breakdown"]
+    )
+
+with st.sidebar.expander("5️⃣ FII / DII Smart Money", expanded=False):
+    fii_today = st.number_input("FII Today ₹ Cr", value=0.0, step=100.0)
+    dii_today = st.number_input("DII Today ₹ Cr", value=0.0, step=100.0)
+    fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=0.0, step=100.0)
+    dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=0.0, step=100.0)
+    fii_index_futures_bias = st.selectbox(
+        "FII Index Futures Bias",
+        ["Neutral", "Bullish", "Bearish"]
+    )
+
+with st.sidebar.expander("6️⃣ Confirmation Panel", expanded=False):
+    rsi = st.number_input("RSI", value=55.0, step=0.5)
+    macd = st.selectbox("MACD", ["Neutral", "Bullish", "Bearish"])
+    bollinger = st.selectbox(
+        "Bollinger Band",
+        ["Normal", "Squeeze", "Upper Breakout", "Lower Breakdown"]
+    )
+    supertrend = st.selectbox("Supertrend", ["Neutral", "Bullish", "Bearish"])
+
+with st.sidebar.expander("7️⃣ Risk / Position", expanded=True):
+    news_risk = st.selectbox("News Risk", ["Low", "Medium", "High"])
+    capital = st.number_input("Capital ₹", value=500000, step=10000)
+    margin_per_lot = st.number_input("Margin Per Lot ₹", value=100000, step=5000)
+    current_lots = st.number_input("Current Lots Holding", value=0, step=1)
+    lot_size = st.number_input("Lot Size", value=50, step=25)
+
+
+# =========================================================
+# CORE CALCULATIONS
+# =========================================================
+pcr = safe_divide(total_put_oi, total_call_oi, 0.0)
+rvol = safe_divide(current_volume, average_volume, 0.0)
+
+support_levels = [previous_day_low, today_low, opening_range_low]
+resistance_levels = [previous_day_high, today_high, opening_range_high]
+
+nearest_support = max([x for x in support_levels if x <= price], default=min(support_levels))
+nearest_resistance = min([x for x in resistance_levels if x >= price], default=max(resistance_levels))
+
+support_distance = max(price - nearest_support, 0)
+resistance_distance = max(nearest_resistance - price, 0)
+
+
+# =========================================================
+# SCORE ENGINE
+# =========================================================
+
+# 1. Price Action
+price_action_score = 50
+price_action_score += 10 if price > ema20 else -10
+price_action_score += 10 if price > ema50 else -10
+price_action_score += 15 if price > vwap else -15
+price_action_score += 10 if ema20 > ema50 else -10
+
+if price > opening_range_high:
+    price_action_score += 8
+elif price < opening_range_low:
+    price_action_score -= 8
+
+price_action_score = clamp(price_action_score)
+
+# 2. Support / Resistance
+sr_score = 50
+
+if support_distance <= 30:
+    sr_score += 25
+elif support_distance <= 60:
+    sr_score += 10
+
+if resistance_distance <= 30:
+    sr_score -= 25
+elif resistance_distance <= 60:
+    sr_score -= 10
+
+if price > opening_range_high:
+    sr_score += 10
+elif price < opening_range_low:
+    sr_score -= 10
+
+sr_score = clamp(sr_score)
+
+# 3. Volume
+volume_score = 50
 
 if rvol >= 2:
-    st.success("🟢 High Volume - Strong Move Possible")
-elif rvol >= 1:
-    st.warning("🟡 Normal Volume")
-else:
-    st.error("🔴 Low Volume - Weak Move / Avoid Breakout Trade")
-
-st.markdown("### 🚨 Volume Spike Alert")
-
-if rvol >= 2:
-    st.error("🚨 Volume Spike Detected")
-else:
-    st.info("No major volume spike")
-
-st.markdown("### Breakout Quality")
-
-breakout = st.selectbox(
-    "Price Action",
-    ["No Breakout", "Resistance Breakout", "Support Breakdown"],
-    key="breakout_type"
-)
-
-if breakout == "Resistance Breakout" and rvol >= 1.5:
-    st.success("✅ Strong Bullish Breakout Confirmed")
-elif breakout == "Support Breakdown" and rvol >= 1.5:
-    st.error("✅ Strong Bearish Breakdown Confirmed")
-elif breakout != "No Breakout" and rvol < 1.5:
-    st.warning("⚠️ Weak Breakout - Fake Move Risk")
-else:
-    st.info("No breakout detected")
-
-st.markdown("### Volume Strength Score")
-
-volume_score = 0
-
-if rvol >= 2:
-    volume_score = 100
+    volume_score += 30
 elif rvol >= 1.5:
-    volume_score = 80
+    volume_score += 20
 elif rvol >= 1:
-    volume_score = 60
+    volume_score += 5
 else:
-    volume_score = 30
+    volume_score -= 20
 
-st.progress(volume_score)
-st.write(f"Volume Score: {volume_score}/100")
-st.markdown("---")
-st.markdown("## 🧠 AI Position Manager")
+if breakout_type in ["Resistance Breakout", "Support Breakdown"] and rvol >= 1.5:
+    volume_score += 12
 
-capital_pm = st.number_input("Total Capital", value=500000, key="capital_pm")
-margin_per_lot = st.number_input("Approx Margin Per Lot", value=100000, key="margin_per_lot")
-current_lots = st.number_input("Current Lots Holding", value=0, key="current_lots")
-trade_confidence = st.number_input("Trade Confidence %", value=80, key="trade_confidence_pm")
-vix_level = st.number_input("India VIX", value=13.5, key="vix_pm")
+volume_score = clamp(volume_score)
 
-news_risk_pm = st.selectbox(
-    "News Risk",
-    ["Low", "Medium", "High"],
-    key="news_risk_pm"
+# 4. OI
+oi_score = 50
+
+if put_oi_change > call_oi_change:
+    oi_score += 25
+elif call_oi_change > put_oi_change:
+    oi_score -= 25
+
+oi_diff_ratio = safe_divide(
+    abs(put_oi_change - call_oi_change),
+    max(abs(call_oi_change), abs(put_oi_change)),
+    0.0
 )
 
-expiry_mode_pm = st.selectbox(
-    "Expiry Mode",
-    ["Normal Day", "Expiry Day"],
-    key="expiry_mode_pm"
-)
+if oi_diff_ratio >= 0.35:
+    oi_score += 10 if put_oi_change > call_oi_change else -10
 
-max_lots_by_margin = int(capital_pm / margin_per_lot) if margin_per_lot > 0 else 0
+oi_score = clamp(oi_score)
 
-risk_lot_factor = 1.0
+# 5. PCR
+pcr_score = 50
 
-if trade_confidence >= 90:
-    risk_lot_factor += 0.30
-elif trade_confidence >= 75:
-    risk_lot_factor += 0.00
+if 0.95 <= pcr <= 1.20:
+    pcr_score += 20
+elif 1.20 < pcr <= 1.45:
+    pcr_score += 10
+elif pcr > 1.45:
+    pcr_score -= 5
+elif 0.75 <= pcr < 0.95:
+    pcr_score -= 10
 else:
-    risk_lot_factor -= 0.40
+    pcr_score -= 25
 
-if vix_level <= 14:
-    risk_lot_factor += 0.20
-elif vix_level <= 18:
-    risk_lot_factor += 0.00
+pcr_score = clamp(pcr_score)
+
+# 6. VIX
+vix_score = 50
+
+if vix <= 13:
+    vix_score += 25
+elif vix <= 15:
+    vix_score += 15
+elif vix <= 18:
+    vix_score -= 5
 else:
-    risk_lot_factor -= 0.40
+    vix_score -= 30
 
-if news_risk_pm == "Low":
-    risk_lot_factor += 0.10
-elif news_risk_pm == "Medium":
-    risk_lot_factor -= 0.20
+vix_score = clamp(vix_score)
+
+# 7. FII / DII Smart Money
+smart_money_score = 50
+smart_money_score += 15 if fii_today > 0 else -15 if fii_today < 0 else 0
+smart_money_score += 8 if dii_today > 0 else -8 if dii_today < 0 else 0
+smart_money_score += 15 if fii_5day > 0 else -15 if fii_5day < 0 else 0
+smart_money_score += 6 if dii_5day > 0 else -6 if dii_5day < 0 else 0
+
+if fii_index_futures_bias == "Bullish":
+    smart_money_score += 14
+elif fii_index_futures_bias == "Bearish":
+    smart_money_score -= 14
+
+smart_money_score = clamp(smart_money_score)
+
+# 8. News Risk
+news_score = 50
+
+if news_risk == "Low":
+    news_score += 25
+elif news_risk == "Medium":
+    news_score -= 5
 else:
-    risk_lot_factor -= 0.60
+    news_score -= 35
 
-if expiry_mode_pm == "Expiry Day":
-    risk_lot_factor -= 0.25
+news_score = clamp(news_score)
 
-risk_lot_factor = max(0, min(risk_lot_factor, 1.5))
-
-suggested_lots_ai = int(max_lots_by_margin * risk_lot_factor)
-suggested_lots_ai = max(0, min(suggested_lots_ai, max_lots_by_margin))
-
-st.write(f"Maximum Lots by Margin: {max_lots_by_margin}")
-st.write(f"AI Suggested Lots: {suggested_lots_ai}")
-
-if suggested_lots_ai == 0:
-    st.error("❌ No Trade / Avoid Position")
-elif current_lots == suggested_lots_ai:
-    st.success("✅ Current Position Perfect")
-elif current_lots < suggested_lots_ai:
-    add_lots = suggested_lots_ai - current_lots
-    st.success(f"➕ Add Possible: {add_lots} lot(s)")
-else:
-    reduce_lots = current_lots - suggested_lots_ai
-    st.error(f"➖ Reduce Position: {reduce_lots} lot(s)")
-
-st.markdown("### Risk Status")
-
-if trade_confidence >= 90 and vix_level <= 14 and news_risk_pm == "Low":
-    st.success("🟢 Aggressive Setup Possible")
-elif trade_confidence >= 75 and news_risk_pm != "High":
-    st.warning("🟡 Normal Setup - Controlled Lots")
-else:
-    st.error("🔴 Risky Setup - Small Size / Avoid")
-
-st.warning("⚠️ Ye lot suggestion risk management ke liye hai. Final order se pehle broker margin, spread, liquidity aur hedge zaroor check karo.")
-st.markdown("---")
-st.markdown("## 📍 Support & Resistance AI")
-
-current_price_sr = st.number_input("Current Price", value=25000, key="current_price_sr")
-pdh = st.number_input("Previous Day High", value=25150, key="pdh")
-pdl = st.number_input("Previous Day Low", value=24850, key="pdl")
-today_high = st.number_input("Today High", value=25080, key="today_high")
-today_low = st.number_input("Today Low", value=24920, key="today_low")
-opening_high = st.number_input("Opening Range High", value=25060, key="opening_high")
-opening_low = st.number_input("Opening Range Low", value=24940, key="opening_low")
-
-resistance_levels = [pdh, today_high, opening_high]
-support_levels = [pdl, today_low, opening_low]
-
-nearest_resistance = min([r for r in resistance_levels if r >= current_price_sr], default=max(resistance_levels))
-nearest_support = max([s for s in support_levels if s <= current_price_sr], default=min(support_levels))
-
-res_distance = nearest_resistance - current_price_sr
-sup_distance = current_price_sr - nearest_support
-
-st.write(f"Nearest Resistance: {nearest_resistance}")
-st.write(f"Distance from Resistance: {res_distance} points")
-
-st.write(f"Nearest Support: {nearest_support}")
-st.write(f"Distance from Support: {sup_distance} points")
-
-st.markdown("### AI Level Analysis")
-
-if res_distance <= 30:
-    st.error("🔴 Price resistance ke bahut paas hai - PE Sell avoid / careful")
-elif sup_distance <= 30:
-    st.success("🟢 Price support ke paas hai - PE Sell better ho sakti hai")
-else:
-    st.info("🟡 Price middle zone me hai - confirmation ka wait")
-
-st.markdown("### Breakout / Breakdown Alert")
-
-if current_price_sr > nearest_resistance:
-    st.success("🚀 Resistance Breakout")
-elif current_price_sr < nearest_support:
-    st.error("📉 Support Breakdown")
-else:
-    st.warning("⏳ No clear breakout yet")
-    st.markdown("---")
-st.markdown("## ✅ Confirmation Panel")
-
-rsi = st.number_input("RSI", value=55, key="rsi_confirm")
-macd_signal = st.selectbox(
-    "MACD Signal",
-    ["Bullish", "Bearish", "Neutral"],
-    key="macd_confirm"
-)
-bollinger_status = st.selectbox(
-    "Bollinger Band Status",
-    ["Normal", "Squeeze", "Upper Breakout", "Lower Breakdown"],
-    key="bb_confirm"
-)
-supertrend_signal = st.selectbox(
-    "Supertrend",
-    ["Bullish", "Bearish", "Neutral"],
-    key="supertrend_confirm"
-)
-
-confirm_score = 0
+# 9. Confirmation Panel
+confirmation_score = 50
 
 if 45 <= rsi <= 65:
-    confirm_score += 20
-elif rsi > 65:
-    st.warning("⚠️ RSI high hai - PE sell me thoda caution")
-elif rsi < 35:
-    st.warning("⚠️ RSI low hai - CE sell me thoda caution")
+    confirmation_score += 10
+elif rsi > 70 or rsi < 30:
+    confirmation_score -= 10
 
-if macd_signal == "Bullish":
-    confirm_score += 20
-elif macd_signal == "Bearish":
-    confirm_score += 20
+if macd == "Bullish":
+    confirmation_score += 10
+elif macd == "Bearish":
+    confirmation_score -= 10
 
-if bollinger_status == "Squeeze":
-    st.warning("⚠️ Bollinger Squeeze - Big move aa sakta hai")
-    confirm_score += 10
-elif bollinger_status in ["Upper Breakout", "Lower Breakdown"]:
-    confirm_score += 20
+if bollinger == "Upper Breakout":
+    confirmation_score += 8
+elif bollinger == "Lower Breakdown":
+    confirmation_score -= 8
+elif bollinger == "Squeeze":
+    confirmation_score -= 5
 
-if supertrend_signal != "Neutral":
-    confirm_score += 20
+if supertrend == "Bullish":
+    confirmation_score += 12
+elif supertrend == "Bearish":
+    confirmation_score -= 12
 
-st.progress(confirm_score)
-st.write(f"Confirmation Score: {confirm_score}/80")
+confirmation_score = clamp(confirmation_score)
 
-if confirm_score >= 60:
-    st.success("✅ Strong Confirmation")
-elif confirm_score >= 40:
-    st.warning("🟡 Average Confirmation")
-else:
-    st.error("🔴 Weak Confirmation - Avoid Blind Trade")
-    st.markdown("---")
-st.markdown("## 🏛️ Smart Money: FII / DII Analysis")
 
-fii_today = st.number_input("FII Today Cash Flow (₹ Cr)", value=0, key="fii_today")
-dii_today = st.number_input("DII Today Cash Flow (₹ Cr)", value=0, key="dii_today")
-
-fii_5day = st.number_input("FII Last 5 Days Net (₹ Cr)", value=0, key="fii_5day")
-dii_5day = st.number_input("DII Last 5 Days Net (₹ Cr)", value=0, key="dii_5day")
-
-fii_index_fut = st.selectbox(
-    "FII Index Futures Bias",
-    ["Bullish", "Bearish", "Neutral"],
-    key="fii_index_fut"
+# =========================================================
+# FINAL DECISION ENGINE
+# =========================================================
+bullish_probability = (
+    price_action_score * 0.20 +
+    sr_score * 0.15 +
+    volume_score * 0.10 +
+    oi_score * 0.15 +
+    pcr_score * 0.12 +
+    vix_score * 0.10 +
+    smart_money_score * 0.10 +
+    news_score * 0.05 +
+    confirmation_score * 0.03
 )
 
-smart_money_score = 0
+bearish_probability = (
+    (98 - price_action_score) * 0.20 +
+    (98 - sr_score) * 0.15 +
+    volume_score * 0.10 +
+    (98 - oi_score) * 0.15 +
+    (98 - pcr_score) * 0.12 +
+    vix_score * 0.10 +
+    (98 - smart_money_score) * 0.10 +
+    news_score * 0.05 +
+    (98 - confirmation_score) * 0.03
+)
 
-if fii_today > 0:
-    smart_money_score += 25
-elif fii_today < 0:
-    smart_money_score -= 25
+bullish_probability = clamp(bullish_probability)
+bearish_probability = clamp(bearish_probability)
 
-if dii_today > 0:
-    smart_money_score += 15
-elif dii_today < 0:
-    smart_money_score -= 15
+signal_gap = abs(bullish_probability - bearish_probability)
+best_probability = max(bullish_probability, bearish_probability)
 
-if fii_5day > 0:
-    smart_money_score += 25
-elif fii_5day < 0:
-    smart_money_score -= 25
+high_risk_block = news_risk == "High" or vix > 18
 
-if fii_index_fut == "Bullish":
-    smart_money_score += 25
-elif fii_index_fut == "Bearish":
-    smart_money_score -= 25
-
-st.write(f"Smart Money Score: {smart_money_score}")
-
-if smart_money_score >= 50:
-    st.success("🟢 Institutional Bias: Bullish")
-elif smart_money_score <= -50:
-    st.error("🔴 Institutional Bias: Bearish")
+if high_risk_block:
+    final_trade = "WAIT"
+    probability = clamp(best_probability - 20)
+elif signal_gap < 7:
+    final_trade = "WAIT"
+    probability = best_probability
+elif bullish_probability >= bearish_probability and bullish_probability >= 60:
+    final_trade = "SELL PE"
+    probability = bullish_probability
+elif bearish_probability > bullish_probability and bearish_probability >= 60:
+    final_trade = "SELL CE"
+    probability = bearish_probability
 else:
-    st.warning("🟡 Institutional Bias: Neutral / Mixed")
+    final_trade = "WAIT"
+    probability = best_probability
 
-st.markdown("### AI Interpretation")
+confidence = clamp((signal_gap * 1.2) + (probability * 0.55))
 
-if fii_today > 0 and fii_5day > 0:
-    st.success("✅ FII buying short-term aur 5-day dono me positive hai.")
-elif fii_today < 0 and fii_5day < 0:
-    st.error("⚠️ FII selling short-term aur 5-day dono me negative hai.")
+if final_trade == "SELL PE":
+    selected_strike = f"{int(pe_strike)} PE"
+    hedge = f"{int(pe_strike - hedge_gap)} PE"
+elif final_trade == "SELL CE":
+    selected_strike = f"{int(ce_strike)} CE"
+    hedge = f"{int(ce_strike + hedge_gap)} CE"
 else:
-    st.warning("🟡 FII data mixed hai. Sirf is basis par trade mat lo.")
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
 
-st.info("Note: Final decision me FII/DII ko Price Action, OI, Volume, VIX aur News ke saath combine karna hai.")
+max_lots = int(capital / margin_per_lot) if margin_per_lot > 0 else 0
+
+if final_trade == "WAIT":
+    suggested_lots = 0
+elif probability >= 88 and news_risk == "Low" and vix <= 14:
+    suggested_lots = max_lots
+elif probability >= 75:
+    suggested_lots = max(1, int(max_lots * 0.60))
+elif probability >= 60:
+    suggested_lots = max(1, int(max_lots * 0.30))
+else:
+    suggested_lots = 0
+
+sl_points = round(max(atr5 * 1.5, 20), 2)
+target_points = round(max(atr5 * 1.0, 15), 2)
+
+now, day_name, market_text, expiry_text = get_market_status()
+
+if vix <= 14:
+    vix_text = "VIX Low"
+elif vix <= 18:
+    vix_text = "VIX Normal"
+else:
+    vix_text = "VIX High"
+
+
+# =========================================================
+# HEADER
+# =========================================================
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V3.1</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='sub-title'>Option Seller Decision Engine: Price Action + Support/Resistance + Volume + OI + PCR + VIX + FII/DII + News</div>",
+    unsafe_allow_html=True
+)
+
+# =========================================================
+# TOP STATUS RIBBON
+# =========================================================
+r1, r2, r3, r4, r5 = st.columns(5)
+r1.markdown(f"<div class='ribbon'>{market_text}</div>", unsafe_allow_html=True)
+r2.markdown(f"<div class='ribbon'>{expiry_text}</div>", unsafe_allow_html=True)
+r3.markdown(f"<div class='ribbon'>News: {news_risk}</div>", unsafe_allow_html=True)
+r4.markdown(f"<div class='ribbon'>{vix_text}</div>", unsafe_allow_html=True)
+r5.markdown(f"<div class='ribbon'>PCR: {pcr:.2f}</div>", unsafe_allow_html=True)
+
+# =========================================================
+# FINAL ADVISOR CARD
+# =========================================================
+if final_trade == "SELL PE":
+    card_class = "card-green"
+    status_text = "🟢 Bullish Option Selling Setup"
+elif final_trade == "SELL CE":
+    card_class = "card-red"
+    status_text = "🔴 Bearish Option Selling Setup"
+elif probability >= 55:
+    card_class = "card-yellow"
+    status_text = "🟡 Mixed Setup - Wait"
+else:
+    card_class = "card-wait"
+    status_text = "⚪ No Clear Trade"
+
+st.markdown(f"""
+<div class="advisor-card {card_class}">
+    <h3>{status_text}</h3>
+    <h1>{final_trade}</h1>
+    <p><b>Trade Probability:</b> {probability}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>AI Confidence:</b> {confidence}%</p>
+    <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge}</p>
+    <p><b>Suggested Lots:</b> {suggested_lots} / {max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
+</div>
+""", unsafe_allow_html=True)
+
+st.progress(probability)
+
+if final_trade == "WAIT":
+    st.warning("AI Advice: Clear edge nahi hai. Is setup me trade avoid karo ya fresh confirmation ka wait karo.")
+elif final_trade == "SELL PE":
+    st.success("AI Advice: Bullish bias hai. PE sell sirf hedge aur strict SL ke saath.")
+else:
+    st.error("AI Advice: Bearish bias hai. CE sell sirf hedge aur strict SL ke saath.")
+
+
+# =========================================================
+# WHY AI
+# =========================================================
+why = []
+
+if price_action_score >= 65:
+    why.append("Price Action bullish hai: price EMA/VWAP ke upar hai.")
+elif price_action_score <= 35:
+    why.append("Price Action bearish hai: price EMA/VWAP ke neeche hai.")
+
+if sr_score >= 65:
+    why.append("Support zone favourable hai.")
+elif sr_score <= 35:
+    why.append("Resistance pressure / S-R risk high hai.")
+
+if volume_score >= 65:
+    why.append("Volume confirmation strong hai.")
+elif volume_score <= 35:
+    why.append("Volume weak hai, false move ka risk hai.")
+
+if oi_score >= 65:
+    why.append("Put OI stronger hai, bullish support mil raha hai.")
+elif oi_score <= 35:
+    why.append("Call OI stronger hai, bearish pressure mil raha hai.")
+
+if pcr_score >= 65:
+    why.append("PCR supportive zone me hai.")
+elif pcr_score <= 35:
+    why.append("PCR weak/risky zone me hai.")
+
+if vix_score <= 35:
+    why.append("VIX high hai, option selling risk zyada hai.")
+
+if smart_money_score >= 65:
+    why.append("FII/DII smart money supportive hai.")
+elif smart_money_score <= 35:
+    why.append("FII/DII smart money weak hai.")
+
+if news_score <= 35:
+    why.append("News risk high hai, trade avoid better.")
+
+with st.expander("✅ Why AI gave this decision", expanded=True):
+    if why:
+        for item in why:
+            st.write("✔", item)
+    else:
+        st.write("Signals mixed hain. Isliye AI aggressive trade nahi de raha.")
+
+
+# =========================================================
+# AI RADAR
+# =========================================================
+st.markdown("## 📡 AI Radar")
+
+a1, a2, a3 = st.columns(3)
+
+with a1:
+    st.metric("Price Action", f"{price_action_score}%", score_label(price_action_score))
+    st.progress(price_action_score)
+    st.metric("Support / Resistance", f"{sr_score}%", score_label(sr_score))
+    st.progress(sr_score)
+
+with a2:
+    st.metric("Volume AI", f"{volume_score}%", f"{rvol:.2f}x RVOL")
+    st.progress(volume_score)
+    st.metric("OI Change", f"{oi_score}%", score_label(oi_score))
+    st.progress(oi_score)
+
+with a3:
+    st.metric("PCR", f"{pcr_score}%", f"{pcr:.2f}")
+    st.progress(pcr_score)
+    risk_combo = clamp((vix_score + news_score) / 2)
+    st.metric("VIX + News Risk", f"{risk_combo}%", f"VIX {vix:.2f}")
+    st.progress(risk_combo)
+
+b1, b2 = st.columns(2)
+
+with b1:
+    st.metric("FII / DII Smart Money", f"{smart_money_score}%", score_label(smart_money_score))
+    st.progress(smart_money_score)
+
+with b2:
+    st.metric("Confirmation Panel", f"{confirmation_score}%", score_label(confirmation_score))
+    st.progress(confirmation_score)
+
+
+# =========================================================
+# DASHBOARD SECTIONS
+# =========================================================
+with st.expander("📊 Market Snapshot", expanded=True):
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Nifty", f"{price:.2f}")
+    m2.metric("EMA20", f"{ema20:.2f}")
+    m3.metric("EMA50", f"{ema50:.2f}")
+    m4.metric("VWAP", f"{vwap:.2f}")
+
+    m5, m6, m7, m8 = st.columns(4)
+    m5.metric("ATR 5m", f"{atr5:.2f}")
+    m6.metric("ATR 15m", f"{atr15:.2f}")
+    m7.metric("India VIX", f"{vix:.2f}")
+    m8.metric("News Risk", news_risk)
+
+with st.expander("📍 Support / Resistance AI", expanded=False):
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Nearest Support", f"{nearest_support:.2f}")
+    c2.metric("Support Distance", f"{support_distance:.2f} pts")
+    c3.metric("Nearest Resistance", f"{nearest_resistance:.2f}")
+    c4.metric("Resistance Distance", f"{resistance_distance:.2f} pts")
+
+    if support_distance <= 30 and final_trade == "SELL PE":
+        st.success("Price support ke paas hai. PE selling setup better ho sakta hai.")
+    elif resistance_distance <= 30 and final_trade == "SELL PE":
+        st.error("Price resistance ke paas hai. PE sell risky ho sakta hai.")
+    elif resistance_distance <= 30 and final_trade == "SELL CE":
+        st.success("Price resistance ke paas hai. CE selling setup better ho sakta hai.")
+    elif support_distance <= 30 and final_trade == "SELL CE":
+        st.error("Price support ke paas hai. CE sell risky ho sakta hai.")
+    else:
+        st.info("Price middle zone me hai. Breakout/breakdown confirmation important hai.")
+
+with st.expander("📊 Option Chain / Strike & Hedge Finder", expanded=False):
+    oc1, oc2, oc3, oc4 = st.columns(4)
+    oc1.metric("PCR", f"{pcr:.2f}")
+    oc2.metric("Put OI Change", f"{put_oi_change:,}")
+    oc3.metric("Call OI Change", f"{call_oi_change:,}")
+    oc4.metric(
+        "OI Bias",
+        "Bullish" if put_oi_change > call_oi_change else "Bearish" if call_oi_change > put_oi_change else "Neutral"
+    )
+
+    if final_trade == "SELL PE":
+        st.success(f"Recommended: Sell {int(pe_strike)} PE")
+        st.info(f"Hedge: Buy {int(pe_strike - hedge_gap)} PE")
+    elif final_trade == "SELL CE":
+        st.error(f"Recommended: Sell {int(ce_strike)} CE")
+        st.info(f"Hedge: Buy {int(ce_strike + hedge_gap)} CE")
+    else:
+        st.warning("No strike selected because final decision is WAIT.")
+
+with st.expander("📊 Volume AI", expanded=False):
+    st.write(f"Relative Volume: **{rvol:.2f}x**")
+    st.write(f"Breakout Type: **{breakout_type}**")
+
+    if rvol >= 2:
+        st.success("Strong volume spike detected.")
+    elif rvol >= 1.5:
+        st.warning("Volume above average hai.")
+    elif rvol >= 1:
+        st.info("Volume normal hai.")
+    else:
+        st.error("Volume weak hai.")
+
+with st.expander("🏛️ FII / DII Smart Money", expanded=False):
+    sm1, sm2, sm3, sm4 = st.columns(4)
+    sm1.metric("FII Today", f"₹{fii_today:,.0f} Cr")
+    sm2.metric("DII Today", f"₹{dii_today:,.0f} Cr")
+    sm3.metric("FII 5 Day", f"₹{fii_5day:,.0f} Cr")
+    sm4.metric("DII 5 Day", f"₹{dii_5day:,.0f} Cr")
+
+    st.write(f"FII Index Futures Bias: **{fii_index_futures_bias}**")
+
+    if smart_money_score >= 65:
+        st.success("Institutional bias supportive hai.")
+    elif smart_money_score <= 35:
+        st.error("Institutional bias weak hai.")
+    else:
+        st.warning("Institutional data mixed hai.")
+
+with st.expander("✅ Confirmation Panel", expanded=False):
+    cp1, cp2, cp3, cp4 = st.columns(4)
+    cp1.metric("RSI", f"{rsi:.1f}")
+    cp2.metric("MACD", macd)
+    cp3.metric("Bollinger", bollinger)
+    cp4.metric("Supertrend", supertrend)
+
+    st.write(f"Confirmation Score: **{confirmation_score}%**")
+    st.progress(confirmation_score)
+
+with st.expander("💰 Position Manager", expanded=False):
+    pm1, pm2, pm3, pm4 = st.columns(4)
+    pm1.metric("Capital", f"₹{capital:,.0f}")
+    pm2.metric("Max Lots", max_lots)
+    pm3.metric("Current Lots", current_lots)
+    pm4.metric("AI Suggested Lots", suggested_lots)
+
+    if suggested_lots == 0:
+        st.warning("No fresh position suggested.")
+    elif suggested_lots > current_lots:
+        st.success(f"AI ke hisaab se {suggested_lots - current_lots} lot add possible hai.")
+    elif suggested_lots < current_lots:
+        st.error(f"AI ke hisaab se {current_lots - suggested_lots} lot reduce karo.")
+    else:
+        st.info("Current lots AI suggestion ke equal hain.")
+
+    estimated_margin = suggested_lots * margin_per_lot
+    st.write(f"Estimated Margin Required: **₹{estimated_margin:,.0f}**")
+    st.write(f"Lot Size: **{lot_size}**")
+
+with st.expander("📅 Expiry / Carry Forward / News Risk", expanded=False):
+    carry_probability = probability
+
+    if day_name == "Thursday":
+        carry_probability -= 25
+    if news_risk == "Medium":
+        carry_probability -= 15
+    elif news_risk == "High":
+        carry_probability -= 40
+    if vix > 18:
+        carry_probability -= 25
+
+    carry_probability = clamp(carry_probability)
+
+    e1, e2, e3, e4 = st.columns(4)
+    e1.metric("Today", day_name)
+    e2.metric("Mode", expiry_text)
+    e3.metric("News Risk", news_risk)
+    e4.metric("Carry Probability", f"{carry_probability}%")
+
+    st.progress(carry_probability)
+
+    if carry_probability >= 80:
+        st.success("Carry possible hai, lekin hedge mandatory rakho.")
+    elif carry_probability >= 60:
+        st.warning("Carry only with strict hedge and small quantity.")
+    else:
+        st.error("Carry avoid. Intraday exit better.")
+
+with st.expander("📂 CSV Upload Analysis", expanded=False):
+    uploaded_file = st.file_uploader("Upload CSV file", type=["csv"])
+
+    if uploaded_file is not None:
+        try:
+            df = pd.read_csv(uploaded_file)
+            st.dataframe(df.head(20), use_container_width=True)
+
+            if "Close" in df.columns:
+                df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
+                df["EMA50"] = df["Close"].ewm(span=50, adjust=False).mean()
+
+                latest_close = float(df["Close"].iloc[-1])
+                latest_ema20 = float(df["EMA20"].iloc[-1])
+                latest_ema50 = float(df["EMA50"].iloc[-1])
+
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Latest Close", f"{latest_close:.2f}")
+                c2.metric("CSV EMA20", f"{latest_ema20:.2f}")
+                c3.metric("CSV EMA50", f"{latest_ema50:.2f}")
+
+                if latest_close > latest_ema20 > latest_ema50:
+                    st.success("CSV Trend: Bullish")
+                elif latest_close < latest_ema20 < latest_ema50:
+                    st.error("CSV Trend: Bearish")
+                else:
+                    st.warning("CSV Trend: Mixed / Sideways")
+            else:
+                st.error("CSV me 'Close' column hona chahiye.")
+
+        except Exception as e:
+            st.error(f"CSV read error: {e}")
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+st.markdown("---")
+st.markdown(
+    "<div class='small-note'>Disclaimer: Ye tool decision-support ke liye hai. Final trade se pehle live chart, liquidity, slippage aur risk management zaroor check karein.</div>",
+    unsafe_allow_html=True
+)
