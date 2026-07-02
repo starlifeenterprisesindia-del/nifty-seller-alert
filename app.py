@@ -197,8 +197,6 @@ if use_live_vix and live_vix_data["success"]:
         if use_live_vix:
             st.warning("Live India VIX unavailable. Manual VIX is being used.")
 
-with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):            st.warning("Live India VIX unavailable. Manual VIX is being used.")
-
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
     put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
