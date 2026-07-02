@@ -85,156 +85,20 @@ st.markdown("""
 # HELPERS
 # =========================================================
 # =========================================================
+# =========================================================
 # LIVE DATA - FEATURE 1: LIVE NIFTY PRICE
 # =========================================================
 @st.cache_data(ttl=30)
 def get_live_nifty_price():
-    # =========================================================
-# LIVE DATA - FEATURE 2: LIVE INDIA VIX
-# =========================================================
+    ...
+
+# yahan galat paste hua VIX wala code hoga
 @st.cache_data(ttl=60)
 def get_live_india_vix():
-    """
-    Fetch near-live India VIX from Yahoo Finance using yfinance.
-    Ticker: ^INDIAVIX
-    Cache TTL: 60 seconds
-    """
-    try:
-        ticker = yf.Ticker("^INDIAVIX")
+    ...
 
-        intraday = ticker.history(period="2d", interval="1m")
-
-        if intraday is None or intraday.empty:
-            intraday = ticker.history(period="5d", interval="5m")
-
-        if intraday is None or intraday.empty:
-            daily = ticker.history(period="7d", interval="1d")
-            if daily is None or daily.empty:
-                return {
-                    "success": False,
-                    "vix": None,
-                    "change": None,
-                    "change_pct": None,
-                    "last_update": "Not Available",
-                    "message": "Live India VIX data not available right now."
-                }
-            intraday = daily
-
-        intraday = intraday.dropna()
-        latest_row = intraday.iloc[-1]
-        live_vix = float(latest_row["Close"])
-
-        daily = ticker.history(period="7d", interval="1d")
-        previous_close = None
-
-        if daily is not None and not daily.empty:
-            daily = daily.dropna()
-            if len(daily) >= 2:
-                previous_close = float(daily["Close"].iloc[-2])
-            elif len(daily) == 1:
-                previous_close = float(daily["Close"].iloc[-1])
-
-        if previous_close:
-            change = live_vix - previous_close
-            change_pct = (change / previous_close) * 100
-        else:
-            change = 0.0
-            change_pct = 0.0
-
-        last_time = intraday.index[-1]
-
-        try:
-            last_update = last_time.tz_convert("Asia/Kolkata").strftime("%d-%m-%Y %I:%M:%S %p")
-        except Exception:
-            last_update = str(last_time)
-
-        return {
-            "success": True,
-            "vix": round(live_vix, 2),
-            "change": round(change, 2),
-            "change_pct": round(change_pct, 2),
-            "last_update": last_update,
-            "message": "Live India VIX fetched successfully."
-        }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "vix": None,
-            "change": None,
-            "change_pct": None,
-            "last_update": "Error",
-            "message": f"Live India VIX fetch error: {e}"
-        }
-    """
-    Fetch near-live NIFTY 50 price from Yahoo Finance using yfinance.
-    Ticker: ^NSEI
-    Cache TTL: 30 seconds
-    """
-    try:
-        ticker = yf.Ticker("^NSEI")
-
-        intraday = ticker.history(period="2d", interval="1m")
-
-        if intraday is None or intraday.empty:
-            intraday = ticker.history(period="5d", interval="5m")
-
-        if intraday is None or intraday.empty:
-            return {
-                "success": False,
-                "price": None,
-                "change": None,
-                "change_pct": None,
-                "last_update": "Not Available",
-                "message": "Live Nifty data not available right now."
-            }
-
-        intraday = intraday.dropna()
-        latest_row = intraday.iloc[-1]
-        live_price = float(latest_row["Close"])
-
-        daily = ticker.history(period="7d", interval="1d")
-        previous_close = None
-
-        if daily is not None and not daily.empty:
-            daily = daily.dropna()
-            if len(daily) >= 2:
-                previous_close = float(daily["Close"].iloc[-2])
-            elif len(daily) == 1:
-                previous_close = float(daily["Close"].iloc[-1])
-
-        if previous_close:
-            change = live_price - previous_close
-            change_pct = (change / previous_close) * 100
-        else:
-            change = 0.0
-            change_pct = 0.0
-
-        last_time = intraday.index[-1]
-
-        try:
-            last_update = last_time.tz_convert("Asia/Kolkata").strftime("%d-%m-%Y %I:%M:%S %p")
-        except Exception:
-            last_update = str(last_time)
-
-        return {
-            "success": True,
-            "price": round(live_price, 2),
-            "change": round(change, 2),
-            "change_pct": round(change_pct, 2),
-            "last_update": last_update,
-            "message": "Live Nifty price fetched successfully."
-        }
-
-    except Exception as e:
-        return {
-            "success": False,
-            "price": None,
-            "change": None,
-            "change_pct": None,
-            "last_update": "Error",
-            "message": f"Live Nifty fetch error: {e}"
-        }
+def clamp(value, low=0, high=98):
+    ...
 def clamp(value, low=0, high=98):
     """Convert score to safe integer percentage."""
     try:
