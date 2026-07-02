@@ -168,12 +168,14 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
         if use_live_nifty:
             st.warning("Live price unavailable. Manual price is being used.")
 
-    ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
+        ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
     ema50 = st.number_input("EMA 50", value=24900.0, step=1.0)
     vwap = st.number_input("VWAP", value=24940.0, step=1.0)
     atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
     atr15 = st.number_input("ATR 15 Min", value=90.0, step=1.0)
+
     live_vix_data = get_live_india_vix()
+
     use_live_vix = st.checkbox("Use Live India VIX", value=True)
 
     manual_vix = st.number_input(
@@ -193,8 +195,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
     else:
         vix = manual_vix
         if use_live_vix:
-            st.warning("Live India VIX unavailable. Manual VIX is being used.")
-        
+            st.warning("Live India VIX unavailable. Manual VIX is being used.")        
 with st.sidebar.expander("2️⃣ Option Chain / OI / PCR", expanded=True):
     call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
     put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
