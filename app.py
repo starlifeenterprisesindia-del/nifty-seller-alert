@@ -184,7 +184,7 @@ with st.sidebar.expander("1️⃣ Market Snapshot", expanded=True):
         step=0.1
     )
 
-        if use_live_vix and live_vix_data["success"]:
+if use_live_vix and live_vix_data["success"]:
         vix = live_vix_data["vix"]
         st.success(
             f"Live India VIX: {vix} | "
