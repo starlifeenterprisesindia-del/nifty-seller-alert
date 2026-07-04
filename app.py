@@ -248,9 +248,10 @@ def get_live_india_vix():
 @st.cache_data(ttl=60)
 def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
     """
+    OPTION CHAIN AI ENGINE V1
     Fetch live NIFTY option chain from NSE.
-    It returns OI, OI Change, PCR, support/resistance and suggested strikes.
-    If NSE blocks or data is unavailable, it returns success=False.
+    Returns strike-wise LTP, price change, OI, OI change, volume, PCR,
+    support/resistance strikes and suggested sell strikes.
     """
     try:
         url = "https://www.nseindia.com/api/option-chain-indices?symbol=NIFTY"
@@ -278,7 +279,6 @@ def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
             }
 
         data = response.json()
-
         records = data.get("records", {})
         option_data = records.get("data", [])
 
@@ -288,10 +288,7 @@ def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
                 "message": "NSE option chain data empty."
             }
 
-        underlying_value = records.get("underlyingValue", None)
-
-        if underlying_value is None:
-            underlying_value = spot_price
+        underlying_value = records.get("underlyingValue", spot_price)
 
         if underlying_value is None:
             return {
@@ -326,18 +323,28 @@ def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
             if strike_price is None:
                 continue
 
-            if lower_strike <= int(strike_price) <= upper_strike:
+            strike_price = int(strike_price)
+
+            if lower_strike <= strike_price <= upper_strike:
                 ce = row.get("CE", {})
                 pe = row.get("PE", {})
 
                 filtered_rows.append({
-                    "strike": int(strike_price),
+                    "strike": strike_price,
+
+                    "ce_ltp": float(ce.get("lastPrice", 0) or 0),
+                    "ce_change": float(ce.get("change", 0) or 0),
                     "ce_oi": int(ce.get("openInterest", 0) or 0),
-                    "pe_oi": int(pe.get("openInterest", 0) or 0),
                     "ce_change_oi": int(ce.get("changeinOpenInterest", 0) or 0),
-                    "pe_change_oi": int(pe.get("changeinOpenInterest", 0) or 0),
                     "ce_volume": int(ce.get("totalTradedVolume", 0) or 0),
+                    "ce_iv": float(ce.get("impliedVolatility", 0) or 0),
+
+                    "pe_ltp": float(pe.get("lastPrice", 0) or 0),
+                    "pe_change": float(pe.get("change", 0) or 0),
+                    "pe_oi": int(pe.get("openInterest", 0) or 0),
+                    "pe_change_oi": int(pe.get("changeinOpenInterest", 0) or 0),
                     "pe_volume": int(pe.get("totalTradedVolume", 0) or 0),
+                    "pe_iv": float(pe.get("impliedVolatility", 0) or 0),
                 })
 
         if not filtered_rows:
@@ -370,13 +377,17 @@ def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
             "underlying": round(underlying_value, 2),
             "expiry": selected_expiry,
             "atm_strike": atm_strike,
+
             "call_oi_change": int(call_oi_change),
             "put_oi_change": int(put_oi_change),
             "total_call_oi": int(total_call_oi),
             "total_put_oi": int(total_put_oi),
             "pcr": round(pcr_value, 2),
+
             "ce_sell_strike": int(ce_sell_strike),
             "pe_sell_strike": int(pe_sell_strike),
+
+            "option_rows": filtered_rows,
             "rows_count": len(filtered_rows),
             "last_update": last_update,
             "message": "Live option chain fetched successfully."
@@ -386,8 +397,7 @@ def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
         return {
             "success": False,
             "message": f"Live option chain fetch error: {e}"
-        }
-def clamp(value, low=0, high=98):
+        }def clamp(value, low=0, high=98):
     """Convert score to safe integer percentage."""
     try:
         value = int(round(float(value)))
