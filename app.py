@@ -397,7 +397,7 @@ def get_live_option_chain(spot_price=None, strike_gap=50, strikes_each_side=4):
         return {
             "success": False,
             "message": f"Live option chain fetch error: {e}"
-        }def clamp(value, low=0, high=98):
+        def clamp(value, low=0, high=98):
     """Convert score to safe integer percentage."""
     try:
         value = int(round(float(value)))
