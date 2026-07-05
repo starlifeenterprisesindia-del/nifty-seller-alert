@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V6 - SELLER INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V8 - SELLER INTELLIGENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V6",
+    page_title="Nifty Seller AI Dashboard V8",
     page_icon="🧠",
     layout="wide",
 )
@@ -1091,7 +1091,7 @@ def trade_quality_score(confidence, seller_risk, shock_score):
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V6 Seller Intelligence")
+st.sidebar.title("⚙️ V8 Seller Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1429,7 +1429,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V6</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V8</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
