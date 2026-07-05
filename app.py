@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V8",
+    page_title="Nifty Seller AI Dashboard V9",
     page_icon="🧠",
     layout="wide",
 )
@@ -1085,13 +1085,79 @@ def trade_quality_score(confidence, seller_risk, shock_score):
     return int(round(clamp(confidence * 0.55 + (100 - seller_risk) * 0.25 + (100 - shock_score) * 0.20)))
 
 
+
+# =========================================================
+# V9 DECISION QUALITY LAYER
+# =========================================================
+def v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_score=0):
+    """
+    Detects when market parts disagree. In conflict mode, WAIT is preferred.
+    """
+    reasons = []
+    if option_bias >= 55 and price_action_bias <= -45:
+        reasons.append("Option Chain bullish hai, lekin Price Action strong bearish hai.")
+    if option_bias <= -55 and price_action_bias >= 45:
+        reasons.append("Option Chain bearish hai, lekin Price Action strong bullish hai.")
+    if heavy_bias >= 35 and price_action_bias <= -45:
+        reasons.append("Heavyweights bullish hain, lekin chart bearish hai.")
+    if heavy_bias <= -35 and price_action_bias >= 45:
+        reasons.append("Heavyweights bearish hain, lekin chart bullish hai.")
+    if pcr < 0.80 and option_bias >= 45:
+        reasons.append("PCR bearish zone mein hai, par Option Chain bullish signal de rahi hai.")
+    if pcr > 1.55 and option_bias <= -45:
+        reasons.append("PCR overheated bullish zone mein hai, par Option Chain bearish signal de rahi hai.")
+    if gamma_score >= 70:
+        reasons.append("Gamma risk high hai; option seller ko aggressive trade avoid karna chahiye.")
+    return bool(reasons), reasons
+
+
+def v9_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk, shock_score, gamma_score, conflict_reasons, source_text):
+    """
+    Creates a simple human-readable action plan.
+    """
+    plan = []
+    if "Fallback" in source_text:
+        plan.append("Live data incomplete/fallback active: real trade avoid karo.")
+    if conflict_reasons:
+        plan.append("Market conflict mode: fresh trade avoid karo jab tak 2-3 signals same direction mein na aayen.")
+        plan.extend(conflict_reasons[:3])
+    if final_trade == "WAIT":
+        plan.append("Final action: WAIT. No trade bhi valid trade hai.")
+    else:
+        plan.append(f"Final action: {final_trade} at {selected_strike} with hedge {hedge}.")
+        plan.append(f"Confidence {confidence:.0f}% | Seller Risk {seller_risk:.0f}% | Shock {shock_score}/100 | Gamma {gamma_score}/100")
+        if confidence < 70:
+            plan.append("Confidence medium/low: sirf 1 lot test ya avoid.")
+        if seller_risk > 55 or shock_score > 55:
+            plan.append("Risk elevated: SL tight rakho aur profit fast protect karo.")
+    return plan
+
+
+def v9_data_quality_score(dhan_ready, option_ok, nifty_source, heavy_source, vix_source):
+    score = 0
+    reasons = []
+    if dhan_ready:
+        score += 20; reasons.append("Dhan credentials detected")
+    if option_ok:
+        score += 35; reasons.append("Dhan live option-chain active")
+    if str(nifty_source).lower().startswith("dhan"):
+        score += 20; reasons.append("Nifty from DhanHQ")
+    else:
+        reasons.append(f"Nifty source: {nifty_source}")
+    if str(heavy_source).lower().startswith("dhan") or str(heavy_source).lower().startswith("yahoo"):
+        score += 15; reasons.append(f"Heavyweights source: {heavy_source}")
+    if str(vix_source):
+        score += 10; reasons.append(f"VIX source: {vix_source}")
+    return int(clamp(score)), reasons
+
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V8 Seller Intelligence")
+st.sidebar.title("⚙️ V9 Seller Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1214,6 +1280,14 @@ else:
 # Heavyweights
 if dhan_bundle.get("success") and top5_ids:
     heavy_raw = parse_dhan_heavyweights(dhan_bundle, top5_ids, weights)
+    # V9 accuracy improvement: if Dhan quote gives symbols but no usable daily move, fallback to Yahoo for movement.
+    if heavy_raw.get("success") and heavy_raw.get("rows") and all(abs(float(r.get("change_pct", 0) or 0)) < 0.001 for r in heavy_raw["rows"]):
+        yahoo_hw = get_yahoo_heavyweights()
+        if yahoo_hw.get("success"):
+            for row in yahoo_hw["rows"]:
+                row["weight"] = float(weights.get(row["symbol"], row["weight"]))
+            yahoo_hw["source"] = "Yahoo fallback (Dhan stock move unavailable)"
+            heavy_raw = yahoo_hw
 else:
     heavy_raw = get_yahoo_heavyweights()
     if heavy_raw.get("success"):
@@ -1362,9 +1436,24 @@ negative_components = sum(1 for x in component_signs if x <= -15)
 agreement = max(positive_components, negative_components) / len(component_signs)
 confidence = clamp(abs(final_direction) * 0.72 + agreement * 35 + (100 - seller_risk) * 0.18, 0, 98)
 
+# V9 improved decision model:
+# 1) Hard risk blocks first
+# 2) Conflict mode = WAIT
+# 3) Dhan option-chain can strengthen strike-specific decision, but price action must not be strongly opposite.
 hard_block = news["score"] >= 80 or seller_risk >= 82
+conflict_mode_pre, conflict_reasons_pre = v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, 0)
+
 if hard_block:
     final_trade = "WAIT"
+elif conflict_mode_pre:
+    final_trade = "WAIT"
+    confidence = min(confidence, 55)
+elif option_analysis.get("success") and option_bias >= 55 and price_action_bias > -45 and pcr >= 0.80:
+    final_trade = "SELL PE"
+    confidence = max(confidence, 66)
+elif option_analysis.get("success") and option_bias <= -55 and price_action_bias < 45 and pcr <= 1.30:
+    final_trade = "SELL CE"
+    confidence = max(confidence, 66)
 elif final_direction >= 24 and confidence >= 58:
     final_trade = "SELL PE"
 elif final_direction <= -24 and confidence >= 58:
@@ -1415,6 +1504,17 @@ position_ai = active_position_manager(active_side, active_strike, active_entry_p
 discipline_text, discipline_score, discipline_reason = discipline_status(trades_taken_today, daily_loss_hit, confidence, seller_risk)
 trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
 
+# Final V9 conflict check now includes Gamma.
+conflict_mode, conflict_reasons = v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_score_v7)
+if conflict_mode and final_trade != "WAIT":
+    final_trade = "WAIT"
+    confidence = min(confidence, 55)
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+    suggested_lots = 0
+    trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
+
 
 # =========================================================
 # UI
@@ -1429,7 +1529,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V8</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V9</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -1467,7 +1567,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V8 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>V9 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -1482,9 +1582,25 @@ elif final_trade == "SELL CE":
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
 
+with st.expander("🎯 V9 Final Action Plan — Trade / No Trade", expanded=True):
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Data Quality", f"{data_quality}/100")
+    q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
+    q3.metric("Final Confidence", f"{confidence:.0f}%")
+    q4.metric("Suggested Lots", f"{suggested_lots}/{max_lots}")
+    for item in action_plan:
+        st.write("✔", item)
+    if conflict_mode:
+        st.warning("Conflict mode active hai. Iska matlab market ke major parts same direction mein nahi hain.")
+    if data_quality < 70:
+        st.info("Data quality 70 se kam ho to real trade avoid karo. Pehle data source verify karo.")
+    with st.expander("Data quality details", expanded=False):
+        for reason in data_quality_reasons:
+            st.write("•", reason)
 
-# V7 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V8 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+
+# V9 Position Manager + Expiry/Shock/Discipline panels
+with st.expander("🚀 V9 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     else:
@@ -1502,7 +1618,7 @@ with st.expander("🚀 V8 AI Position Manager — Hold / Exit / Trail SL", expan
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V8 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 V9 Expiry + Shock + Discipline Engine", expanded=True):
     e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
     e2.metric("Historical Zone", f"{time_risk}/100", time_zone_label)
@@ -1547,7 +1663,7 @@ with st.expander("✅ Why AI gave this decision", expanded=True):
 
 
 
-with st.expander("✅ V8 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ V9 Trade Checklist — Entry Allowed Only If Green", expanded=True):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -1624,7 +1740,7 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         c1, c2 = st.columns(2)
         with c1:
             if best_ce:
-                st.subheader(f"🔴 Best CE Candidate: {best_ce['strike']} CE")
+                st.subheader(f"🔴 Best CE Candidate (only if final AI agrees): {best_ce['strike']} CE")
                 st.write(f"Signal: **{best_ce['ce_signal']}** ({best_ce['ce_signal_basis']})")
                 st.write(f"Sell Score: **{best_ce['ce_sell_score']}/98** | Delta: **{best_ce['ce_delta']:.3f}** | IV: **{best_ce['ce_iv']:.2f}**")
                 st.caption(best_ce.get("ce_sell_reason", ""))
@@ -1632,13 +1748,14 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
                     st.warning("CE sell risk: upside pressure detected.")
         with c2:
             if best_pe:
-                st.subheader(f"🟢 Best PE Candidate: {best_pe['strike']} PE")
+                st.subheader(f"🟢 Best PE Candidate (only if final AI agrees): {best_pe['strike']} PE")
                 st.write(f"Signal: **{best_pe['pe_signal']}** ({best_pe['pe_signal_basis']})")
                 st.write(f"Sell Score: **{best_pe['pe_sell_score']}/98** | Delta: **{best_pe['pe_delta']:.3f}** | IV: **{best_pe['pe_iv']:.2f}**")
                 st.caption(best_pe.get("pe_sell_reason", ""))
                 if "Short Covering" in best_pe["pe_signal"] or "Buying" in best_pe["pe_signal"]:
                     st.warning("PE sell risk: downside pressure detected.")
 
+        st.warning("Candidate strike is NOT automatic entry. Final AI Decision + Action Plan must agree before trade.\")
         st.caption("OI+price labels are conventional inferences. Every option trade has both buyer and seller; OI alone does not prove who initiated the trade.")
         st.caption("Snapshot OI acceleration becomes active after at least two fresh Dhan snapshots. Press Refresh after 4+ seconds to compare snapshots.")
     else:
@@ -1724,7 +1841,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V8 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 V9 Live Dhan API Diagnostics", expanded=True):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
