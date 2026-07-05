@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V10.2",
+    page_title="Nifty Seller AI Dashboard V11",
     page_icon="🧠",
     layout="wide",
 )
@@ -1325,7 +1325,7 @@ def v102_journal_stats(df, lookback=30):
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V10.2 Seller Intelligence")
+st.sidebar.title("⚙️ V11 Super Signal Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1932,6 +1932,212 @@ except NameError:
     v10_conflict_notes = v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr)
 
 
+
+# =========================================================
+# V11 SUPER SIGNAL + STRATEGY ENGINE
+# =========================================================
+def v11_super_signal_engine(
+    final_trade="WAIT",
+    confidence=0,
+    data_quality=0,
+    seller_risk=100,
+    shock_score=100,
+    gamma_score=100,
+    conflict_mode=True,
+    price_action_bias=0,
+    option_bias=0,
+    heavy_bias=0,
+    smart_money_bias=0,
+    news_score=100,
+    pcr=1.0,
+    vix=99,
+):
+    """
+    High-confidence signal engine.
+    Goal: fewer signals, higher quality. No guarantee, only evidence-based grading.
+    """
+    conf = v91_safe_num(confidence)
+    dq = v91_safe_num(data_quality)
+    sr = v91_safe_num(seller_risk)
+    shock = v91_safe_num(shock_score)
+    gamma = v91_safe_num(gamma_score)
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    sm = v91_safe_num(smart_money_bias)
+    news = v91_safe_num(news_score)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+
+    bullish_votes = 0
+    bearish_votes = 0
+    range_votes = 0
+    notes = []
+
+    if pa >= 35: bullish_votes += 1
+    if pa <= -35: bearish_votes += 1
+    if ob >= 45: bullish_votes += 1
+    if ob <= -45: bearish_votes += 1
+    if hw >= 25: bullish_votes += 1
+    if hw <= -25: bearish_votes += 1
+    if sm >= 20: bullish_votes += 1
+    if sm <= -20: bearish_votes += 1
+    if 0.95 <= pcrv <= 1.35: bullish_votes += 1
+    if pcrv < 0.85: bearish_votes += 1
+    if vixv <= 15 and shock <= 45: range_votes += 1
+    if gamma <= 55: range_votes += 1
+    if news <= 35: range_votes += 1
+
+    safe_core = dq >= 75 and sr <= 55 and shock <= 55 and gamma <= 65 and news <= 55 and not conflict_mode
+
+    if not safe_core:
+        notes.append("Super signal blocked: data/risk/conflict conditions not fully safe.")
+
+    level = "NO SUPER SIGNAL"
+    signal = "WAIT"
+    score = int(max(0, min(100, (conf * 0.35) + (dq * 0.20) + ((100 - sr) * 0.15) + ((100 - shock) * 0.15) + ((100 - gamma) * 0.10) + ((100 - news) * 0.05))))
+
+    if safe_core and conf >= 82:
+        if final_trade == "SELL CE" and bearish_votes >= 3:
+            signal = "SUPER SELL CE"
+            level = "SUPER"
+            notes.append("Bearish confirmations aligned for CE selling.")
+        elif final_trade == "SELL PE" and bullish_votes >= 3:
+            signal = "SUPER SELL PE"
+            level = "SUPER"
+            notes.append("Bullish confirmations aligned for PE selling.")
+        elif range_votes >= 3 and abs(pa) < 45 and abs(ob) < 70:
+            signal = "SUPER IRON CONDOR"
+            level = "SUPER"
+            notes.append("Range + low shock + theta-friendly environment.")
+    elif safe_core and conf >= 72:
+        level = "HIGH CONFIDENCE"
+        signal = final_trade if final_trade != "WAIT" else "WAIT"
+        notes.append("High-confidence but not super-grade setup.")
+    elif safe_core and conf >= 62:
+        level = "STRONG WATCH"
+        signal = final_trade
+        notes.append("Good setup, but wait for stronger confirmation.")
+    else:
+        notes.append("No high-confidence signal. WAIT/observe preferred.")
+
+    return {
+        "signal": signal,
+        "level": level,
+        "score": score,
+        "bullish_votes": bullish_votes,
+        "bearish_votes": bearish_votes,
+        "range_votes": range_votes,
+        "notes": notes,
+    }
+
+def v11_strategy_ranker(
+    price_action_bias=0,
+    option_bias=0,
+    heavy_bias=0,
+    smart_money_bias=0,
+    pcr=1.0,
+    vix=99,
+    shock_score=100,
+    gamma_score=100,
+    news_score=100,
+    conflict_mode=True,
+    data_quality=0,
+):
+    """
+    Strategy ranking: seller-first, buy-with-hedge only on strong trend/catalyst.
+    """
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    sm = v91_safe_num(smart_money_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+    shock = v91_safe_num(shock_score)
+    gamma = v91_safe_num(gamma_score)
+    news = v91_safe_num(news_score)
+    dq = v91_safe_num(data_quality)
+
+    risk_penalty = max(0, shock - 45) * 0.25 + max(0, gamma - 60) * 0.20 + max(0, news - 55) * 0.25
+    data_bonus = max(0, dq - 60) * 0.20
+    conflict_penalty = 18 if conflict_mode else 0
+
+    sell_pe = 50 + pa*0.18 + ob*0.25 + hw*0.18 + sm*0.10 + data_bonus - risk_penalty - conflict_penalty
+    sell_ce = 50 - pa*0.18 - ob*0.25 - hw*0.18 - sm*0.10 + data_bonus - risk_penalty - conflict_penalty
+    range_base = 55 + (15 if vixv <= 15 else 0) + (12 if shock <= 45 else -10) + (10 if gamma <= 55 else -12) - abs(pa)*0.10 - abs(hw)*0.06 - conflict_penalty*0.5
+    iron_condor = range_base + data_bonus
+    buy_call_hedged = 35 + pa*0.22 + hw*0.20 + sm*0.10 + max(0, news-40)*0.08 - max(0, vixv-18)*0.6 - (8 if ob < 0 else 0)
+    buy_put_hedged = 35 - pa*0.22 - hw*0.20 - sm*0.10 + max(0, news-40)*0.08 - max(0, vixv-18)*0.6 + (8 if ob < 0 else 0)
+
+    # Buy strategy should be rare and catalyst/trend based.
+    if abs(pa) < 60 or abs(hw) < 25 or dq < 75:
+        buy_call_hedged -= 18
+        buy_put_hedged -= 18
+    if news < 35 and shock < 45:
+        buy_call_hedged -= 8
+        buy_put_hedged -= 8
+
+    strategies = [
+        {"strategy": "SELL PE", "confidence": int(max(0, min(95, sell_pe))), "type": "Seller"},
+        {"strategy": "SELL CE", "confidence": int(max(0, min(95, sell_ce))), "type": "Seller"},
+        {"strategy": "IRON CONDOR", "confidence": int(max(0, min(95, iron_condor))), "type": "Seller Range"},
+        {"strategy": "BUY CALL (Hedged)", "confidence": int(max(0, min(95, buy_call_hedged))), "type": "Defined Risk Buy"},
+        {"strategy": "BUY PUT (Hedged)", "confidence": int(max(0, min(95, buy_put_hedged))), "type": "Defined Risk Buy"},
+        {"strategy": "WAIT", "confidence": int(max(25, min(95, 100 - max(sell_pe, sell_ce, iron_condor, buy_call_hedged, buy_put_hedged)))), "type": "Safety"},
+    ]
+    strategies = sorted(strategies, key=lambda x: x["confidence"], reverse=True)
+    return strategies
+
+def v11_strategy_text(strategy, confidence):
+    if strategy == "WAIT":
+        return "No trade. Capital protection priority."
+    if "BUY" in strategy:
+        return "Buy strategy sirf hedged/defined-risk mode mein consider karo."
+    if strategy == "IRON CONDOR":
+        return "Range setup. Dono sides hedge ke saath, shock/gamma low hona chahiye."
+    return "Seller setup. Hedge + SL mandatory."
+
+
+
+# V11 Super Signal + Strategy Ranking
+try:
+    v11_super
+except NameError:
+    v11_super = v11_super_signal_engine(
+        final_trade=locals().get("final_trade", "WAIT"),
+        confidence=locals().get("confidence", 0),
+        data_quality=locals().get("data_quality", 0),
+        seller_risk=locals().get("seller_risk", 100),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        conflict_mode=locals().get("conflict_mode", True),
+        price_action_bias=locals().get("price_action_bias", 0),
+        option_bias=locals().get("option_bias", 0),
+        heavy_bias=locals().get("heavy_bias", 0),
+        smart_money_bias=locals().get("smart_money_bias", 0),
+        news_score=(locals().get("news", {}) or {}).get("score", 100) if isinstance(locals().get("news", {}), dict) else 100,
+        pcr=locals().get("pcr", 1.0),
+        vix=locals().get("vix", 99),
+    )
+
+try:
+    v11_ranked_strategies
+except NameError:
+    v11_ranked_strategies = v11_strategy_ranker(
+        price_action_bias=locals().get("price_action_bias", 0),
+        option_bias=locals().get("option_bias", 0),
+        heavy_bias=locals().get("heavy_bias", 0),
+        smart_money_bias=locals().get("smart_money_bias", 0),
+        pcr=locals().get("pcr", 1.0),
+        vix=locals().get("vix", 99),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        news_score=(locals().get("news", {}) or {}).get("score", 100) if isinstance(locals().get("news", {}), dict) else 100,
+        conflict_mode=locals().get("conflict_mode", True),
+        data_quality=locals().get("data_quality", 0),
+    )
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -1945,7 +2151,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V10.2</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V11</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -1983,7 +2189,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V10.2 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>V11 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -1998,7 +2204,7 @@ elif final_trade == "SELL CE":
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
 
-with st.expander("🎯 V10.2 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 V11 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -2032,8 +2238,34 @@ with st.expander("🧠 V10 Probability + Conflict Brain", expanded=True):
         st.success("V10 verdict: Major conflict limited. Still use SL/hedge and checklist.")
 
 
-# V10 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V10.2 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+
+with st.expander("🚨 V11 Super Signal Engine — Only Strong Setups", expanded=True):
+    s1, s2, s3, s4 = st.columns(4)
+    s1.metric("Super Signal", v11_super["signal"])
+    s2.metric("Level", v11_super["level"])
+    s3.metric("Signal Score", f"{v11_super['score']}/100")
+    s4.metric("Votes B/B/R", f"{v11_super['bullish_votes']}/{v11_super['bearish_votes']}/{v11_super['range_votes']}")
+    for note in v11_super["notes"]:
+        st.write("•", note)
+    if v11_super["level"] == "SUPER":
+        st.success("Super Signal active: still use hedge, SL, and position size control.")
+    else:
+        st.info("No super signal. Normal AI decision/checklist follow karo.")
+
+with st.expander("🎯 V11 Best Strategy Ranking", expanded=True):
+    _rank_df = pd.DataFrame(v11_ranked_strategies)
+    st.dataframe(_rank_df, use_container_width=True, hide_index=True)
+    _top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
+    st.subheader(f"⭐ Best Strategy: {_top['strategy']} ({_top['confidence']}%)")
+    st.write(v11_strategy_text(_top["strategy"], _top["confidence"]))
+    if "BUY" in _top["strategy"] and _top["confidence"] < 85:
+        st.warning("Buy-with-hedge confidence 85% se kam ho to avoid. Seller-first discipline follow karo.")
+    if _top["strategy"] == "IRON CONDOR":
+        st.caption("Iron Condor tabhi jab range probability high, shock/gamma low, aur both side strikes liquid hon.")
+
+
+# V11 Position Manager + Expiry/Shock/Discipline panels
+with st.expander("🚀 V11 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     try:
@@ -2057,7 +2289,7 @@ with st.expander("🚀 V10.2 AI Position Manager — Hold / Exit / Trail SL", ex
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V10.2 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 V11 Expiry + Shock + Discipline Engine", expanded=True):
     e1, e2, e3, e4, e5 = st.columns(5)
     with e1:
         v102_metric_card("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
@@ -2107,7 +2339,7 @@ with st.expander("✅ Why AI gave this decision", expanded=True):
 
 
 
-with st.expander("✅ V10.2 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ V11 Trade Checklist — Entry Allowed Only If Green", expanded=True):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -2317,7 +2549,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V10.2 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 V11 Live Dhan API Diagnostics", expanded=True):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
