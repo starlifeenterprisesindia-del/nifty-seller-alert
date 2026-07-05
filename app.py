@@ -1755,7 +1755,7 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
                 if "Short Covering" in best_pe["pe_signal"] or "Buying" in best_pe["pe_signal"]:
                     st.warning("PE sell risk: downside pressure detected.")
 
-        st.warning("Candidate strike is NOT automatic entry. Final AI Decision + Action Plan must agree before trade.\")
+        st.warning("Candidate strike is NOT automatic entry. Final AI Decision + Action Plan must agree before trade.")
         st.caption("OI+price labels are conventional inferences. Every option trade has both buyer and seller; OI alone does not prove who initiated the trade.")
         st.caption("Snapshot OI acceleration becomes active after at least two fresh Dhan snapshots. Press Refresh after 4+ seconds to compare snapshots.")
     else:
