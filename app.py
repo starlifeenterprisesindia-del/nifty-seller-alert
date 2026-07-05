@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V9.1",
+    page_title="Nifty Seller AI Dashboard V10",
     page_icon="🧠",
     layout="wide",
 )
@@ -1258,7 +1258,7 @@ def v91_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V9.1 Seller Intelligence")
+st.sidebar.title("⚙️ V10 Seller Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1652,6 +1652,168 @@ except NameError:
     )
 
 
+
+# =========================================================
+# V10 OPTION SELLER AI BRAIN
+# =========================================================
+def v10_probability_engine(price_action_bias, option_bias, heavy_bias, pcr, vix, gamma_score, shock_score, news_score):
+    """
+    Converts multiple live signals into directional/range probabilities.
+    This is decision-support, not prediction guarantee.
+    """
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    news = v91_safe_num(news_score)
+
+    raw_bull = 50 + (pa * 0.20) + (ob * 0.30) + (hw * 0.20)
+    if 1.0 <= pcrv <= 1.35:
+        raw_bull += 6
+    elif pcrv < 0.85:
+        raw_bull -= 8
+    elif pcrv > 1.55:
+        raw_bull -= 4
+
+    bull = int(max(5, min(95, raw_bull)))
+    bear = int(max(5, min(95, 100 - bull)))
+
+    conflict_strength = abs(ob - pa)
+    range_prob = 45
+    if conflict_strength >= 80:
+        range_prob += 22
+    if vixv <= 14:
+        range_prob += 12
+    if gamma >= 70:
+        range_prob -= 15
+    if shock >= 60:
+        range_prob -= 10
+    range_prob = int(max(5, min(95, range_prob)))
+
+    breakout_prob = int(max(5, min(95, 100 - range_prob + (gamma * 0.20) + (news * 0.10))))
+    fake_breakout = "HIGH" if conflict_strength >= 110 and vixv <= 15 else "MEDIUM" if conflict_strength >= 70 else "LOW"
+
+    return {
+        "bullish": bull,
+        "bearish": bear,
+        "range": range_prob,
+        "breakout": breakout_prob,
+        "fake_breakout": fake_breakout,
+        "conflict_strength": int(conflict_strength),
+    }
+
+def v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr):
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    notes = []
+
+    if pa <= -45 and ob >= 55:
+        notes.append("Bearish chart + bullish option-chain = possible short-covering / PE writing support, but entry risky until price confirms.")
+    elif pa >= 45 and ob <= -55:
+        notes.append("Bullish chart + bearish option-chain = possible call writing pressure / resistance, wait for confirmation.")
+    elif abs(pa) < 25 and abs(ob) >= 55:
+        notes.append("Price action neutral hai, option-chain strong signal de rahi hai. Breakout confirmation ka wait karo.")
+    elif abs(ob) < 25 and abs(pa) >= 55:
+        notes.append("Chart strong hai, option-chain support weak hai. Seller ke liye low-confidence zone.")
+    else:
+        notes.append("Major conflict limited hai; signal alignment improve ho raha hai.")
+
+    if hw >= 35 and pa < 0:
+        notes.append("Heavyweights hidden support de rahe hain; downside follow-through weak ho sakta hai.")
+    if hw <= -35 and pa > 0:
+        notes.append("Heavyweights hidden pressure de rahe hain; upside follow-through weak ho sakta hai.")
+    if pcrv < 0.85:
+        notes.append("PCR low hai: call-side pressure ya bearish sentiment possible.")
+    elif pcrv > 1.45:
+        notes.append("PCR high hai: bullish sentiment strong but overcrowding risk.")
+    return notes
+
+def v10_candidate_verdict(side, strike, score, signal, delta=None, iv=None, spread=None, final_trade="WAIT", conflict_mode=False):
+    """
+    Converts best CE/PE candidate into safe actionable wording.
+    """
+    score = v91_safe_num(score)
+    delta = v91_safe_num(delta)
+    iv = v91_safe_num(iv)
+    spread = v91_safe_num(spread)
+    reasons = []
+    action_ok = (final_trade == f"SELL {side}") and not conflict_mode and score >= 70
+
+    if score >= 80:
+        reasons.append("Candidate score strong.")
+    elif score >= 60:
+        reasons.append("Candidate score medium.")
+    else:
+        reasons.append("Candidate score weak.")
+
+    if abs(delta) <= 0.35:
+        reasons.append("Delta seller-friendly zone mein hai.")
+    elif abs(delta) >= 0.55:
+        reasons.append("Delta high risk hai.")
+    if spread and spread <= 1.0:
+        reasons.append("Spread acceptable hai.")
+    elif spread and spread > 2.0:
+        reasons.append("Spread wide hai; execution risk.")
+    if iv:
+        reasons.append(f"IV approx {iv:.2f}.")
+
+    if action_ok:
+        verdict = f"SELL {strike} {side} allowed only with SL + hedge."
+    else:
+        verdict = f"{strike} {side} candidate hai, automatic trade nahi."
+
+    return {"ok": action_ok, "verdict": verdict, "reasons": reasons[:4], "signal": signal}
+
+def v10_sl_target(entry_premium, gamma_score, shock_score, confidence):
+    """
+    Premium based SL/target suggestion for manual active trade.
+    """
+    entry = v91_safe_num(entry_premium)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    conf = v91_safe_num(confidence)
+    if entry <= 0:
+        return {"sl": 0, "target": 0, "trail_after": 0}
+    sl_pct = 0.22
+    if gamma >= 65 or shock >= 60:
+        sl_pct = 0.16
+    elif conf >= 75:
+        sl_pct = 0.25
+    target_pct = 0.35 if conf >= 70 else 0.25
+    return {
+        "sl": round(entry * (1 + sl_pct), 2),
+        "target": round(entry * (1 - target_pct), 2),
+        "trail_after": round(entry * 0.75, 2),
+    }
+
+
+
+# V10 analytics calculated after all major signals are available.
+try:
+    v10_probs
+except NameError:
+    v10_probs = v10_probability_engine(
+        price_action_bias,
+        option_bias,
+        heavy_bias,
+        pcr,
+        locals().get("vix", locals().get("india_vix", 0)),
+        locals().get("gamma_score_v7", 0),
+        locals().get("shock_score_v7", 0),
+        locals().get("news", {}).get("score", 0) if isinstance(locals().get("news", {}), dict) else 0,
+    )
+
+try:
+    v10_conflict_notes
+except NameError:
+    v10_conflict_notes = v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr)
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -1665,7 +1827,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V9.1</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V10</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -1703,7 +1865,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V9.1 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>V10 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -1718,7 +1880,7 @@ elif final_trade == "SELL CE":
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
 
-with st.expander("🎯 V9.1 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 V10 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -1735,10 +1897,33 @@ with st.expander("🎯 V9.1 Final Action Plan — Trade / No Trade", expanded=Tr
             st.write("•", reason)
 
 
-# V9 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V9.1 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+
+with st.expander("🧠 V10 Probability + Conflict Brain", expanded=True):
+    p1, p2, p3, p4, p5 = st.columns(5)
+    p1.metric("Bullish Probability", f"{v10_probs['bullish']}%")
+    p2.metric("Bearish Probability", f"{v10_probs['bearish']}%")
+    p3.metric("Range Probability", f"{v10_probs['range']}%")
+    p4.metric("Breakout Risk", f"{v10_probs['breakout']}%")
+    p5.metric("Fake Breakout", v10_probs["fake_breakout"])
+    st.write("**Conflict Interpretation:**")
+    for note in v10_conflict_notes:
+        st.write("•", note)
+    if conflict_mode:
+        st.warning("V10 verdict: Conflict mode active. Fresh selling tabhi jab price action + OI + heavyweight ek direction mein align ho.")
+    else:
+        st.success("V10 verdict: Major conflict limited. Still use SL/hedge and checklist.")
+
+
+# V10 Position Manager + Expiry/Shock/Discipline panels
+with st.expander("🚀 V10 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
+    try:
+        if entry_premium > 0:
+            prem_plan = v10_sl_target(entry_premium, gamma_score_v7, shock_score_v7, confidence)
+            st.write(f"V10 Premium Plan: SL around {prem_plan['sl']} | Target around {prem_plan['target']} | Trail after premium reaches {prem_plan['trail_after']}")
+    except Exception:
+        pass
     else:
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Position AI", position_ai["action"], f"Confidence {position_ai['confidence']}%")
@@ -1754,7 +1939,7 @@ with st.expander("🚀 V9.1 AI Position Manager — Hold / Exit / Trail SL", exp
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V9.1 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 V10 Expiry + Shock + Discipline Engine", expanded=True):
     e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
     e2.metric("Historical Zone", f"{time_risk}/100", time_zone_label)
@@ -1799,7 +1984,7 @@ with st.expander("✅ Why AI gave this decision", expanded=True):
 
 
 
-with st.expander("✅ V9.1 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ V10 Trade Checklist — Entry Allowed Only If Green", expanded=True):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -1892,6 +2077,23 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
                     st.warning("PE sell risk: downside pressure detected.")
 
         st.warning("Candidate strike is NOT automatic entry. Final AI Decision + Action Plan must agree before trade.")
+
+        # V10 candidate safety verdicts
+        try:
+            ce_verdict = v10_candidate_verdict("CE", best_ce["strike"], best_ce.get("ce_sell_score", 0), best_ce.get("ce_signal", ""), best_ce.get("ce_delta", 0), best_ce.get("ce_iv", 0), best_ce.get("ce_spread_pct", 0), final_trade, conflict_mode) if best_ce else None
+            pe_verdict = v10_candidate_verdict("PE", best_pe["strike"], best_pe.get("pe_sell_score", 0), best_pe.get("pe_signal", ""), best_pe.get("pe_delta", 0), best_pe.get("pe_iv", 0), best_pe.get("pe_spread_pct", 0), final_trade, conflict_mode) if best_pe else None
+            st.markdown("### 🧾 V10 Candidate Verdict")
+            if ce_verdict:
+                st.write("🔴", ce_verdict["verdict"])
+                for rr in ce_verdict["reasons"]:
+                    st.caption("CE: " + rr)
+            if pe_verdict:
+                st.write("🟢", pe_verdict["verdict"])
+                for rr in pe_verdict["reasons"]:
+                    st.caption("PE: " + rr)
+        except Exception as _e:
+            st.caption("V10 candidate verdict unavailable for this snapshot.")
+
         st.caption("OI+price labels are conventional inferences. Every option trade has both buyer and seller; OI alone does not prove who initiated the trade.")
         st.caption("Snapshot OI acceleration becomes active after at least two fresh Dhan snapshots. Press Refresh after 4+ seconds to compare snapshots.")
     else:
@@ -1977,7 +2179,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V9.1 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 V10 Live Dhan API Diagnostics", expanded=True):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
