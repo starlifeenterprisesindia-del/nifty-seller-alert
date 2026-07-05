@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V11",
+    page_title="Nifty Seller AI Dashboard V12",
     page_icon="🧠",
     layout="wide",
 )
@@ -1325,7 +1325,7 @@ def v102_journal_stats(df, lookback=30):
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V11 Super Signal Intelligence")
+st.sidebar.title("⚙️ V12 Trade Ticket Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -2138,6 +2138,231 @@ except NameError:
     )
 
 
+
+# =========================================================
+# V12 AI TRADE TICKET ENGINE
+# =========================================================
+def v12_round_strike(x, step=50):
+    try:
+        return int(round(float(x) / step) * step)
+    except Exception:
+        return 0
+
+def v12_option_row_by_strike(option_analysis, strike):
+    try:
+        rows = option_analysis.get("rows", [])
+        s = int(strike)
+        for r in rows:
+            if int(r.get("strike", 0)) == s:
+                return r
+    except Exception:
+        pass
+    return None
+
+def v12_premium_from_row(row, side):
+    if not row:
+        return 0.0
+    try:
+        if side == "CE":
+            return float(row.get("ce_ltp", 0) or 0)
+        if side == "PE":
+            return float(row.get("pe_ltp", 0) or 0)
+    except Exception:
+        return 0.0
+    return 0.0
+
+def v12_select_hedge_strike(sell_strike, side, hedge_gap=100):
+    try:
+        sell_strike = int(sell_strike)
+        hedge_gap = int(hedge_gap)
+        if side == "CE":
+            return sell_strike + hedge_gap
+        if side == "PE":
+            return sell_strike - hedge_gap
+    except Exception:
+        pass
+    return 0
+
+def v12_sl_target_for_seller(premium, confidence=0, gamma_score=0, shock_score=0):
+    premium = v91_safe_num(premium)
+    conf = v91_safe_num(confidence)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    if premium <= 0:
+        return {"sl": 0.0, "target1": 0.0, "target2": 0.0, "trail_after": 0.0}
+    # seller SL: premium rises against us
+    sl_pct = 0.28
+    if gamma >= 70 or shock >= 65:
+        sl_pct = 0.18
+    elif conf >= 80:
+        sl_pct = 0.32
+    target1_pct = 0.30
+    target2_pct = 0.50
+    return {
+        "sl": round(premium * (1 + sl_pct), 2),
+        "target1": round(max(0.05, premium * (1 - target1_pct)), 2),
+        "target2": round(max(0.05, premium * (1 - target2_pct)), 2),
+        "trail_after": round(max(0.05, premium * 0.75), 2),
+    }
+
+def v12_sl_target_for_buyer(premium, confidence=0):
+    premium = v91_safe_num(premium)
+    conf = v91_safe_num(confidence)
+    if premium <= 0:
+        return {"sl": 0.0, "target1": 0.0, "target2": 0.0}
+    sl_pct = 0.28 if conf >= 85 else 0.22
+    return {
+        "sl": round(max(0.05, premium * (1 - sl_pct)), 2),
+        "target1": round(premium * 1.35, 2),
+        "target2": round(premium * 1.70, 2),
+    }
+
+def v12_build_trade_ticket(
+    top_strategy,
+    final_trade,
+    best_ce,
+    best_pe,
+    option_analysis,
+    price,
+    confidence,
+    seller_risk,
+    shock_score,
+    gamma_score,
+    hedge_gap=100,
+    max_lots=1,
+    conflict_mode=True,
+    data_quality=0,
+):
+    """
+    Builds a human-readable trade ticket. Recommendation only, no auto-order.
+    """
+    strategy = (top_strategy or {}).get("strategy", final_trade or "WAIT")
+    strategy_conf = int((top_strategy or {}).get("confidence", confidence or 0))
+    confidence = max(v91_safe_num(confidence), strategy_conf)
+    data_quality = v91_safe_num(data_quality)
+    max_lots = int(max(0, max_lots or 0))
+    lots = 0 if strategy == "WAIT" else min(max_lots, 1 if confidence < 82 else 2 if confidence < 90 else 3)
+
+    reasons = []
+    warnings = []
+    legs = []
+    summary = "WAIT"
+
+    if data_quality < 70:
+        warnings.append("Data quality low/medium hai. Real trade avoid karo.")
+    if conflict_mode:
+        warnings.append("Conflict mode active hai. Fresh trade avoid.")
+    if seller_risk > 60:
+        warnings.append("Seller risk elevated hai.")
+    if shock_score > 60:
+        warnings.append("Shock risk elevated hai.")
+    if gamma_score > 70:
+        warnings.append("Gamma risk high hai.")
+
+    def add_seller_leg(side, strike, label):
+        row = v12_option_row_by_strike(option_analysis, strike)
+        prem = v12_premium_from_row(row, side)
+        plan = v12_sl_target_for_seller(prem, confidence, gamma_score, shock_score)
+        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap)
+        hedge_row = v12_option_row_by_strike(option_analysis, hedge_strike)
+        hedge_prem = v12_premium_from_row(hedge_row, side)
+        legs.append({"Action": "SELL", "Leg": label, "Side": side, "Strike": int(strike), "Premium": prem, "SL": plan["sl"], "Target 1": plan["target1"], "Target 2": plan["target2"], "Trail After": plan["trail_after"]})
+        if hedge_strike:
+            legs.append({"Action": "BUY", "Leg": f"{label} Hedge", "Side": side, "Strike": int(hedge_strike), "Premium": hedge_prem, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Trail After": 0.0})
+        return prem, hedge_prem
+
+    def add_buyer_leg(side, strike, label):
+        row = v12_option_row_by_strike(option_analysis, strike)
+        prem = v12_premium_from_row(row, side)
+        plan = v12_sl_target_for_buyer(prem, confidence)
+        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap)
+        hedge_row = v12_option_row_by_strike(option_analysis, hedge_strike)
+        hedge_prem = v12_premium_from_row(hedge_row, side)
+        legs.append({"Action": "BUY", "Leg": label, "Side": side, "Strike": int(strike), "Premium": prem, "SL": plan["sl"], "Target 1": plan["target1"], "Target 2": plan["target2"], "Trail After": 0.0})
+        if hedge_strike:
+            legs.append({"Action": "SELL", "Leg": f"{label} Cost Hedge", "Side": side, "Strike": int(hedge_strike), "Premium": hedge_prem, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Trail After": 0.0})
+        return prem, hedge_prem
+
+    if strategy == "WAIT" or warnings:
+        summary = "NO TRADE / WAIT"
+        reasons.append("Capital protection priority. Trade tabhi jab Action Plan + Checklist agree kare.")
+    elif strategy == "SELL CE":
+        strike = int(best_ce.get("strike", v12_round_strike(price) + 100)) if best_ce else v12_round_strike(price) + 100
+        add_seller_leg("CE", strike, "Main CE Sell")
+        summary = f"SELL {strike} CE with hedge"
+        reasons.append("CE selling selected by strategy engine.")
+    elif strategy == "SELL PE":
+        strike = int(best_pe.get("strike", v12_round_strike(price) - 100)) if best_pe else v12_round_strike(price) - 100
+        add_seller_leg("PE", strike, "Main PE Sell")
+        summary = f"SELL {strike} PE with hedge"
+        reasons.append("PE selling selected by strategy engine.")
+    elif strategy == "IRON CONDOR":
+        ce_strike = int(best_ce.get("strike", v12_round_strike(price) + 150)) if best_ce else v12_round_strike(price) + 150
+        pe_strike = int(best_pe.get("strike", v12_round_strike(price) - 150)) if best_pe else v12_round_strike(price) - 150
+        ce_credit, ce_hedge = add_seller_leg("CE", ce_strike, "Condor CE Sell")
+        pe_credit, pe_hedge = add_seller_leg("PE", pe_strike, "Condor PE Sell")
+        summary = f"IRON CONDOR: Sell {ce_strike} CE + {pe_strike} PE"
+        reasons.append("Range strategy selected. Both sides must be hedged.")
+    elif strategy == "BUY CALL (Hedged)":
+        atm = v12_round_strike(price)
+        add_buyer_leg("CE", atm, "Hedged Call Buy")
+        summary = f"BUY {atm} CE with cost hedge"
+        reasons.append("Strong bullish/trend strategy selected. Defined risk only.")
+    elif strategy == "BUY PUT (Hedged)":
+        atm = v12_round_strike(price)
+        add_buyer_leg("PE", atm, "Hedged Put Buy")
+        summary = f"BUY {atm} PE with cost hedge"
+        reasons.append("Strong bearish/trend strategy selected. Defined risk only.")
+    else:
+        summary = "WAIT"
+        reasons.append("Strategy not clear.")
+
+    # Approx totals
+    sell_credit = sum(float(x["Premium"]) for x in legs if x["Action"] == "SELL")
+    buy_debit = sum(float(x["Premium"]) for x in legs if x["Action"] == "BUY")
+    net_credit = round(sell_credit - buy_debit, 2)
+    estimated_points_risk = int(hedge_gap) - net_credit if net_credit > 0 else buy_debit - sell_credit
+    return {
+        "summary": summary,
+        "strategy": strategy,
+        "confidence": int(confidence),
+        "lots": lots,
+        "legs": legs,
+        "net_credit": round(net_credit, 2),
+        "estimated_points_risk": round(max(0, estimated_points_risk), 2),
+        "reasons": reasons,
+        "warnings": warnings,
+    }
+
+
+
+# V12 AI Trade Ticket
+try:
+    v12_top_strategy
+except NameError:
+    v12_top_strategy = v11_ranked_strategies[0] if locals().get("v11_ranked_strategies") else {"strategy": locals().get("final_trade", "WAIT"), "confidence": locals().get("confidence", 0)}
+
+try:
+    v12_trade_ticket
+except NameError:
+    v12_trade_ticket = v12_build_trade_ticket(
+        top_strategy=v12_top_strategy,
+        final_trade=locals().get("final_trade", "WAIT"),
+        best_ce=locals().get("best_ce", None),
+        best_pe=locals().get("best_pe", None),
+        option_analysis=locals().get("option_analysis", {}),
+        price=locals().get("price", 0),
+        confidence=locals().get("confidence", 0),
+        seller_risk=locals().get("seller_risk", 100),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        hedge_gap=locals().get("hedge_gap", 100),
+        max_lots=locals().get("max_lots", 1),
+        conflict_mode=locals().get("conflict_mode", True),
+        data_quality=locals().get("data_quality", 0),
+    )
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -2151,7 +2376,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V11</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V12</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -2189,7 +2414,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V11 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>V12 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -2204,7 +2429,7 @@ elif final_trade == "SELL CE":
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
 
-with st.expander("🎯 V11 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 V12 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -2239,7 +2464,7 @@ with st.expander("🧠 V10 Probability + Conflict Brain", expanded=True):
 
 
 
-with st.expander("🚨 V11 Super Signal Engine — Only Strong Setups", expanded=True):
+with st.expander("🚨 V12 Super Signal Engine — Only Strong Setups", expanded=True):
     s1, s2, s3, s4 = st.columns(4)
     s1.metric("Super Signal", v11_super["signal"])
     s2.metric("Level", v11_super["level"])
@@ -2252,7 +2477,7 @@ with st.expander("🚨 V11 Super Signal Engine — Only Strong Setups", expanded
     else:
         st.info("No super signal. Normal AI decision/checklist follow karo.")
 
-with st.expander("🎯 V11 Best Strategy Ranking", expanded=True):
+with st.expander("🎯 V12 Best Strategy Ranking", expanded=True):
     _rank_df = pd.DataFrame(v11_ranked_strategies)
     st.dataframe(_rank_df, use_container_width=True, hide_index=True)
     _top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
@@ -2264,8 +2489,34 @@ with st.expander("🎯 V11 Best Strategy Ranking", expanded=True):
         st.caption("Iron Condor tabhi jab range probability high, shock/gamma low, aur both side strikes liquid hon.")
 
 
-# V11 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V11 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+
+with st.expander("🎟️ V12 AI Trade Ticket — Strike + Price + SL + Target", expanded=True):
+    tt = v12_trade_ticket
+    t1, t2, t3, t4, t5 = st.columns(5)
+    t1.metric("Recommended", tt["summary"])
+    t2.metric("Strategy", tt["strategy"])
+    t3.metric("Confidence", f"{tt['confidence']}%")
+    t4.metric("Lots", tt["lots"])
+    t5.metric("Net Credit", f"{tt['net_credit']} pts")
+    if tt["warnings"]:
+        for w in tt["warnings"]:
+            st.warning(w)
+    else:
+        st.success("Trade ticket clean hai. Still confirm broker price, spread, margin and SL before execution.")
+    if tt["legs"]:
+        _legs_df = pd.DataFrame(tt["legs"])
+        st.dataframe(_legs_df, use_container_width=True, hide_index=True)
+        st.caption(f"Approx points risk: {tt['estimated_points_risk']} | Hedge gap: {hedge_gap} pts")
+    else:
+        st.info("No legs generated because current verdict is WAIT/NO TRADE.")
+    st.write("**Why this ticket:**")
+    for r in tt["reasons"]:
+        st.write("•", r)
+    st.error("Important: Ye recommendation/order-ticket hai, auto execution nahi. Final order price broker screen par confirm karo.")
+
+
+# V12 Position Manager + Expiry/Shock/Discipline panels
+with st.expander("🚀 V12 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     try:
@@ -2289,7 +2540,7 @@ with st.expander("🚀 V11 AI Position Manager — Hold / Exit / Trail SL", expa
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V11 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 V12 Expiry + Shock + Discipline Engine", expanded=True):
     e1, e2, e3, e4, e5 = st.columns(5)
     with e1:
         v102_metric_card("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
@@ -2339,7 +2590,7 @@ with st.expander("✅ Why AI gave this decision", expanded=True):
 
 
 
-with st.expander("✅ V11 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ V12 Trade Checklist — Entry Allowed Only If Green", expanded=True):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -2549,7 +2800,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V11 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 V12 Live Dhan API Diagnostics", expanded=True):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
