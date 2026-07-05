@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V10",
+    page_title="Nifty Seller AI Dashboard V10.2",
     page_icon="🧠",
     layout="wide",
 )
@@ -1252,13 +1252,80 @@ def v91_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk
     return plan
 
 
+
+# =========================================================
+# V10.2 UI + FII/DII JOURNAL HELPERS
+# =========================================================
+from pathlib import Path as _Path
+
+FII_DII_STORE = _Path("data/fii_dii_journal.csv")
+
+def v102_metric_card(label, value, delta=None):
+    """Compact metric card for long labels like NEAR EXPIRY MODE."""
+    safe_delta = f"<div class='metric-delta'>{delta}</div>" if delta not in (None, "") else ""
+    st.markdown(
+        f"""
+        <div class="mini-metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value-small">{value}</div>
+            {safe_delta}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def v102_load_fii_dii_journal():
+    try:
+        if FII_DII_STORE.exists():
+            df = pd.read_csv(FII_DII_STORE)
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+            return df
+    except Exception:
+        pass
+    return pd.DataFrame(columns=["Date", "FII Cash Cr", "DII Cash Cr", "FII Index Futures Bias", "FII Options Bias", "Notes"])
+
+def v102_save_fii_dii_journal(df):
+    try:
+        FII_DII_STORE.parent.mkdir(parents=True, exist_ok=True)
+        df2 = df.copy()
+        if "Date" in df2.columns:
+            df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce").dt.date.astype(str)
+        df2.to_csv(FII_DII_STORE, index=False)
+        return True
+    except Exception:
+        return False
+
+def v102_journal_stats(df, lookback=30):
+    if df is None or df.empty:
+        return {"rows": 0, "fii_5": 0.0, "dii_5": 0.0, "fii_10": 0.0, "dii_10": 0.0, "bias": 0.0, "label": "No data"}
+    d = df.copy()
+    d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+    d = d.dropna(subset=["Date"]).sort_values("Date").tail(int(lookback))
+    for col in ["FII Cash Cr", "DII Cash Cr"]:
+        d[col] = pd.to_numeric(d[col], errors="coerce").fillna(0.0)
+    last5 = d.tail(5)
+    last10 = d.tail(10)
+    fii5 = float(last5["FII Cash Cr"].sum()) if not last5.empty else 0.0
+    dii5 = float(last5["DII Cash Cr"].sum()) if not last5.empty else 0.0
+    fii10 = float(last10["FII Cash Cr"].sum()) if not last10.empty else 0.0
+    dii10 = float(last10["DII Cash Cr"].sum()) if not last10.empty else 0.0
+    bias = 0.0
+    bias += 35 if fii5 > 1000 else -35 if fii5 < -1000 else fii5 / 30.0
+    bias += 15 if dii5 > 1000 else -15 if dii5 < -1000 else dii5 / 70.0
+    bias += 20 if fii10 > 2000 else -20 if fii10 < -2000 else fii10 / 100.0
+    bias = signed_clamp(bias)
+    label = bias_label(bias)
+    return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "fii_10": fii10, "dii_10": dii10, "bias": bias, "label": label}
+
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V10 Seller Intelligence")
+st.sidebar.title("⚙️ V10.2 Seller Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1306,6 +1373,46 @@ with st.sidebar.expander("5️⃣ FII / DII — Daily Manual", expanded=True):
     fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=0.0, step=100.0)
     dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=0.0, step=100.0)
     fii_index_futures_bias = st.selectbox("FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"])
+    st.caption("Quick manual fields. Detailed 30-day journal below.")
+
+with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=False):
+    fii_journal_df = v102_load_fii_dii_journal()
+    journal_date = st.date_input("Date")
+    journal_fii = st.number_input("Journal FII Cash ₹ Cr", value=0.0, step=100.0)
+    journal_dii = st.number_input("Journal DII Cash ₹ Cr", value=0.0, step=100.0)
+    journal_fut_bias = st.selectbox("Journal FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], key="journal_fut_bias")
+    journal_opt_bias = st.selectbox("Journal FII Options Bias", ["Neutral", "Bullish", "Bearish"], key="journal_opt_bias")
+    journal_notes = st.text_input("Notes", value="")
+    col_j1, col_j2 = st.columns(2)
+    if col_j1.button("Save FII/DII Day"):
+        new_row = pd.DataFrame([{
+            "Date": journal_date,
+            "FII Cash Cr": journal_fii,
+            "DII Cash Cr": journal_dii,
+            "FII Index Futures Bias": journal_fut_bias,
+            "FII Options Bias": journal_opt_bias,
+            "Notes": journal_notes,
+        }])
+        fii_journal_df = pd.concat([fii_journal_df, new_row], ignore_index=True)
+        fii_journal_df["Date"] = pd.to_datetime(fii_journal_df["Date"], errors="coerce")
+        fii_journal_df = fii_journal_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
+        if v102_save_fii_dii_journal(fii_journal_df):
+            st.success("Saved. Last 30 trading days retained.")
+        else:
+            st.error("Save failed. Use download backup.")
+    if col_j2.button("Clear Journal"):
+        fii_journal_df = fii_journal_df.iloc[0:0]
+        v102_save_fii_dii_journal(fii_journal_df)
+        st.warning("Journal cleared.")
+    journal_stats = v102_journal_stats(fii_journal_df)
+    st.caption(f"Rows: {journal_stats['rows']} | 5D FII: ₹{journal_stats['fii_5']:,.0f} Cr | 5D DII: ₹{journal_stats['dii_5']:,.0f} Cr")
+    if not fii_journal_df.empty:
+        st.download_button(
+            "Download Journal CSV",
+            data=fii_journal_df.to_csv(index=False),
+            file_name="fii_dii_journal_backup.csv",
+            mime="text/csv",
+        )
 
 with st.sidebar.expander("6️⃣ News Risk", expanded=True):
     manual_news_risk = st.selectbox("Manual fallback", ["Low", "Medium", "High", "Critical"])
@@ -1491,6 +1598,17 @@ elif 0.75 <= pcr < 0.95:
     pcr_bias = -22
 else:
     pcr_bias = -45
+
+# Use FII/DII journal rolling data if available; manual fields remain fallback.
+try:
+    _journal_stats_live = v102_journal_stats(locals().get("fii_journal_df", pd.DataFrame()))
+    if _journal_stats_live.get("rows", 0) > 0:
+        if abs(float(fii_5day)) < 0.001:
+            fii_5day = _journal_stats_live["fii_5"]
+        if abs(float(dii_5day)) < 0.001:
+            dii_5day = _journal_stats_live["dii_5"]
+except Exception:
+    _journal_stats_live = {"rows": 0, "fii_5": fii_5day, "dii_5": dii_5day, "bias": 0}
 
 smart_money_bias = 0.0
 smart_money_bias += 22 if fii_today > 0 else -22 if fii_today < 0 else 0
@@ -1827,7 +1945,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V10</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V10.2</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -1865,7 +1983,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V10 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>V10.2 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -1880,7 +1998,7 @@ elif final_trade == "SELL CE":
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
 
-with st.expander("🎯 V10 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 V10.2 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -1915,7 +2033,7 @@ with st.expander("🧠 V10 Probability + Conflict Brain", expanded=True):
 
 
 # V10 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V10 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+with st.expander("🚀 V10.2 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     try:
@@ -1939,13 +2057,18 @@ with st.expander("🚀 V10 AI Position Manager — Hold / Exit / Trail SL", expa
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V10 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 V10.2 Expiry + Shock + Discipline Engine", expanded=True):
     e1, e2, e3, e4, e5 = st.columns(5)
-    e1.metric("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
-    e2.metric("Historical Zone", f"{time_risk}/100", time_zone_label)
-    e3.metric("Theta Score", f"{theta_score_v7}/100")
-    e4.metric("Gamma Risk", f"{gamma_score_v7}/100")
-    e5.metric("Shock Risk", f"{shock_score_v7}/100")
+    with e1:
+        v102_metric_card("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
+    with e2:
+        v102_metric_card("Historical Zone", f"{time_risk}/100", time_zone_label)
+    with e3:
+        v102_metric_card("Theta Score", f"{theta_score_v7}/100")
+    with e4:
+        v102_metric_card("Gamma Risk", f"{gamma_score_v7}/100")
+    with e5:
+        v102_metric_card("Shock Risk", f"{shock_score_v7}/100")
     st.write(f"**Discipline:** {discipline_text} — {discipline_reason}")
     if shock_score_v7 >= 75:
         st.error("🚨 High Shock Probability: new selling avoid / SL tight / profit protect.")
@@ -1984,7 +2107,7 @@ with st.expander("✅ Why AI gave this decision", expanded=True):
 
 
 
-with st.expander("✅ V10 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ V10.2 Trade Checklist — Entry Allowed Only If Green", expanded=True):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -2056,7 +2179,15 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
                 "PE IV": round(row["pe_iv"], 2),
                 "PE Spread%": round(row["pe_spread_pct"], 2),
             })
-        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+        _oc_df = pd.DataFrame(table_rows)
+        try:
+            _atm_strike = int(round(float(price) / 50.0) * 50)
+            def _highlight_atm(row):
+                return ["background-color: rgba(37, 99, 235, 0.35); border-top: 1px solid #60a5fa; border-bottom: 1px solid #60a5fa;" if int(row.get("Strike", 0)) == _atm_strike else "" for _ in row]
+            st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
+            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), use_container_width=True, hide_index=True)
+        except Exception:
+            st.dataframe(_oc_df, use_container_width=True, hide_index=True)
 
         c1, c2 = st.columns(2)
         with c1:
@@ -2158,6 +2289,10 @@ with st.expander("🚨 Automatic Market News Risk Indicator", expanded=True):
 
 
 with st.expander("🏛️ FII / DII Smart Money", expanded=False):
+    try:
+        _fii_stats = v102_journal_stats(locals().get("fii_journal_df", pd.DataFrame()))
+    except Exception:
+        _fii_stats = {"rows": 0, "fii_5": fii_5day, "dii_5": dii_5day, "fii_10": 0, "dii_10": 0}
     f1, f2, f3, f4 = st.columns(4)
     f1.metric("FII Today", f"₹{fii_today:,.0f} Cr")
     f2.metric("DII Today", f"₹{dii_today:,.0f} Cr")
@@ -2165,6 +2300,9 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
     f4.metric("DII 5 Day", f"₹{dii_5day:,.0f} Cr")
     st.write(f"FII Index Futures Bias: **{fii_index_futures_bias}**")
     st.write(f"Smart Money Bias: **{smart_money_bias:+.0f}/100 ({bias_label(smart_money_bias)})**")
+    st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
+    if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
+        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), use_container_width=True, hide_index=True)
 
 
 with st.expander("💰 Position & Risk Manager", expanded=False):
@@ -2179,7 +2317,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V10 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 V10.2 Live Dhan API Diagnostics", expanded=True):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
