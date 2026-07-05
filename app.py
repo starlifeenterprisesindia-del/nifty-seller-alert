@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V9",
+    page_title="Nifty Seller AI Dashboard V9.1",
     page_icon="🧠",
     layout="wide",
 )
@@ -1151,13 +1151,114 @@ def v9_data_quality_score(dhan_ready, option_ok, nifty_source, heavy_source, vix
     return int(clamp(score)), reasons
 
 
+
+# =========================================================
+# V9.1 DECISION QUALITY LAYER - STABLE
+# =========================================================
+def v91_safe_num(x, default=0.0):
+    try:
+        return float(x)
+    except Exception:
+        return default
+
+def v91_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_score=0):
+    """
+    Market ke major signals opposite hon to fresh trade avoid.
+    """
+    reasons = []
+    price_action_bias = v91_safe_num(price_action_bias)
+    option_bias = v91_safe_num(option_bias)
+    heavy_bias = v91_safe_num(heavy_bias)
+    pcr = v91_safe_num(pcr)
+    gamma_score = v91_safe_num(gamma_score)
+
+    if option_bias >= 55 and price_action_bias <= -45:
+        reasons.append("Option Chain bullish hai, lekin Price Action strong bearish hai.")
+    if option_bias <= -55 and price_action_bias >= 45:
+        reasons.append("Option Chain bearish hai, lekin Price Action strong bullish hai.")
+    if heavy_bias >= 35 and price_action_bias <= -45:
+        reasons.append("Heavyweights bullish hain, lekin chart bearish hai.")
+    if heavy_bias <= -35 and price_action_bias >= 45:
+        reasons.append("Heavyweights bearish hain, lekin chart bullish hai.")
+    if pcr < 0.80 and option_bias >= 45:
+        reasons.append("PCR bearish zone mein hai, par Option Chain bullish signal de rahi hai.")
+    if pcr > 1.55 and option_bias <= -45:
+        reasons.append("PCR overheated bullish zone mein hai, par Option Chain bearish signal de rahi hai.")
+    if gamma_score >= 70:
+        reasons.append("Gamma risk high hai; option seller ko aggressive trade avoid karna chahiye.")
+    return bool(reasons), reasons
+
+def v91_data_quality_score(dhan_ready=False, option_ok=False, nifty_source="Fallback", heavy_source="Fallback", vix_source="Fallback"):
+    score = 0
+    reasons = []
+    if dhan_ready:
+        score += 20
+        reasons.append("Dhan credentials detected")
+    else:
+        reasons.append("Dhan credentials missing")
+
+    if option_ok:
+        score += 35
+        reasons.append("Dhan live option-chain active")
+    else:
+        reasons.append("Option-chain fallback/not live")
+
+    if str(nifty_source).lower().startswith("dhan"):
+        score += 20
+        reasons.append("Nifty from DhanHQ")
+    else:
+        score += 8
+        reasons.append(f"Nifty source: {nifty_source}")
+
+    if str(heavy_source).lower().startswith("dhan"):
+        score += 15
+        reasons.append("Heavyweights from DhanHQ")
+    elif str(heavy_source).lower().startswith("yahoo"):
+        score += 10
+        reasons.append("Heavyweights from Yahoo fallback")
+    else:
+        reasons.append(f"Heavyweights source: {heavy_source}")
+
+    if str(vix_source).lower().startswith("dhan"):
+        score += 10
+        reasons.append("VIX from DhanHQ")
+    elif str(vix_source):
+        score += 6
+        reasons.append(f"VIX source: {vix_source}")
+    else:
+        reasons.append("VIX source unavailable")
+
+    return int(max(0, min(100, score))), reasons
+
+def v91_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk, shock_score, gamma_score, conflict_reasons, source_text, data_quality=0):
+    plan = []
+    if data_quality < 70:
+        plan.append("Data quality 70 se kam hai: real trade avoid karo, pehle data source verify karo.")
+    if "Fallback" in str(source_text):
+        plan.append("Fallback data active hai: real trade avoid karo ya sirf observation mode rakho.")
+    if conflict_reasons:
+        plan.append("Market conflict mode: fresh trade avoid karo jab tak 2-3 signals same direction mein na aayen.")
+        for r in conflict_reasons[:3]:
+            plan.append(r)
+    if final_trade == "WAIT":
+        plan.append("Final action: WAIT. No trade bhi valid seller decision hai.")
+    else:
+        plan.append(f"Final action: {final_trade} at {selected_strike} with hedge {hedge}.")
+        plan.append(f"Confidence {v91_safe_num(confidence):.0f}% | Seller Risk {v91_safe_num(seller_risk):.0f}% | Shock {v91_safe_num(shock_score):.0f}/100 | Gamma {v91_safe_num(gamma_score):.0f}/100")
+        if v91_safe_num(confidence) < 70:
+            plan.append("Confidence medium/low hai: sirf 1 lot test ya avoid.")
+        if v91_safe_num(seller_risk) > 55 or v91_safe_num(shock_score) > 55:
+            plan.append("Risk elevated hai: SL tight rakho aur profit fast protect karo.")
+    return plan
+
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V9 Seller Intelligence")
+st.sidebar.title("⚙️ V9.1 Seller Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1516,6 +1617,41 @@ if conflict_mode and final_trade != "WAIT":
     trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
 
 
+
+# V9.1 stable defaults: prevent NameError if any earlier block skipped.
+try:
+    conflict_mode
+except NameError:
+    conflict_mode, conflict_reasons = v91_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, locals().get("gamma_score_v7", 0))
+
+try:
+    data_quality
+except NameError:
+    data_quality, data_quality_reasons = v91_data_quality_score(
+        dhan_ready=locals().get("dhan_ready", False),
+        option_ok=bool(locals().get("option_chain", {}).get("success", False)) if isinstance(locals().get("option_chain", {}), dict) else False,
+        nifty_source=locals().get("nifty_source", "Fallback"),
+        heavy_source=(locals().get("heavy_analysis", {}) or {}).get("source", "Fallback") if isinstance(locals().get("heavy_analysis", {}), dict) else "Fallback",
+        vix_source=locals().get("vix_source", "Fallback"),
+    )
+
+try:
+    action_plan
+except NameError:
+    action_plan = v91_action_plan(
+        locals().get("final_trade", "WAIT"),
+        locals().get("selected_strike", "No Strike"),
+        locals().get("hedge", "No Hedge"),
+        locals().get("confidence", 0),
+        locals().get("seller_risk", 0),
+        locals().get("shock_score_v7", 0),
+        locals().get("gamma_score_v7", 0),
+        locals().get("conflict_reasons", []),
+        locals().get("source_text", "Fallback"),
+        data_quality,
+    )
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -1529,7 +1665,7 @@ elif dhan_ready:
 else:
     source_text = "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V9</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V9.1</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -1567,7 +1703,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V9 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>V9.1 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -1582,7 +1718,7 @@ elif final_trade == "SELL CE":
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
 
-with st.expander("🎯 V9 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 V9.1 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -1600,7 +1736,7 @@ with st.expander("🎯 V9 Final Action Plan — Trade / No Trade", expanded=True
 
 
 # V9 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V9 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+with st.expander("🚀 V9.1 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     else:
@@ -1618,7 +1754,7 @@ with st.expander("🚀 V9 AI Position Manager — Hold / Exit / Trail SL", expan
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V9 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 V9.1 Expiry + Shock + Discipline Engine", expanded=True):
     e1, e2, e3, e4, e5 = st.columns(5)
     e1.metric("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
     e2.metric("Historical Zone", f"{time_risk}/100", time_zone_label)
@@ -1663,7 +1799,7 @@ with st.expander("✅ Why AI gave this decision", expanded=True):
 
 
 
-with st.expander("✅ V9 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ V9.1 Trade Checklist — Entry Allowed Only If Green", expanded=True):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -1841,7 +1977,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V9 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 V9.1 Live Dhan API Diagnostics", expanded=True):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
