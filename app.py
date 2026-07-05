@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V6 - SELLER INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V7.1 - LIVE SELLER INTELLIGENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V6",
+    page_title="Nifty Seller AI Dashboard V7.1",
     page_icon="🧠",
     layout="wide",
 )
@@ -151,6 +151,12 @@ def manual_risk_score(label):
 
 def dhan_credentials():
     return get_secret("DHAN_CLIENT_ID"), get_secret("DHAN_ACCESS_TOKEN")
+
+# Optional future auto-token placeholders.
+# Keep these ONLY in Streamlit Secrets, never inside GitHub code:
+# DHAN_TOTP_SECRET = "..."
+# DHAN_PIN = "..."
+# Auto-token generation will be added only after confirming Dhan's official auth endpoint.
 
 
 def dhan_headers(client_id, access_token):
@@ -971,127 +977,12 @@ def build_news_risk(manual_label, te_result, alpha_result, reaction_score, vix_c
 
 
 # =========================================================
-# V7 UPGRADE: POSITION MANAGER + EXPIRY/SHOCK/DISCIPLINE
-# =========================================================
-def detect_expiry_mode(expiry_text, news_score):
-    """Auto mode: Normal / Near Expiry / Expiry / Event Risk."""
-    if news_score >= 80:
-        return "EVENT RISK MODE", 99
-    try:
-        today = now_ist().date()
-        exp_date = pd.to_datetime(str(expiry_text)).date()
-        dte = (exp_date - today).days
-    except Exception:
-        dte = 99
-    if dte == 0:
-        return "EXPIRY MODE", dte
-    if dte in (1, 2):
-        return "NEAR EXPIRY MODE", dte
-    return "NORMAL DAY MODE", dte
-
-
-def historical_time_zone_risk(is_expiry):
-    """Historical caution zones: prediction nahi, sirf precaution."""
-    t = now_ist().time()
-    score = 18
-    label = "Normal Zone"
-    if datetime.strptime("09:15", "%H:%M").time() <= t <= datetime.strptime("09:45", "%H:%M").time():
-        score, label = 65, "Opening Volatility Zone"
-    elif datetime.strptime("10:00", "%H:%M").time() <= t <= datetime.strptime("10:20", "%H:%M").time():
-        score, label = 45, "First Trend Test Zone"
-    elif datetime.strptime("11:30", "%H:%M").time() <= t <= datetime.strptime("12:00", "%H:%M").time():
-        score, label = 35, "Midday False Move Zone"
-    elif datetime.strptime("13:45", "%H:%M").time() <= t <= datetime.strptime("14:15", "%H:%M").time():
-        score, label = 42, "Post-Lunch Setup Zone"
-    elif datetime.strptime("14:30", "%H:%M").time() <= t <= datetime.strptime("15:15", "%H:%M").time():
-        score, label = 58, "Last Hour Move Zone"
-    if is_expiry and datetime.strptime("14:15", "%H:%M").time() <= t <= datetime.strptime("15:25", "%H:%M").time():
-        score, label = max(score, 78), "Expiry Gamma Danger Zone"
-    return int(clamp(score)), label
-
-
-def theta_decay_score(is_expiry, entry_price, current_price):
-    decay_pct = 0.0
-    if entry_price and entry_price > 0 and current_price >= 0:
-        decay_pct = ((entry_price - current_price) / entry_price) * 100.0
-    score = 20 + (35 if is_expiry else 0)
-    if decay_pct >= 35:
-        score += 35
-    elif decay_pct >= 20:
-        score += 25
-    elif decay_pct >= 10:
-        score += 12
-    return int(clamp(score)), decay_pct
-
-
-def gamma_risk_score(is_expiry, vix_change_pct, shock_score, option_bias, heavy_bias):
-    score = 18 + (35 if is_expiry else 0)
-    if vix_change_pct > 5:
-        score += 25
-    elif vix_change_pct > 2:
-        score += 12
-    score += min(abs(option_bias) * 0.15, 12)
-    score += min(abs(heavy_bias) * 0.12, 10)
-    score += shock_score * 0.22
-    return int(clamp(score))
-
-
-def shock_probability_score(time_risk, vix_risk, option_bias, heavy_bias, news_score):
-    oi_shift_risk = clamp(abs(option_bias))
-    hw_risk = clamp(abs(heavy_bias))
-    score = time_risk * 0.20 + vix_risk * 0.20 + oi_shift_risk * 0.20 + hw_risk * 0.20 + news_score * 0.20
-    return int(round(clamp(score)))
-
-
-def active_position_manager(side, strike, entry_price, current_price, lots, theta_score, gamma_score, shock_score, final_trade, confidence):
-    if side == "None" or lots <= 0 or entry_price <= 0:
-        return {"action": "NO ACTIVE POSITION", "confidence": 0, "risk": 0, "trail_sl": 0.0, "profit_pct": 0.0, "reasons": ["Active trade details not entered."]}
-    profit_pct = ((entry_price - current_price) / entry_price) * 100.0
-    reasons = [f"Premium move from ₹{entry_price:.2f} to ₹{current_price:.2f}: approx {profit_pct:.1f}% in seller favour."]
-    opposite = (side == "CE" and final_trade == "SELL PE") or (side == "PE" and final_trade == "SELL CE")
-    if shock_score >= 78 or gamma_score >= 78:
-        reasons += ["Shock/Gamma risk high.", "Capital protection priority."]
-        return {"action": "EXIT NOW", "confidence": 88, "risk": max(shock_score, gamma_score), "trail_sl": 0.0, "profit_pct": profit_pct, "reasons": reasons}
-    if opposite and confidence >= 60:
-        reasons += ["Fresh AI direction is opposite to current sold side.", "Hold risk has increased."]
-        return {"action": "EXIT / BOOK PROFIT", "confidence": 82, "risk": max(shock_score, gamma_score), "trail_sl": 0.0, "profit_pct": profit_pct, "reasons": reasons}
-    if profit_pct >= 30 and (shock_score >= 55 or gamma_score >= 60):
-        reasons += ["Good profit available but risk is rising.", "Book full/partial profit is safer."]
-        return {"action": "BOOK PROFIT", "confidence": 84, "risk": max(shock_score, gamma_score), "trail_sl": 0.0, "profit_pct": profit_pct, "reasons": reasons}
-    if profit_pct >= 22 and theta_score >= 60 and shock_score < 55:
-        trail = round(max(current_price * 1.15, current_price + 3), 2)
-        reasons += ["Theta decay still supportive.", f"Trail SL around ₹{trail:.2f} premium."]
-        return {"action": "HOLD + TRAIL SL", "confidence": 78, "risk": shock_score, "trail_sl": trail, "profit_pct": profit_pct, "reasons": reasons}
-    if theta_score >= 65 and shock_score < 50 and gamma_score < 55:
-        reasons += ["Theta favourable and live danger controlled."]
-        return {"action": "HOLD", "confidence": 70, "risk": shock_score, "trail_sl": 0.0, "profit_pct": profit_pct, "reasons": reasons}
-    reasons += ["No strong edge for aggressive hold.", "Tight SL recommended."]
-    return {"action": "TIGHTEN SL", "confidence": 62, "risk": max(shock_score, gamma_score), "trail_sl": round(current_price * 1.10, 2), "profit_pct": profit_pct, "reasons": reasons}
-
-
-def discipline_status(trades_taken, daily_loss_hit, confidence, seller_risk):
-    if daily_loss_hit:
-        return "STOP TRADING TODAY", 15, "Daily loss hit: recovery/revenge trade avoid karo."
-    if trades_taken >= 3:
-        return "OVERTRADING WARNING", 35, "3 or more trades: discipline mode active."
-    if confidence < 58:
-        return "NO TRADE - LOW CONFIDENCE", 45, "AI confidence low hai. Wait is better."
-    if seller_risk >= 70:
-        return "RISK HIGH - REDUCE SIZE", 55, "Seller risk high hai; quantity reduce/avoid."
-    return "DISCIPLINE OK", 85, "Rules ke andar trade allowed only if setup clear."
-
-
-def trade_quality_score(confidence, seller_risk, shock_score):
-    return int(round(clamp(confidence * 0.55 + (100 - seller_risk) * 0.25 + (100 - shock_score) * 0.20)))
-
-
-# =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V6 Seller Intelligence")
+st.sidebar.title("⚙️ V7.1 Seller Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1156,16 +1047,6 @@ with st.sidebar.expander("8️⃣ Risk / Position", expanded=True):
     margin_per_lot = st.number_input("Margin Per Lot ₹", value=100000, step=5000)
     current_lots = int(st.number_input("Current Lots", value=0, step=1))
     lot_size = int(st.number_input("Lot Size", value=50, step=25))
-
-
-with st.sidebar.expander("9️⃣ V7 Active Trade / Discipline", expanded=True):
-    active_side = st.selectbox("Active Sold Side", ["None", "CE", "PE"])
-    active_strike = int(st.number_input("Active Strike", value=0, step=50))
-    active_entry_price = st.number_input("Entry Premium ₹", value=0.0, step=0.05)
-    active_current_price = st.number_input("Current Premium ₹", value=0.0, step=0.05)
-    active_lots = int(st.number_input("Active Lots", value=0, step=1))
-    trades_taken_today = int(st.number_input("Trades Taken Today", value=0, step=1))
-    daily_loss_hit = st.checkbox("Daily Loss Hit / Stop Trading", value=False)
 
 
 # =========================================================
@@ -1401,25 +1282,13 @@ sl_points = round(max(atr5 * (1.25 if seller_risk < 50 else 1.6), 20), 2)
 target_points = round(max(atr5 * 0.85, 15), 2)
 
 
-# V7 advanced management layer
-market_mode, dte = detect_expiry_mode(selected_expiry, news["score"])
-is_expiry_mode = market_mode in ("EXPIRY MODE", "NEAR EXPIRY MODE")
-time_risk, time_zone_label = historical_time_zone_risk(is_expiry_mode)
-theta_score_v7, active_profit_pct = theta_decay_score(is_expiry_mode, active_entry_price, active_current_price)
-gamma_score_v7 = gamma_risk_score(is_expiry_mode, vix_change_pct, time_risk, option_bias, heavy_bias)
-shock_score_v7 = shock_probability_score(time_risk, vix_risk, option_bias, heavy_bias, news["score"])
-position_ai = active_position_manager(active_side, active_strike, active_entry_price, active_current_price, active_lots, theta_score_v7, gamma_score_v7, shock_score_v7, final_trade, confidence)
-discipline_text, discipline_score, discipline_reason = discipline_status(trades_taken_today, daily_loss_hit, confidence, seller_risk)
-trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
-
-
 # =========================================================
 # UI
 # =========================================================
 market_text, day_name = market_status()
 source_text = "DhanHQ" if (nifty_source == "DhanHQ" or option_chain.get("success")) else "Fallback"
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V6</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V7.1</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -1431,10 +1300,6 @@ r2.markdown(f"<div class='ribbon'>Data: {source_text}</div>", unsafe_allow_html=
 r3.markdown(f"<div class='ribbon'>News {news['label']} {news['score']}/100</div>", unsafe_allow_html=True)
 r4.markdown(f"<div class='ribbon'>HW: {bias_label(heavy_bias)}</div>", unsafe_allow_html=True)
 r5.markdown(f"<div class='ribbon'>PCR: {pcr:.2f}</div>", unsafe_allow_html=True)
-r6, r7, r8 = st.columns(3)
-r6.markdown(f"<div class='ribbon'>Mode: {market_mode}</div>", unsafe_allow_html=True)
-r7.markdown(f"<div class='ribbon'>Shock: {shock_score_v7}/100</div>", unsafe_allow_html=True)
-r8.markdown(f"<div class='ribbon'>Discipline: {discipline_score}/100</div>", unsafe_allow_html=True)
 
 if final_trade == "SELL PE":
     card_class = "card-green"
@@ -1457,7 +1322,6 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
-    <p><b>V7 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -1471,41 +1335,6 @@ elif final_trade == "SELL CE":
     st.error("CE side preferred — hedge aur strict SL ke saath. Short-covering warning ko ignore mat karo.")
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
-
-
-# V7 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V7 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
-    if active_side == "None" or active_lots <= 0:
-        st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
-    else:
-        p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Position AI", position_ai["action"], f"Confidence {position_ai['confidence']}%")
-        p2.metric("Profit in Premium", f"{position_ai['profit_pct']:.1f}%")
-        p3.metric("Trail SL", f"₹{position_ai['trail_sl']:.2f}" if position_ai["trail_sl"] else "--")
-        p4.metric("Position Risk", f"{position_ai['risk']}/100")
-        for reason in position_ai["reasons"]:
-            st.write("✔", reason)
-        if position_ai["action"] == "EXIT NOW":
-            st.error("🔴 EXIT NOW: market structure/risk seller ke against ho raha hai.")
-        elif "BOOK" in position_ai["action"]:
-            st.warning("🟡 Profit secure karna better ho sakta hai.")
-        elif "HOLD" in position_ai["action"]:
-            st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
-
-with st.expander("🧠 V7 Expiry + Shock + Discipline Engine", expanded=True):
-    e1, e2, e3, e4, e5 = st.columns(5)
-    e1.metric("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
-    e2.metric("Historical Zone", f"{time_risk}/100", time_zone_label)
-    e3.metric("Theta Score", f"{theta_score_v7}/100")
-    e4.metric("Gamma Risk", f"{gamma_score_v7}/100")
-    e5.metric("Shock Risk", f"{shock_score_v7}/100")
-    st.write(f"**Discipline:** {discipline_text} — {discipline_reason}")
-    if shock_score_v7 >= 75:
-        st.error("🚨 High Shock Probability: new selling avoid / SL tight / profit protect.")
-    elif shock_score_v7 >= 55:
-        st.warning("⚠️ Caution Zone: quantity small, SL tight, hold decision data se confirm karo.")
-    else:
-        st.success("✅ Shock risk controlled by current inputs.")
 
 # Compact source status
 st.markdown(
