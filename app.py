@@ -1409,6 +1409,33 @@ def v13_today_journal_row(df):
         return None
 
 
+def v134_journal_row_by_date(df, target_date):
+    try:
+        if df is None or df.empty or target_date is None:
+            return None
+        d = df.copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce").dt.date
+        rows = d[d["Date"] == pd.to_datetime(target_date).date()]
+        if rows.empty:
+            return None
+        return rows.iloc[-1].to_dict()
+    except Exception:
+        return None
+
+def v134_latest_journal_date(df):
+    try:
+        if df is None or df.empty:
+            return now_ist().date()
+        d = df.copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+        d = d.dropna(subset=["Date"]).sort_values("Date")
+        if d.empty:
+            return now_ist().date()
+        return d["Date"].iloc[-1].date()
+    except Exception:
+        return now_ist().date()
+
+
 def v132_vix_range_engine(nifty_price, india_vix):
     """India VIX expected daily range for option sellers.
     Shortcut used by traders: VIX / 16 ≈ expected 1-day move percentage.
@@ -1610,44 +1637,57 @@ with st.sidebar.expander("4️⃣ Manual Option Fallback", expanded=False):
     manual_pe_strike = int(st.number_input("Manual PE Sell Strike", value=24900, step=50))
     hedge_gap = int(st.number_input("Hedge Gap", value=100, step=50))
 
-with st.sidebar.expander("5️⃣ FII / DII — Daily Manual", expanded=True):
+with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True):
     _quick_journal_df = v102_load_fii_dii_journal()
-    _today_saved = v13_today_journal_row(_quick_journal_df)
-    _default_fii_today = float((_today_saved or {}).get("FII Cash Cr", 0.0) or 0.0)
-    _default_dii_today = float((_today_saved or {}).get("DII Cash Cr", 0.0) or 0.0)
+    _default_data_date = v134_latest_journal_date(_quick_journal_df)
+    fii_data_date = st.date_input("FII/DII Data Date", value=_default_data_date, key="v134_fii_data_date")
+    _saved_row_for_date = v134_journal_row_by_date(_quick_journal_df, fii_data_date)
+    _default_fii_today = float((_saved_row_for_date or {}).get("FII Cash Cr", 0.0) or 0.0)
+    _default_dii_today = float((_saved_row_for_date or {}).get("DII Cash Cr", 0.0) or 0.0)
     _quick_stats = v102_journal_stats(_quick_journal_df)
-    fii_today = st.number_input("FII Today ₹ Cr", value=_default_fii_today, step=100.0, key="v13_fii_today")
-    dii_today = st.number_input("DII Today ₹ Cr", value=_default_dii_today, step=100.0, key="v13_dii_today")
-    fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=float(_quick_stats.get("fii_5", 0.0)), step=100.0, key="v13_fii_5day")
-    dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=float(_quick_stats.get("dii_5", 0.0)), step=100.0, key="v13_dii_5day")
-    _bias_default = str((_today_saved or {}).get("FII Index Futures Bias", "Neutral") or "Neutral")
-    fii_index_futures_bias = st.selectbox("FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_bias_default) if _bias_default in ["Neutral", "Bullish", "Bearish"] else 0, key="v13_fut_bias")
-    if st.button("💾 Save Today FII/DII", use_container_width=True):
+    _date_key = pd.to_datetime(fii_data_date).strftime("%Y%m%d")
+    fii_today = st.number_input("FII Cash ₹ Cr", value=_default_fii_today, step=100.0, key=f"v134_fii_today_{_date_key}")
+    dii_today = st.number_input("DII Cash ₹ Cr", value=_default_dii_today, step=100.0, key=f"v134_dii_today_{_date_key}")
+    fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=float(_quick_stats.get("fii_5", 0.0)), step=100.0, key="v134_fii_5day")
+    dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=float(_quick_stats.get("dii_5", 0.0)), step=100.0, key="v134_dii_5day")
+    _bias_default = str((_saved_row_for_date or {}).get("FII Index Futures Bias", "Neutral") or "Neutral")
+    fii_index_futures_bias = st.selectbox("FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_bias_default) if _bias_default in ["Neutral", "Bullish", "Bearish"] else 0, key=f"v134_fut_bias_{_date_key}")
+    if _saved_row_for_date:
+        st.success(f"{pd.to_datetime(fii_data_date).strftime('%d-%m-%Y')} ka saved data loaded.")
+    else:
+        st.info("Is date ka data abhi save nahi hai.")
+    if st.button("💾 Save Selected Date FII/DII", use_container_width=True):
         _new_row = pd.DataFrame([{
-            "Date": now_ist().date(),
+            "Date": fii_data_date,
             "FII Cash Cr": fii_today,
             "DII Cash Cr": dii_today,
             "FII Index Futures Bias": fii_index_futures_bias,
             "FII Options Bias": "Neutral",
-            "Notes": "Saved from quick manual fields",
+            "Notes": "Saved from date-wise manual fields",
         }])
         _save_df = pd.concat([_quick_journal_df, _new_row], ignore_index=True)
         _save_df["Date"] = pd.to_datetime(_save_df["Date"], errors="coerce")
         _save_df = _save_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
         if v102_save_fii_dii_journal(_save_df):
-            st.success("Saved. Refresh ke baad bhi data rahega.")
+            st.success("Saved. Ab date change karoge to usi date ka data load hoga.")
         else:
             st.error("Save failed.")
-    st.caption("Save button dabane ke baad ye data refresh/restart ke baad bhi rahega.")
+    st.caption("Bug fix: har date ka data alag save/load hoga; 02-07 aur 03-07 mix nahi honge.")
 
 with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=False):
     fii_journal_df = v102_load_fii_dii_journal()
-    journal_date = st.date_input("Date")
-    journal_fii = st.number_input("Journal FII Cash ₹ Cr", value=0.0, step=100.0)
-    journal_dii = st.number_input("Journal DII Cash ₹ Cr", value=0.0, step=100.0)
-    journal_fut_bias = st.selectbox("Journal FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], key="journal_fut_bias")
-    journal_opt_bias = st.selectbox("Journal FII Options Bias", ["Neutral", "Bullish", "Bearish"], key="journal_opt_bias")
-    journal_notes = st.text_input("Notes", value="")
+    journal_date = st.date_input("Date", value=v134_latest_journal_date(fii_journal_df), key="v134_journal_date")
+    _journal_existing = v134_journal_row_by_date(fii_journal_df, journal_date)
+    _jkey = pd.to_datetime(journal_date).strftime("%Y%m%d")
+    journal_fii = st.number_input("Journal FII Cash ₹ Cr", value=float((_journal_existing or {}).get("FII Cash Cr", 0.0) or 0.0), step=100.0, key=f"journal_fii_{_jkey}")
+    journal_dii = st.number_input("Journal DII Cash ₹ Cr", value=float((_journal_existing or {}).get("DII Cash Cr", 0.0) or 0.0), step=100.0, key=f"journal_dii_{_jkey}")
+    _jfut = str((_journal_existing or {}).get("FII Index Futures Bias", "Neutral") or "Neutral")
+    _jopt = str((_journal_existing or {}).get("FII Options Bias", "Neutral") or "Neutral")
+    journal_fut_bias = st.selectbox("Journal FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_jfut) if _jfut in ["Neutral", "Bullish", "Bearish"] else 0, key=f"journal_fut_bias_{_jkey}")
+    journal_opt_bias = st.selectbox("Journal FII Options Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_jopt) if _jopt in ["Neutral", "Bullish", "Bearish"] else 0, key=f"journal_opt_bias_{_jkey}")
+    journal_notes = st.text_input("Notes", value=str((_journal_existing or {}).get("Notes", "") or ""), key=f"journal_notes_{_jkey}")
+    if _journal_existing:
+        st.success("Selected date ka saved row loaded.")
     col_j1, col_j2 = st.columns(2)
     if col_j1.button("Save FII/DII Day"):
         new_row = pd.DataFrame([{
