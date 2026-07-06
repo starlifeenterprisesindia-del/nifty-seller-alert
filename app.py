@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V13",
+    page_title="Nifty Seller AI Dashboard V13.2",
     page_icon="🧠",
     layout="wide",
 )
@@ -1408,13 +1408,67 @@ def v13_today_journal_row(df):
     except Exception:
         return None
 
+
+def v132_vix_range_engine(nifty_price, india_vix):
+    """India VIX expected daily range for option sellers.
+    Shortcut used by traders: VIX / 16 ≈ expected 1-day move percentage.
+    This is an estimate, not a guarantee.
+    """
+    try:
+        spot = float(nifty_price)
+        vixv = float(india_vix)
+    except Exception:
+        spot, vixv = 0.0, 0.0
+    if spot <= 0 or vixv <= 0:
+        return {
+            "ok": False, "move_pct": 0.0, "move_points": 0.0, "upper": 0.0, "lower": 0.0,
+            "position": "Unavailable", "risk": "UNKNOWN", "message": "VIX range unavailable."
+        }
+    move_pct = vixv / 16.0
+    move_points = spot * move_pct / 100.0
+    upper = spot + move_points
+    lower = spot - move_points
+    # Position inside the estimated band using current spot as centre. Kept for UI symmetry.
+    width = max(upper - lower, 1.0)
+    pct_from_lower = clamp(((spot - lower) / width) * 100.0)
+    if move_pct >= 1.35:
+        risk = "HIGH RANGE"
+    elif move_pct >= 0.90:
+        risk = "MEDIUM RANGE"
+    else:
+        risk = "LOW RANGE"
+    return {
+        "ok": True,
+        "move_pct": move_pct,
+        "move_points": move_points,
+        "upper": upper,
+        "lower": lower,
+        "pct_from_lower": pct_from_lower,
+        "position": "Middle of expected range",
+        "risk": risk,
+        "message": f"Expected 1-day move approx ±{move_points:.0f} pts ({move_pct:.2f}%)."
+    }
+
+
+def v132_vix_trade_note(final_trade, price, vix_range):
+    if not vix_range.get("ok"):
+        return "VIX range unavailable."
+    move_points = vix_range.get("move_points", 0)
+    if final_trade == "WAIT":
+        return "Final AI WAIT hai; VIX range sirf observation ke liye use karo."
+    if move_points <= 120:
+        return "Expected range tight hai; premium selling ke liye theta support ho sakta hai, par breakout SL zaroor rakho."
+    if move_points >= 250:
+        return "Expected range wide hai; seller risk high ho sakta hai. Lot size reduce/tight SL better."
+    return "Expected range normal hai; entry tabhi jab OI + price action + heavyweight agree kare."
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V13 Trade Ticket Intelligence")
+st.sidebar.title("⚙️ V13.2 Trade Ticket Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -2485,6 +2539,7 @@ except NameError:
 # UI
 # =========================================================
 market_text, day_name = market_status()
+vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 top_refresh_col, top_auto_col, top_time_col = st.columns([1, 1, 2])
@@ -2496,7 +2551,7 @@ if _auto_refresh_on and market_text == "Market Open":
     st.markdown("<meta http-equiv='refresh' content='60'>", unsafe_allow_html=True)
 top_time_col.caption(f"Last update: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V13</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V13.2</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -2519,6 +2574,22 @@ if "INVALID/EXPIRED" in source_text:
     st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
 elif "Fallback" in source_text:
     st.info("Observation Mode: live option-chain complete nahi hai. Real trade se pehle Dhan data verify karo.")
+
+# V13.2: India VIX Expected Range Engine
+if vix_range.get("ok"):
+    vr1, vr2, vr3, vr4 = st.columns(4)
+    vr1.metric("VIX Expected Move", f"±{vix_range['move_points']:.0f} pts", f"{vix_range['move_pct']:.2f}%")
+    vr2.metric("Upper Range", f"{vix_range['upper']:.0f}")
+    vr3.metric("Lower Range", f"{vix_range['lower']:.0f}")
+    vr4.metric("Range Risk", vix_range['risk'])
+    st.caption("India VIX shortcut: VIX ÷ 16 ≈ expected 1-day % move. Ye guarantee nahi, sirf option-seller range estimate hai.")
+    _vix_note = v132_vix_trade_note(final_trade, price, vix_range)
+    if vix_range['risk'] == "HIGH RANGE":
+        st.warning("📊 VIX Range Engine: " + _vix_note)
+    else:
+        st.info("📊 VIX Range Engine: " + _vix_note)
+else:
+    st.info("📊 VIX Range Engine unavailable: VIX/price data missing.")
 
 if final_trade == "SELL PE":
     card_class = "card-green"
@@ -2593,6 +2664,16 @@ with st.expander("🎯 V13.1 Final Action Plan — Trade / No Trade", expanded=T
         for reason in data_quality_reasons:
             st.write("•", reason)
 
+
+with st.expander("📊 V13.2 India VIX Range Engine — Expected Move", expanded=False):
+    if vix_range.get("ok"):
+        st.write(f"**India VIX:** {vix:.2f}")
+        st.write(f"**Formula:** VIX ÷ 16 = {vix_range['move_pct']:.2f}% expected 1-day move")
+        st.write(f"**Nifty Expected Range:** {vix_range['lower']:.0f} to {vix_range['upper']:.0f} (approx ±{vix_range['move_points']:.0f} points)")
+        st.write("**Use:** Agar price expected range ke edge ke paas ho to fresh option selling me extra caution. Agar market range ke beech ho aur OI/price action support kare to setup safer ho sakta hai.")
+        st.caption("Note: News/event days par market VIX range se bahar bhi ja sakta hai.")
+    else:
+        st.info(vix_range.get("message", "VIX range unavailable."))
 
 
 with st.expander("🧠 V10 Probability + Conflict Brain", expanded=True):
