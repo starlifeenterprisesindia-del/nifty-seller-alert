@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V13.3",
+    page_title="Nifty Seller AI Dashboard V14.0",
     page_icon="🧠",
     layout="wide",
 )
@@ -1630,13 +1630,178 @@ def v133_fake_move_engine(price_action_bias, option_bias, heavy_bias, pcr, vix, 
         'confirmations': confirmations[:3],
     }
 
+
+# =========================================================
+# V14 AI BRAIN UPGRADE: MEMORY + FREEZE + REGIME + CANDLE
+# =========================================================
+def v14_snapshot_engine(snapshot, max_len=20):
+    """Rolling memory: sirf last 20 snapshots session_state me rakhe. App slow nahi hogi."""
+    hist = st.session_state.get("v14_memory", [])
+    sid = str(snapshot.get("snapshot_id", ""))
+    if not hist or str(hist[-1].get("snapshot_id", "")) != sid:
+        hist.append(snapshot)
+        hist = hist[-int(max_len):]
+        st.session_state["v14_memory"] = hist
+    return hist
+
+
+def v14_decision_freeze(proposed_trade, confidence, history, required=3):
+    """Trade signal tabhi confirm jab same non-WAIT signal required refreshes tak rahe."""
+    proposed = str(proposed_trade or "WAIT")
+    recent = [str(x.get("proposed_trade", "WAIT")) for x in history[-int(required):]]
+    same_count = 0
+    for sig in reversed(recent):
+        if sig == proposed:
+            same_count += 1
+        else:
+            break
+    if proposed == "WAIT":
+        return {
+            "final_trade": "WAIT",
+            "confirmed": False,
+            "same_count": same_count,
+            "required": required,
+            "status": "WAIT MODE",
+            "reason": "AI currently WAIT mode me hai.",
+            "confidence": confidence,
+        }
+    if same_count >= required:
+        return {
+            "final_trade": proposed,
+            "confirmed": True,
+            "same_count": same_count,
+            "required": required,
+            "status": "SIGNAL CONFIRMED",
+            "reason": f"{proposed} signal {same_count} refresh se stable hai.",
+            "confidence": confidence,
+        }
+    return {
+        "final_trade": "WAIT",
+        "confirmed": False,
+        "same_count": same_count,
+        "required": required,
+        "status": "FREEZE ACTIVE",
+        "reason": f"{proposed} signal abhi {same_count}/{required} refresh confirm hua hai. Jaldbazi avoid.",
+        "confidence": min(float(confidence or 0), 60),
+    }
+
+
+def v14_confidence_stability(history, current_trade, confidence):
+    if not history:
+        return {"score": 0, "label": "NO MEMORY", "note": "First refresh."}
+    recent = history[-5:]
+    decisions = [str(x.get("proposed_trade", "WAIT")) for x in recent]
+    same = sum(1 for d in decisions if d == str(current_trade))
+    decision_score = same / max(len(decisions), 1) * 100
+    confs = [float(x.get("confidence", 0) or 0) for x in recent]
+    conf_range = max(confs) - min(confs) if confs else 0
+    penalty = min(conf_range * 1.2, 35)
+    score = int(round(clamp(decision_score - penalty, 0, 100)))
+    if score >= 80:
+        label = "STABLE"
+    elif score >= 55:
+        label = "MEDIUM"
+    else:
+        label = "UNSTABLE"
+    return {"score": score, "label": label, "note": f"Last {len(recent)} refresh decisions: " + " → ".join(decisions)}
+
+
+def v14_market_regime(price_action_bias, option_bias, heavy_bias, vix, shock_score, gamma_score, is_expiry=False, time_risk=0):
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    vixv = v91_safe_num(vix)
+    shock = v91_safe_num(shock_score)
+    gamma = v91_safe_num(gamma_score)
+    tr = v91_safe_num(time_risk)
+    aligned_bull = pa >= 25 and ob >= 25 and hw >= 10
+    aligned_bear = pa <= -25 and ob <= -25 and hw <= -10
+    if is_expiry and (gamma >= 65 or tr >= 70):
+        return {"label": "⚡ EXPIRY GAMMA DAY", "score": 90, "note": "Expiry + gamma/time risk high. Fresh entry only after confirmation."}
+    if shock >= 70 or vixv >= 18:
+        return {"label": "🔴 VOLATILE DAY", "score": 75, "note": "Shock/VIX elevated. Quantity reduce, SL strict."}
+    if aligned_bull or aligned_bear:
+        return {"label": "🟢 TRENDING DAY", "score": 82, "note": "Price action, option-chain aur heavyweights same direction me hain."}
+    if abs(pa) <= 30 and abs(ob) <= 35 and vixv <= 15:
+        return {"label": "🟡 RANGE DAY", "score": 68, "note": "Directional edge limited. Premium decay strategies better."}
+    return {"label": "⚪ MIXED DAY", "score": 50, "note": "Signals mixed hain. Decision Freeze follow karo."}
+
+
+def v14_candle_confirmation(open_, high_, low_, close_, final_direction):
+    o = v91_safe_num(open_)
+    h = v91_safe_num(high_)
+    l = v91_safe_num(low_)
+    c = v91_safe_num(close_)
+    rng = max(h - l, 0.01)
+    body = abs(c - o)
+    upper_wick = h - max(o, c)
+    lower_wick = min(o, c) - l
+    pattern = "Neutral Candle"
+    score = 0
+    note = "15m candle neutral hai."
+    if body <= rng * 0.18:
+        pattern, score, note = "Doji / Indecision", 0, "Decision weak: next 15m close ka wait better."
+    elif c > o and body >= rng * 0.55:
+        pattern, score, note = "Strong Bullish 15m", 12, "Bullish close PE-sell setup ko confirm kar sakta hai."
+    elif c < o and body >= rng * 0.55:
+        pattern, score, note = "Strong Bearish 15m", -12, "Bearish close CE-sell setup ko confirm kar sakta hai."
+    if upper_wick >= rng * 0.45 and c < h - rng * 0.30:
+        pattern, score, note = "Upper Wick Rejection", min(score, -8), "Upar rejection: bullish move fake ho sakta hai."
+    if lower_wick >= rng * 0.45 and c > l + rng * 0.30:
+        pattern, score, note = "Lower Wick Rejection", max(score, 8), "Neeche rejection: bearish move fake ho sakta hai."
+    fd = v91_safe_num(final_direction)
+    aligned = (score > 0 and fd > 0) or (score < 0 and fd < 0) or abs(score) < 3
+    return {"pattern": pattern, "score": int(score), "aligned": aligned, "note": note}
+
+
+def v14_seller_strength(best_ce, best_pe, option_bias):
+    ce = int(best_ce.get("ce_sell_score", 0)) if best_ce else 0
+    pe = int(best_pe.get("pe_sell_score", 0)) if best_pe else 0
+    ob = v91_safe_num(option_bias)
+    ce_strength = int(clamp(ce + max(-ob, 0) * 0.20, 0, 100))
+    pe_strength = int(clamp(pe + max(ob, 0) * 0.20, 0, 100))
+    if ce_strength > pe_strength + 10:
+        winner = "CE Sellers Strong"
+    elif pe_strength > ce_strength + 10:
+        winner = "PE Sellers Strong"
+    else:
+        winner = "Balanced"
+    return {"ce": ce_strength, "pe": pe_strength, "winner": winner}
+
+
+def v14_entry_window(market_mode, time_risk, confidence, stability_score, freeze_confirmed, seller_risk):
+    t = now_ist().time()
+    if "EXPIRY" in str(market_mode) and datetime.strptime("14:30", "%H:%M").time() <= t:
+        return {"label": "NO FRESH ENTRY", "note": "Expiry last hour: gamma spike risk. Sirf manage/exit focus."}
+    if seller_risk >= 70 or time_risk >= 75:
+        return {"label": "WAIT", "note": "Risk zone high hai. Confirmation ke bina entry avoid."}
+    if freeze_confirmed and confidence >= 70 and stability_score >= 70:
+        return {"label": "ENTRY WINDOW OPEN", "note": "Signal stable + confidence acceptable. Hedge/SL mandatory."}
+    if confidence >= 60:
+        return {"label": "WAIT FOR CONFIRMATION", "note": "Setup ban raha hai, par Freeze/Stability abhi complete nahi."}
+    return {"label": "NO EDGE", "note": "Confidence low hai. No trade bhi valid trade hai."}
+
+
+def v14_reason_breakdown(price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, fake_move_score, vix_risk, seller_risk):
+    items = [
+        ("Price Action", v91_safe_num(price_action_bias) * 0.12),
+        ("Option Chain / OI", v91_safe_num(option_bias) * 0.14),
+        ("Heavyweights", v91_safe_num(heavy_bias) * 0.10),
+        ("FII/DII", v91_safe_num(smart_money_bias) * 0.08),
+        ("PCR", v91_safe_num(pcr_bias) * 0.08),
+        ("Fake Move Risk", -v91_safe_num(fake_move_score) * 0.10),
+        ("VIX Risk", -v91_safe_num(vix_risk) * 0.06),
+        ("Seller Risk", -v91_safe_num(seller_risk) * 0.05),
+    ]
+    return [(name, int(round(val))) for name, val in items]
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V13.3 Trade Ticket Intelligence")
+st.sidebar.title("⚙️ V14.0 AI Brain Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1668,6 +1833,13 @@ with st.sidebar.expander("3️⃣ Price Action", expanded=False):
     today_low = st.number_input("Today Low", value=24920.0, step=1.0)
     opening_range_high = st.number_input("Opening Range High", value=25060.0, step=1.0)
     opening_range_low = st.number_input("Opening Range Low", value=24940.0, step=1.0)
+
+with st.sidebar.expander("3B 🕯️ 15m Candle Confirmation", expanded=False):
+    st.caption("Optional: 15-min candle values chart se daalo. Empty/default rahe to app price-action proxy use karegi.")
+    candle15_open = st.number_input("15m Open", value=manual_nifty, step=1.0)
+    candle15_high = st.number_input("15m High", value=manual_nifty + 40.0, step=1.0)
+    candle15_low = st.number_input("15m Low", value=manual_nifty - 40.0, step=1.0)
+    candle15_close = st.number_input("15m Close", value=manual_nifty, step=1.0)
 
 with st.sidebar.expander("4️⃣ Manual Option Fallback", expanded=False):
     manual_call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
@@ -2111,6 +2283,73 @@ if conflict_mode and final_trade != "WAIT":
     suggested_lots = 0
     trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
 
+
+# V14 AI Brain Upgrade: rolling memory + decision freeze + stability.
+proposed_trade_v14 = final_trade
+try:
+    vix_range = v132_vix_range_engine(price, vix)
+except Exception:
+    vix_range = {"ok": False}
+
+candle15 = v14_candle_confirmation(
+    locals().get("candle15_open", price),
+    locals().get("candle15_high", price),
+    locals().get("candle15_low", price),
+    locals().get("candle15_close", price),
+    final_direction,
+)
+# Candle is confirmation only: low weight, no overreaction.
+if candle15.get("aligned") and proposed_trade_v14 != "WAIT":
+    confidence = clamp(confidence + min(abs(candle15.get("score", 0)), 6), 0, 98)
+elif not candle15.get("aligned") and proposed_trade_v14 != "WAIT":
+    confidence = min(confidence, 68)
+
+v14_snapshot = {
+    "snapshot_id": f"{fmt_time()}|{price:.2f}|{vix:.2f}|{proposed_trade_v14}|{round(option_bias,2)}|{round(heavy_bias,2)}",
+    "time": fmt_time(),
+    "price": float(price),
+    "vix": float(vix),
+    "pcr": float(pcr),
+    "option_bias": float(option_bias),
+    "heavy_bias": float(heavy_bias),
+    "price_action_bias": float(price_action_bias),
+    "proposed_trade": proposed_trade_v14,
+    "confidence": float(confidence),
+}
+v14_memory = v14_snapshot_engine(v14_snapshot, max_len=20)
+v14_freeze = v14_decision_freeze(proposed_trade_v14, confidence, v14_memory, required=3)
+v14_stability = v14_confidence_stability(v14_memory, proposed_trade_v14, confidence)
+v14_regime = v14_market_regime(price_action_bias, option_bias, heavy_bias, vix, shock_score_v7, gamma_score_v7, is_expiry_mode, time_risk)
+v14_seller_strength = v14_seller_strength(best_ce, best_pe, option_bias)
+
+# Freeze rule: ek refresh ke signal par trade nahi. Stable confirmation ke baad hi final trade allow.
+if proposed_trade_v14 != "WAIT" and not v14_freeze.get("confirmed"):
+    final_trade = "WAIT"
+    confidence = v14_freeze.get("confidence", min(confidence, 60))
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+    suggested_lots = 0
+elif proposed_trade_v14 != "WAIT" and v14_freeze.get("confirmed"):
+    final_trade = proposed_trade_v14
+
+# Re-select strike only if freeze allowed trade.
+if final_trade == "SELL PE":
+    selected_strike = f"{pe_strike} PE"
+    hedge = f"{pe_strike - hedge_gap} PE"
+    selected_strike_score = best_pe.get("pe_sell_score", 0) if best_pe else 0
+elif final_trade == "SELL CE":
+    selected_strike = f"{ce_strike} CE"
+    hedge = f"{ce_strike + hedge_gap} CE"
+    selected_strike_score = best_ce.get("ce_sell_score", 0) if best_ce else 0
+
+if final_trade == "WAIT":
+    sl_display = "No Trade"
+    target_display = "No Trade"
+
+trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
+v14_entry = v14_entry_window(market_mode, time_risk, confidence, v14_stability.get("score", 0), v14_freeze.get("confirmed", False), seller_risk)
+v14_reason_items = v14_reason_breakdown(price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, 0, vix_risk, seller_risk)
 
 
 # V9.1 stable defaults: prevent NameError if any earlier block skipped.
@@ -2757,7 +2996,7 @@ if _auto_refresh_on and market_text == "Market Open":
     st.markdown("<meta http-equiv='refresh' content='60'>", unsafe_allow_html=True)
 top_time_col.caption(f"Last update: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V13.3</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V14.0</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -2780,6 +3019,33 @@ if "INVALID/EXPIRED" in source_text:
     st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
 elif "Fallback" in source_text:
     st.info("Observation Mode: live option-chain complete nahi hai. Real trade se pehle Dhan data verify karo.")
+
+# V14 AI Brain top panel
+st.markdown("### 🧠 V14 AI Brain — Memory + Freeze + Regime")
+v14c1, v14c2, v14c3, v14c4, v14c5 = st.columns(5)
+v14c1.metric("AI Proposed", proposed_trade_v14)
+v14c2.metric("Freeze", v14_freeze["status"], f"{v14_freeze['same_count']}/{v14_freeze['required']}")
+v14c3.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
+v14c4.metric("Market Regime", v14_regime["label"])
+v14c5.metric("Entry Window", v14_entry["label"])
+if v14_freeze["status"] == "FREEZE ACTIVE":
+    st.warning("🧊 Decision Freeze: " + v14_freeze["reason"])
+elif v14_freeze["status"] == "SIGNAL CONFIRMED":
+    st.success("✅ Decision Freeze: " + v14_freeze["reason"])
+else:
+    st.info("🧊 Decision Freeze: " + v14_freeze["reason"])
+st.caption(v14_regime["note"] + " | " + v14_entry["note"])
+with st.expander("🔎 V14 Details — Memory, Candle, Seller Strength, Reasoning", expanded=False):
+    st.write("**Memory:**", v14_stability["note"])
+    st.write(f"**15m Candle Confirmation:** {candle15['pattern']} | Score {candle15['score']} | {candle15['note']}")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("CE Seller Strength", f"{v14_seller_strength['ce']}/100")
+    s2.metric("PE Seller Strength", f"{v14_seller_strength['pe']}/100")
+    s3.metric("Winner", v14_seller_strength["winner"])
+    st.write("**AI Reason Breakdown:**")
+    for name, pts in v14_reason_items:
+        sign = "+" if pts >= 0 else ""
+        st.write(f"• {name}: {sign}{pts}")
 
 # V13.2: India VIX Expected Range Engine
 if vix_range.get("ok"):
