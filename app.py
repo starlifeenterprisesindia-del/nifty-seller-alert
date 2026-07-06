@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V13.2",
+    page_title="Nifty Seller AI Dashboard V13.3",
     page_icon="🧠",
     layout="wide",
 )
@@ -1462,13 +1462,113 @@ def v132_vix_trade_note(final_trade, price, vix_range):
         return "Expected range wide hai; seller risk high ho sakta hai. Lot size reduce/tight SL better."
     return "Expected range normal hai; entry tabhi jab OI + price action + heavyweight agree kare."
 
+
+def v133_fake_move_engine(price_action_bias, option_bias, heavy_bias, pcr, vix, gamma_score, shock_score, news_score, conflict_mode, final_trade, vix_range=None):
+    """Fake move probability meter for the WAIT / no-trade zone.
+    This is a decision-support filter, not a guarantee.
+    Higher score means confirmation is weak or signals are fighting each other.
+    """
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    news = v91_safe_num(news_score)
+
+    score = 15.0
+    reasons = []
+    confirmations = []
+
+    if conflict_mode:
+        score += 20
+        reasons.append('Major signal conflict active hai.')
+
+    if pa >= 45 and ob <= 15:
+        score += 18
+        reasons.append('Price upar hai, par option-chain support weak/negative hai.')
+    elif pa <= -45 and ob >= -15:
+        score += 18
+        reasons.append('Price neeche hai, par option-chain breakdown support weak/positive hai.')
+    else:
+        confirmations.append('Price action aur option-chain me severe mismatch nahi hai.')
+
+    if abs(pa - ob) >= 85:
+        score += 18
+        reasons.append('Price action aur OI/option bias me strong mismatch hai.')
+    elif abs(pa - ob) >= 55:
+        score += 10
+        reasons.append('Price action aur OI/option bias partially disagree kar rahe hain.')
+
+    if hw >= 35 and pa <= -25:
+        score += 12
+        reasons.append('Heavyweights support de rahe hain, lekin chart weak dikh raha hai.')
+    elif hw <= -35 and pa >= 25:
+        score += 12
+        reasons.append('Chart upar hai, lekin heavyweights pressure de rahe hain.')
+    else:
+        confirmations.append('Heavyweights me major opposite pressure nahi dikh raha.')
+
+    if pcrv < 0.80 and ob >= 35:
+        score += 10
+        reasons.append('PCR bearish zone me hai, par option bias bullish hai.')
+    elif pcrv > 1.55 and ob <= -35:
+        score += 10
+        reasons.append('PCR overheated bullish zone me hai, par option bias bearish hai.')
+
+    if gamma >= 70:
+        score += 14
+        reasons.append('Gamma risk high hai; spike/fake move ka chance badh sakta hai.')
+    if shock >= 65:
+        score += 12
+        reasons.append('Shock probability elevated hai.')
+    if news >= 70:
+        score += 12
+        reasons.append('News/event risk high hai.')
+
+    if vix_range and vix_range.get('ok') and vix_range.get('risk') == 'HIGH RANGE':
+        score += 8
+        reasons.append('VIX expected range wide hai; seller ko confirmation chahiye.')
+    elif vixv <= 14 and abs(pa - ob) < 45 and not conflict_mode:
+        confirmations.append('VIX low/normal hai aur conflict limited hai.')
+
+    if final_trade == 'WAIT':
+        score += 6
+        reasons.append('Final AI already WAIT mode me hai.')
+
+    score = int(round(clamp(score, 0, 100)))
+    if score >= 75:
+        label = 'HIGH FAKE MOVE RISK'
+        action = 'WAIT / no fresh entry. Confirmation candle + OI support ka wait karo.'
+        tone = 'error'
+    elif score >= 50:
+        label = 'MEDIUM FAKE MOVE RISK'
+        action = 'Small size ya avoid. Entry tabhi jab next refresh me same direction confirm ho.'
+        tone = 'warning'
+    else:
+        label = 'LOW FAKE MOVE RISK'
+        action = 'Fake move risk controlled, but hedge + SL mandatory.'
+        tone = 'success'
+
+    if not reasons:
+        reasons.append('Koi major fake-move warning active nahi hai.')
+    return {
+        'score': score,
+        'label': label,
+        'action': action,
+        'tone': tone,
+        'reasons': reasons[:5],
+        'confirmations': confirmations[:3],
+    }
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V13.2 Trade Ticket Intelligence")
+st.sidebar.title("⚙️ V13.3 Trade Ticket Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -2551,7 +2651,7 @@ if _auto_refresh_on and market_text == "Market Open":
     st.markdown("<meta http-equiv='refresh' content='60'>", unsafe_allow_html=True)
 top_time_col.caption(f"Last update: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V13.2</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V13.3</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -2626,6 +2726,41 @@ elif final_trade == "SELL CE":
     st.error("CE side preferred — hedge aur strict SL ke saath. Short-covering warning ko ignore mat karo.")
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
+
+# V13.3: Fake Move Detector placed exactly in the WAIT / no-clear-edge area.
+fake_move = v133_fake_move_engine(
+    price_action_bias=price_action_bias,
+    option_bias=option_bias,
+    heavy_bias=heavy_bias,
+    pcr=pcr,
+    vix=vix,
+    gamma_score=gamma_score_v7,
+    shock_score=shock_score_v7,
+    news_score=news["score"],
+    conflict_mode=conflict_mode,
+    final_trade=final_trade,
+    vix_range=vix_range,
+)
+fm1, fm2, fm3 = st.columns(3)
+fm1.metric("Fake Move Risk", f"{fake_move['score']}/100")
+fm2.metric("Fake Move Status", fake_move["label"])
+fm3.metric("AI Action", "WAIT" if fake_move["score"] >= 50 or final_trade == "WAIT" else final_trade)
+if fake_move["tone"] == "error":
+    st.error("🚨 " + fake_move["action"])
+elif fake_move["tone"] == "warning":
+    st.warning("⚠️ " + fake_move["action"])
+else:
+    st.success("✅ " + fake_move["action"])
+with st.expander("🚨 V13.3 Fake Move Detector — WAIT Zone", expanded=True):
+    st.write(f"**Status:** {fake_move['label']} ({fake_move['score']}/100)")
+    st.write(f"**Action:** {fake_move['action']}")
+    st.write("**Warning reasons:**")
+    for reason in fake_move["reasons"]:
+        st.write("•", reason)
+    if fake_move["confirmations"]:
+        st.write("**Positive confirmations:**")
+        for note in fake_move["confirmations"]:
+            st.write("✔", note)
 
 # V13: put the most actionable parts near the top for mobile trading.
 with st.expander("🎯 V13 Best Strategy Ranking — Top", expanded=True):
