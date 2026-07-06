@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V12",
+    page_title="Nifty Seller AI Dashboard V13",
     page_icon="🧠",
     layout="wide",
 )
@@ -52,6 +52,11 @@ st.markdown(
 .ribbon {padding: 10px 12px; border-radius: 14px; background: rgba(255,255,255,0.075); border: 1px solid rgba(255,255,255,0.10); text-align: center; font-weight: 750; margin-bottom: 8px;}
 .small-note {opacity: 0.74; font-size: 0.86rem;}
 .source-pill {padding: 5px 9px; border-radius: 10px; background: rgba(255,255,255,0.07); display: inline-block; margin-right: 6px; font-size: 0.84rem;}
+.v13-card {padding: 16px; border-radius: 16px; border: 1px solid rgba(128,128,128,0.25); background: rgba(128,128,128,0.06); margin: 8px 0 14px 0;}
+.v13-green {color:#16a34a; font-weight:800;}
+.v13-red {color:#dc2626; font-weight:800;}
+.v13-flat {color:#6b7280; font-weight:800;}
+.v13-badge {display:inline-block; padding:4px 8px; border-radius:10px; background:rgba(128,128,128,0.12); margin:2px; font-weight:700;}
 </style>
 """,
     unsafe_allow_html=True,
@@ -1319,13 +1324,97 @@ def v102_journal_stats(df, lookback=30):
     return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "fii_10": fii10, "dii_10": dii10, "bias": bias, "label": label}
 
 
+
+
+# =========================================================
+# V13 STABILITY + LIVE UX HELPERS
+# =========================================================
+def v13_is_auth_error(*messages):
+    text = " ".join(str(m) for m in messages).lower()
+    return any(x in text for x in ["401", "authentication failed", "token invalid", "client id or token invalid"])
+
+
+def v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result):
+    messages = [
+        (dhan_bundle or {}).get("message", ""),
+        (expiry_result or {}).get("message", ""),
+        (option_chain or {}).get("message", ""),
+    ]
+    if not dhan_ready:
+        return "Fallback (Dhan token missing)"
+    if v13_is_auth_error(*messages):
+        return "Fallback (Dhan token INVALID/EXPIRED)"
+    if (option_chain or {}).get("success"):
+        return "DhanHQ Live OC"
+    if str(nifty_source).lower().startswith("dhan"):
+        return "DhanHQ Quote (OC unavailable)"
+    return "Fallback (Dhan connected, live OC not active)"
+
+
+def v13_trend(key, value, decimals=2):
+    """Compare value against previous refresh and return arrow, css class, delta text."""
+    try:
+        val = float(value)
+    except Exception:
+        return "→", "v13-flat", "flat"
+    prev_key = f"v13_prev_{key}"
+    prev = st.session_state.get(prev_key)
+    st.session_state[prev_key] = val
+    if prev is None:
+        return "→", "v13-flat", "first refresh"
+    diff = val - float(prev)
+    if abs(diff) < (10 ** (-decimals)):
+        return "→", "v13-flat", "flat"
+    if diff > 0:
+        return "↑", "v13-green", f"+{diff:.{decimals}f} from last refresh"
+    return "↓", "v13-red", f"{diff:.{decimals}f} from last refresh"
+
+
+def v13_candidate_card(title, side, row, final_trade, hedge_gap, confidence, gamma_score, shock_score):
+    if not row:
+        st.info(f"{title}: live option-chain unavailable.")
+        return
+    prefix = side.lower()
+    strike = int(row.get("strike", 0))
+    premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+    st_data = v12_sl_target_for_seller(premium, confidence, gamma_score, shock_score) if "v12_sl_target_for_seller" in globals() else {"sl":0,"target1":0,"target2":0,"trail_after":0}
+    hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap) if "v12_select_hedge_strike" in globals() else 0
+    arrow, cls, delta = v13_trend(f"cand_{side}_{strike}_premium", premium, 2)
+    agree = (final_trade == f"SELL {side}")
+    badge = "✅ Final AI agrees" if agree else "⚠️ Candidate only — final AI does not agree"
+    st.markdown(f"""
+<div class='v13-card'>
+<h3>{title}: {strike} {side}</h3>
+<div class='v13-badge'>{badge}</div>
+<p><b>Live Premium:</b> ₹{premium:.2f} <span class='{cls}'>{arrow} {delta}</span></p>
+<p><b>Suggested Entry:</b> ₹{premium:.2f} &nbsp; | &nbsp; <b>SL:</b> ₹{st_data.get('sl',0):.2f} &nbsp; | &nbsp; <b>Target 1:</b> ₹{st_data.get('target1',0):.2f} &nbsp; | &nbsp; <b>Target 2:</b> ₹{st_data.get('target2',0):.2f}</p>
+<p><b>Hedge:</b> {hedge_strike} {side} &nbsp; | &nbsp; <b>OI:</b> {int(row.get(f'{prefix}_oi',0) or 0):,} &nbsp; | &nbsp; <b>OI Δ:</b> {int(row.get(f'{prefix}_oi_change',0) or 0):,} &nbsp; | &nbsp; <b>Volume:</b> {int(row.get(f'{prefix}_volume',0) or 0):,}</p>
+<p><b>Delta:</b> {float(row.get(f'{prefix}_delta',0) or 0):.3f} &nbsp; | &nbsp; <b>IV:</b> {float(row.get(f'{prefix}_iv',0) or 0):.2f} &nbsp; | &nbsp; <b>Sell Score:</b> {int(row.get(f'{prefix}_sell_score',0) or 0)}/98</p>
+<p><b>Last Updated:</b> {fmt_time()}</p>
+</div>
+""", unsafe_allow_html=True)
+
+
+def v13_today_journal_row(df):
+    try:
+        if df is None or df.empty:
+            return None
+        d = df.copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce").dt.date
+        rows = d[d["Date"] == now_ist().date()]
+        if rows.empty:
+            return None
+        return rows.iloc[-1].to_dict()
+    except Exception:
+        return None
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V12 Trade Ticket Intelligence")
+st.sidebar.title("⚙️ V13 Trade Ticket Intelligence")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1368,12 +1457,34 @@ with st.sidebar.expander("4️⃣ Manual Option Fallback", expanded=False):
     hedge_gap = int(st.number_input("Hedge Gap", value=100, step=50))
 
 with st.sidebar.expander("5️⃣ FII / DII — Daily Manual", expanded=True):
-    fii_today = st.number_input("FII Today ₹ Cr", value=0.0, step=100.0)
-    dii_today = st.number_input("DII Today ₹ Cr", value=0.0, step=100.0)
-    fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=0.0, step=100.0)
-    dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=0.0, step=100.0)
-    fii_index_futures_bias = st.selectbox("FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"])
-    st.caption("Quick manual fields. Detailed 30-day journal below.")
+    _quick_journal_df = v102_load_fii_dii_journal()
+    _today_saved = v13_today_journal_row(_quick_journal_df)
+    _default_fii_today = float((_today_saved or {}).get("FII Cash Cr", 0.0) or 0.0)
+    _default_dii_today = float((_today_saved or {}).get("DII Cash Cr", 0.0) or 0.0)
+    _quick_stats = v102_journal_stats(_quick_journal_df)
+    fii_today = st.number_input("FII Today ₹ Cr", value=_default_fii_today, step=100.0, key="v13_fii_today")
+    dii_today = st.number_input("DII Today ₹ Cr", value=_default_dii_today, step=100.0, key="v13_dii_today")
+    fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=float(_quick_stats.get("fii_5", 0.0)), step=100.0, key="v13_fii_5day")
+    dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=float(_quick_stats.get("dii_5", 0.0)), step=100.0, key="v13_dii_5day")
+    _bias_default = str((_today_saved or {}).get("FII Index Futures Bias", "Neutral") or "Neutral")
+    fii_index_futures_bias = st.selectbox("FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_bias_default) if _bias_default in ["Neutral", "Bullish", "Bearish"] else 0, key="v13_fut_bias")
+    if st.button("💾 Save Today FII/DII", use_container_width=True):
+        _new_row = pd.DataFrame([{
+            "Date": now_ist().date(),
+            "FII Cash Cr": fii_today,
+            "DII Cash Cr": dii_today,
+            "FII Index Futures Bias": fii_index_futures_bias,
+            "FII Options Bias": "Neutral",
+            "Notes": "Saved from quick manual fields",
+        }])
+        _save_df = pd.concat([_quick_journal_df, _new_row], ignore_index=True)
+        _save_df["Date"] = pd.to_datetime(_save_df["Date"], errors="coerce")
+        _save_df = _save_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
+        if v102_save_fii_dii_journal(_save_df):
+            st.success("Saved. Refresh ke baad bhi data rahega.")
+        else:
+            st.error("Save failed.")
+    st.caption("Save button dabane ke baad ye data refresh/restart ke baad bhi rahega.")
 
 with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=False):
     fii_journal_df = v102_load_fii_dii_journal()
@@ -1427,9 +1538,9 @@ with st.sidebar.expander("7️⃣ Top-5 Weights", expanded=False):
 
 with st.sidebar.expander("8️⃣ Risk / Position", expanded=True):
     capital = st.number_input("Capital ₹", value=500000, step=10000)
-    margin_per_lot = st.number_input("Margin Per Lot ₹", value=100000, step=5000)
+    margin_per_lot = st.number_input("Margin Per Lot ₹", value=50000, step=5000)
     current_lots = int(st.number_input("Current Lots", value=0, step=1))
-    lot_size = int(st.number_input("Lot Size", value=50, step=25))
+    lot_size = int(st.number_input("Lot Size", value=65, step=5))
 
 
 with st.sidebar.expander("9️⃣ V8 Active Trade / Discipline", expanded=True):
@@ -1710,6 +1821,12 @@ else:
 
 sl_points = round(max(atr5 * (1.25 if seller_risk < 50 else 1.6), 20), 2)
 target_points = round(max(atr5 * 0.85, 15), 2)
+if final_trade == "WAIT":
+    sl_display = "No Trade"
+    target_display = "No Trade"
+else:
+    sl_display = f"{sl_points} pts"
+    target_display = f"{target_points} pts"
 
 
 # V7 advanced management layer
@@ -1753,21 +1870,19 @@ except NameError:
         vix_source=locals().get("vix_source", "Fallback"),
     )
 
-try:
-    action_plan
-except NameError:
-    action_plan = v91_action_plan(
-        locals().get("final_trade", "WAIT"),
-        locals().get("selected_strike", "No Strike"),
-        locals().get("hedge", "No Hedge"),
-        locals().get("confidence", 0),
-        locals().get("seller_risk", 0),
-        locals().get("shock_score_v7", 0),
-        locals().get("gamma_score_v7", 0),
-        locals().get("conflict_reasons", []),
-        locals().get("source_text", "Fallback"),
-        data_quality,
-    )
+source_text = v13_source_text(locals().get("dhan_ready", False), locals().get("option_chain", {}), locals().get("nifty_source", "Fallback"), locals().get("dhan_bundle", {}), locals().get("expiry_result", {}))
+action_plan = v91_action_plan(
+    locals().get("final_trade", "WAIT"),
+    locals().get("selected_strike", "No Strike"),
+    locals().get("hedge", "No Hedge"),
+    locals().get("confidence", 0),
+    locals().get("seller_risk", 0),
+    locals().get("shock_score_v7", 0),
+    locals().get("gamma_score_v7", 0),
+    locals().get("conflict_reasons", []),
+    source_text,
+    data_quality,
+)
 
 
 
@@ -2237,6 +2352,9 @@ def v12_build_trade_ticket(
     Builds a human-readable trade ticket. Recommendation only, no auto-order.
     """
     strategy = (top_strategy or {}).get("strategy", final_trade or "WAIT")
+    # V13: final WAIT must lock the ticket to NO TRADE. Ranking is only reference.
+    if str(final_trade).upper() == "WAIT" or conflict_mode or data_quality < 70:
+        strategy = "WAIT"
     strategy_conf = int((top_strategy or {}).get("confidence", confidence or 0))
     confidence = max(v91_safe_num(confidence), strategy_conf)
     data_quality = v91_safe_num(data_quality)
@@ -2367,31 +2485,40 @@ except NameError:
 # UI
 # =========================================================
 market_text, day_name = market_status()
-if option_chain.get("success"):
-    source_text = "DhanHQ Live OC"
-elif nifty_source == "DhanHQ":
-    source_text = "DhanHQ Quote"
-elif dhan_ready:
-    source_text = "Fallback (Dhan token OK)"
-else:
-    source_text = "Fallback"
+source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V12</div>", unsafe_allow_html=True)
+top_refresh_col, top_auto_col, top_time_col = st.columns([1, 1, 2])
+if top_refresh_col.button("🔄 Refresh Now", use_container_width=True):
+    st.cache_data.clear()
+    st.rerun()
+_auto_refresh_on = top_auto_col.toggle("Auto 60s", value=False)
+if _auto_refresh_on and market_text == "Market Open":
+    st.markdown("<meta http-equiv='refresh' content='60'>", unsafe_allow_html=True)
+top_time_col.caption(f"Last update: {fmt_time()}")
+
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V13</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
 )
 
 r1, r2, r3, r4, r5 = st.columns(5)
-r1.markdown(f"<div class='ribbon'>{market_text}</div>", unsafe_allow_html=True)
+_price_arrow, _price_cls, _price_delta = v13_trend("nifty_price", price, 2)
+_vix_arrow, _vix_cls, _vix_delta = v13_trend("vix", vix, 2)
+_hw_arrow, _hw_cls, _hw_delta = v13_trend("heavy_bias", heavy_bias, 2)
+r1.markdown(f"<div class='ribbon'>{market_text}<br><span class='{_price_cls}'>Nifty {_price_arrow} {_price_delta}</span></div>", unsafe_allow_html=True)
 r2.markdown(f"<div class='ribbon'>Data: {source_text}</div>", unsafe_allow_html=True)
-r3.markdown(f"<div class='ribbon'>News {news['label']} {news['score']}/100</div>", unsafe_allow_html=True)
-r4.markdown(f"<div class='ribbon'>HW: {bias_label(heavy_bias)}</div>", unsafe_allow_html=True)
+r3.markdown(f"<div class='ribbon'>News {news['label']} {news['score']}/100<br><span class='{_vix_cls}'>VIX {_vix_arrow} {_vix_delta}</span></div>", unsafe_allow_html=True)
+r4.markdown(f"<div class='ribbon'>HW: {bias_label(heavy_bias)}<br><span class='{_hw_cls}'>{_hw_arrow} {_hw_delta}</span></div>", unsafe_allow_html=True)
 r5.markdown(f"<div class='ribbon'>PCR: {pcr:.2f}</div>", unsafe_allow_html=True)
 r6, r7, r8 = st.columns(3)
 r6.markdown(f"<div class='ribbon'>Mode: {market_mode}</div>", unsafe_allow_html=True)
 r7.markdown(f"<div class='ribbon'>Shock: {shock_score_v7}/100</div>", unsafe_allow_html=True)
 r8.markdown(f"<div class='ribbon'>Discipline: {discipline_score}/100</div>", unsafe_allow_html=True)
+if "INVALID/EXPIRED" in source_text:
+    st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
+elif "Fallback" in source_text:
+    st.info("Observation Mode: live option-chain complete nahi hai. Real trade se pehle Dhan data verify karo.")
 
 if final_trade == "SELL PE":
     card_class = "card-green"
@@ -2413,7 +2540,7 @@ st.markdown(
     <h1>{final_trade}</h1>
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
-    <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_points} pts &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_points} pts</p>
+    <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_display} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_display}</p>
     <p><b>V12 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
@@ -2428,6 +2555,27 @@ elif final_trade == "SELL CE":
     st.error("CE side preferred — hedge aur strict SL ke saath. Short-covering warning ko ignore mat karo.")
 else:
     st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
+
+# V13: put the most actionable parts near the top for mobile trading.
+with st.expander("🎯 V13 Best Strategy Ranking — Top", expanded=True):
+    _rank_df_top = pd.DataFrame(v11_ranked_strategies)
+    st.dataframe(_rank_df_top, use_container_width=True, hide_index=True)
+    _top_top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
+    if final_trade == "WAIT":
+        st.warning("Final AI WAIT hai. Ranking sirf reference ke liye hai; entry tabhi jab final AI agree kare.")
+    st.subheader(f"⭐ Best Strategy: {_top_top['strategy']} ({_top_top['confidence']}%)")
+    st.write(v11_strategy_text(_top_top["strategy"], _top_top["confidence"]))
+
+with st.expander("⚡ V13 Live Candidate Cards — Price + SL + Target", expanded=True):
+    if option_analysis.get("success"):
+        ctop1, ctop2 = st.columns(2)
+        with ctop1:
+            v13_candidate_card("🔴 Best CE Candidate", "CE", best_ce, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
+        with ctop2:
+            v13_candidate_card("🟢 Best PE Candidate", "PE", best_pe, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
+        st.warning("Candidate automatic entry nahi hai. Final AI Decision + Action Plan must agree before trade.")
+    else:
+        st.info("Live candidate cards ke liye Dhan option-chain active hona zaroori hai.")
 
 with st.expander("🎯 V12 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
@@ -2677,6 +2825,8 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
             if best_ce:
                 st.subheader(f"🔴 Best CE Candidate (only if final AI agrees): {best_ce['strike']} CE")
                 st.write(f"Signal: **{best_ce['ce_signal']}** ({best_ce['ce_signal_basis']})")
+                _ce_st = v12_sl_target_for_seller(best_ce.get('ce_ltp',0), confidence, gamma_score_v7, shock_score_v7)
+                st.write(f"Live Premium: **₹{best_ce.get('ce_ltp',0):.2f}** | SL: **₹{_ce_st['sl']:.2f}** | Target: **₹{_ce_st['target1']:.2f} / ₹{_ce_st['target2']:.2f}**")
                 st.write(f"Sell Score: **{best_ce['ce_sell_score']}/98** | Delta: **{best_ce['ce_delta']:.3f}** | IV: **{best_ce['ce_iv']:.2f}**")
                 st.caption(best_ce.get("ce_sell_reason", ""))
                 if "Short Covering" in best_ce["ce_signal"] or "Buying" in best_ce["ce_signal"]:
@@ -2685,6 +2835,8 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
             if best_pe:
                 st.subheader(f"🟢 Best PE Candidate (only if final AI agrees): {best_pe['strike']} PE")
                 st.write(f"Signal: **{best_pe['pe_signal']}** ({best_pe['pe_signal_basis']})")
+                _pe_st = v12_sl_target_for_seller(best_pe.get('pe_ltp',0), confidence, gamma_score_v7, shock_score_v7)
+                st.write(f"Live Premium: **₹{best_pe.get('pe_ltp',0):.2f}** | SL: **₹{_pe_st['sl']:.2f}** | Target: **₹{_pe_st['target1']:.2f} / ₹{_pe_st['target2']:.2f}**")
                 st.write(f"Sell Score: **{best_pe['pe_sell_score']}/98** | Delta: **{best_pe['pe_delta']:.3f}** | IV: **{best_pe['pe_iv']:.2f}**")
                 st.caption(best_pe.get("pe_sell_reason", ""))
                 if "Short Covering" in best_pe["pe_signal"] or "Buying" in best_pe["pe_signal"]:
