@@ -1280,15 +1280,24 @@ def v102_metric_card(label, value, delta=None):
     )
 
 def v102_load_fii_dii_journal():
+    """Load FII/DII journal and keep schema backward-compatible."""
+    cols = [
+        "Date", "FII Cash Cr", "DII Cash Cr",
+        "FII Index Futures Contracts", "FII Long %", "FII Short %",
+        "FII Index Futures Bias", "FII Options Bias", "Notes"
+    ]
     try:
         if FII_DII_STORE.exists():
             df = pd.read_csv(FII_DII_STORE)
+            for col in cols:
+                if col not in df.columns:
+                    df[col] = 0.0 if col in ["FII Index Futures Contracts", "FII Long %", "FII Short %"] else ""
             if "Date" in df.columns:
                 df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
-            return df
+            return df[cols]
     except Exception:
         pass
-    return pd.DataFrame(columns=["Date", "FII Cash Cr", "DII Cash Cr", "FII Index Futures Bias", "FII Options Bias", "Notes"])
+    return pd.DataFrame(columns=cols)
 
 def v102_save_fii_dii_journal(df):
     try:
@@ -1434,6 +1443,38 @@ def v134_latest_journal_date(df):
         return d["Date"].iloc[-1].date()
     except Exception:
         return now_ist().date()
+
+def v135_auto_fut_bias(long_pct, short_pct):
+    """Auto-bias from FII Index Futures long/short percentage."""
+    try:
+        long_pct = float(long_pct or 0)
+        short_pct = float(short_pct or 0)
+    except Exception:
+        return "Neutral"
+    if short_pct >= 65 and short_pct - long_pct >= 25:
+        return "Bearish"
+    if long_pct >= 65 and long_pct - short_pct >= 25:
+        return "Bullish"
+    return "Neutral"
+
+def v135_fut_bias_score(long_pct, short_pct, manual_bias="Neutral"):
+    try:
+        long_pct = float(long_pct or 0)
+        short_pct = float(short_pct or 0)
+    except Exception:
+        long_pct, short_pct = 0.0, 0.0
+    spread = long_pct - short_pct
+    # Convert long-short spread into -30 to +30 score.
+    score = signed_clamp(spread * 0.45, -30, 30)
+    if abs(score) < 3:
+        score = 22 if manual_bias == "Bullish" else -22 if manual_bias == "Bearish" else 0
+    return score
+
+def v135_safe_float_from_row(row, key, default=0.0):
+    try:
+        return float((row or {}).get(key, default) or default)
+    except Exception:
+        return default
 
 
 def v132_vix_range_engine(nifty_price, india_vix):
@@ -1642,16 +1683,27 @@ with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True
     _default_data_date = v134_latest_journal_date(_quick_journal_df)
     fii_data_date = st.date_input("FII/DII Data Date", value=_default_data_date, key="v134_fii_data_date")
     _saved_row_for_date = v134_journal_row_by_date(_quick_journal_df, fii_data_date)
-    _default_fii_today = float((_saved_row_for_date or {}).get("FII Cash Cr", 0.0) or 0.0)
-    _default_dii_today = float((_saved_row_for_date or {}).get("DII Cash Cr", 0.0) or 0.0)
+    _default_fii_today = v135_safe_float_from_row(_saved_row_for_date, "FII Cash Cr", 0.0)
+    _default_dii_today = v135_safe_float_from_row(_saved_row_for_date, "DII Cash Cr", 0.0)
+    _default_fut_contracts = v135_safe_float_from_row(_saved_row_for_date, "FII Index Futures Contracts", 0.0)
+    _default_long_pct = v135_safe_float_from_row(_saved_row_for_date, "FII Long %", 0.0)
+    _default_short_pct = v135_safe_float_from_row(_saved_row_for_date, "FII Short %", 0.0)
     _quick_stats = v102_journal_stats(_quick_journal_df)
     _date_key = pd.to_datetime(fii_data_date).strftime("%Y%m%d")
     fii_today = st.number_input("FII Cash ₹ Cr", value=_default_fii_today, step=100.0, key=f"v134_fii_today_{_date_key}")
     dii_today = st.number_input("DII Cash ₹ Cr", value=_default_dii_today, step=100.0, key=f"v134_dii_today_{_date_key}")
     fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=float(_quick_stats.get("fii_5", 0.0)), step=100.0, key="v134_fii_5day")
     dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=float(_quick_stats.get("dii_5", 0.0)), step=100.0, key="v134_dii_5day")
-    _bias_default = str((_saved_row_for_date or {}).get("FII Index Futures Bias", "Neutral") or "Neutral")
-    fii_index_futures_bias = st.selectbox("FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_bias_default) if _bias_default in ["Neutral", "Bullish", "Bearish"] else 0, key=f"v134_fut_bias_{_date_key}")
+    fii_index_futures_contracts = st.number_input("FII Index Futures Contracts", value=_default_fut_contracts, step=1000.0, key=f"v135_fut_contracts_{_date_key}")
+    fii_long_pct = st.number_input("FII Index Futures Long %", value=_default_long_pct, min_value=0.0, max_value=100.0, step=0.01, key=f"v135_long_pct_{_date_key}")
+    fii_short_pct = st.number_input("FII Index Futures Short %", value=_default_short_pct, min_value=0.0, max_value=100.0, step=0.01, key=f"v135_short_pct_{_date_key}")
+    _auto_bias = v135_auto_fut_bias(fii_long_pct, fii_short_pct)
+    _bias_default = str((_saved_row_for_date or {}).get("FII Index Futures Bias", _auto_bias) or _auto_bias)
+    _bias_options = ["Auto", "Neutral", "Bullish", "Bearish"]
+    _bias_index = 0 if _bias_default not in ["Neutral", "Bullish", "Bearish"] else _bias_options.index(_bias_default)
+    _bias_choice = st.selectbox("FII Futures Bias", _bias_options, index=_bias_index, key=f"v135_fut_bias_{_date_key}")
+    fii_index_futures_bias = _auto_bias if _bias_choice == "Auto" else _bias_choice
+    st.caption(f"Auto Futures Bias: {fii_index_futures_bias} | Long {fii_long_pct:.2f}% / Short {fii_short_pct:.2f}%")
     if _saved_row_for_date:
         st.success(f"{pd.to_datetime(fii_data_date).strftime('%d-%m-%Y')} ka saved data loaded.")
     else:
@@ -1661,6 +1713,9 @@ with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True
             "Date": fii_data_date,
             "FII Cash Cr": fii_today,
             "DII Cash Cr": dii_today,
+            "FII Index Futures Contracts": fii_index_futures_contracts,
+            "FII Long %": fii_long_pct,
+            "FII Short %": fii_short_pct,
             "FII Index Futures Bias": fii_index_futures_bias,
             "FII Options Bias": "Neutral",
             "Notes": "Saved from date-wise manual fields",
@@ -1681,9 +1736,16 @@ with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=
     _jkey = pd.to_datetime(journal_date).strftime("%Y%m%d")
     journal_fii = st.number_input("Journal FII Cash ₹ Cr", value=float((_journal_existing or {}).get("FII Cash Cr", 0.0) or 0.0), step=100.0, key=f"journal_fii_{_jkey}")
     journal_dii = st.number_input("Journal DII Cash ₹ Cr", value=float((_journal_existing or {}).get("DII Cash Cr", 0.0) or 0.0), step=100.0, key=f"journal_dii_{_jkey}")
-    _jfut = str((_journal_existing or {}).get("FII Index Futures Bias", "Neutral") or "Neutral")
+    journal_fut_contracts = st.number_input("Journal FII Index Futures Contracts", value=v135_safe_float_from_row(_journal_existing, "FII Index Futures Contracts", 0.0), step=1000.0, key=f"journal_fut_contracts_{_jkey}")
+    journal_long_pct = st.number_input("Journal FII Long %", value=v135_safe_float_from_row(_journal_existing, "FII Long %", 0.0), min_value=0.0, max_value=100.0, step=0.01, key=f"journal_long_pct_{_jkey}")
+    journal_short_pct = st.number_input("Journal FII Short %", value=v135_safe_float_from_row(_journal_existing, "FII Short %", 0.0), min_value=0.0, max_value=100.0, step=0.01, key=f"journal_short_pct_{_jkey}")
+    _jfut_auto = v135_auto_fut_bias(journal_long_pct, journal_short_pct)
+    _jfut = str((_journal_existing or {}).get("FII Index Futures Bias", _jfut_auto) or _jfut_auto)
     _jopt = str((_journal_existing or {}).get("FII Options Bias", "Neutral") or "Neutral")
-    journal_fut_bias = st.selectbox("Journal FII Index Futures Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_jfut) if _jfut in ["Neutral", "Bullish", "Bearish"] else 0, key=f"journal_fut_bias_{_jkey}")
+    _journal_bias_options = ["Auto", "Neutral", "Bullish", "Bearish"]
+    _journal_bias_index = 0 if _jfut not in ["Neutral", "Bullish", "Bearish"] else _journal_bias_options.index(_jfut)
+    _journal_bias_choice = st.selectbox("Journal FII Futures Bias", _journal_bias_options, index=_journal_bias_index, key=f"journal_fut_bias_{_jkey}")
+    journal_fut_bias = _jfut_auto if _journal_bias_choice == "Auto" else _journal_bias_choice
     journal_opt_bias = st.selectbox("Journal FII Options Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_jopt) if _jopt in ["Neutral", "Bullish", "Bearish"] else 0, key=f"journal_opt_bias_{_jkey}")
     journal_notes = st.text_input("Notes", value=str((_journal_existing or {}).get("Notes", "") or ""), key=f"journal_notes_{_jkey}")
     if _journal_existing:
@@ -1694,6 +1756,9 @@ with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=
             "Date": journal_date,
             "FII Cash Cr": journal_fii,
             "DII Cash Cr": journal_dii,
+            "FII Index Futures Contracts": journal_fut_contracts,
+            "FII Long %": journal_long_pct,
+            "FII Short %": journal_short_pct,
             "FII Index Futures Bias": journal_fut_bias,
             "FII Options Bias": journal_opt_bias,
             "Notes": journal_notes,
@@ -1920,7 +1985,8 @@ smart_money_bias += 22 if fii_today > 0 else -22 if fii_today < 0 else 0
 smart_money_bias += 10 if dii_today > 0 else -10 if dii_today < 0 else 0
 smart_money_bias += 18 if fii_5day > 0 else -18 if fii_5day < 0 else 0
 smart_money_bias += 8 if dii_5day > 0 else -8 if dii_5day < 0 else 0
-smart_money_bias += 22 if fii_index_futures_bias == "Bullish" else -22 if fii_index_futures_bias == "Bearish" else 0
+_fut_score = v135_fut_bias_score(locals().get("fii_long_pct", 0), locals().get("fii_short_pct", 0), fii_index_futures_bias)
+smart_money_bias += _fut_score
 smart_money_bias = signed_clamp(smart_money_bias)
 
 heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
@@ -3169,8 +3235,14 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
     f2.metric("DII Today", f"₹{dii_today:,.0f} Cr")
     f3.metric("FII 5 Day", f"₹{fii_5day:,.0f} Cr")
     f4.metric("DII 5 Day", f"₹{dii_5day:,.0f} Cr")
-    st.write(f"FII Index Futures Bias: **{fii_index_futures_bias}**")
+    g1, g2, g3 = st.columns(3)
+    g1.metric("FII Futures Contracts", f"{locals().get('fii_index_futures_contracts', 0):,.0f}")
+    g2.metric("FII Long %", f"{locals().get('fii_long_pct', 0):.2f}%")
+    g3.metric("FII Short %", f"{locals().get('fii_short_pct', 0):.2f}%")
+    st.write(f"FII Index Futures Bias: **{fii_index_futures_bias}** | Futures Score: **{locals().get('_fut_score', 0):+.0f}**")
     st.write(f"Smart Money Bias: **{smart_money_bias:+.0f}/100 ({bias_label(smart_money_bias)})**")
+    if locals().get('fii_short_pct', 0) >= 70 and fii_today > 0:
+        st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
     st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
     if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
         st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), use_container_width=True, hide_index=True)
