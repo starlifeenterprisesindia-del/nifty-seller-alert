@@ -2577,7 +2577,7 @@ with st.expander("⚡ V13 Live Candidate Cards — Price + SL + Target", expande
     else:
         st.info("Live candidate cards ke liye Dhan option-chain active hona zaroori hai.")
 
-with st.expander("🎯 V12 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 V13.1 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -2625,20 +2625,12 @@ with st.expander("🚨 V12 Super Signal Engine — Only Strong Setups", expanded
     else:
         st.info("No super signal. Normal AI decision/checklist follow karo.")
 
-with st.expander("🎯 V12 Best Strategy Ranking", expanded=True):
-    _rank_df = pd.DataFrame(v11_ranked_strategies)
-    st.dataframe(_rank_df, use_container_width=True, hide_index=True)
-    _top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
-    st.subheader(f"⭐ Best Strategy: {_top['strategy']} ({_top['confidence']}%)")
-    st.write(v11_strategy_text(_top["strategy"], _top["confidence"]))
-    if "BUY" in _top["strategy"] and _top["confidence"] < 85:
-        st.warning("Buy-with-hedge confidence 85% se kam ho to avoid. Seller-first discipline follow karo.")
-    if _top["strategy"] == "IRON CONDOR":
-        st.caption("Iron Condor tabhi jab range probability high, shock/gamma low, aur both side strikes liquid hon.")
+# V13.1: Removed duplicate old V12 Best Strategy Ranking block.
 
 
 
-with st.expander("🎟️ V12 AI Trade Ticket — Strike + Price + SL + Target", expanded=True):
+
+with st.expander("🎟️ V13.1 AI Trade Ticket — Strike + Price + SL + Target", expanded=True):
     tt = v12_trade_ticket
     t1, t2, t3, t4, t5 = st.columns(5)
     t1.metric("Recommended", tt["summary"])
@@ -2820,29 +2812,7 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         except Exception:
             st.dataframe(_oc_df, use_container_width=True, hide_index=True)
 
-        c1, c2 = st.columns(2)
-        with c1:
-            if best_ce:
-                st.subheader(f"🔴 Best CE Candidate (only if final AI agrees): {best_ce['strike']} CE")
-                st.write(f"Signal: **{best_ce['ce_signal']}** ({best_ce['ce_signal_basis']})")
-                _ce_st = v12_sl_target_for_seller(best_ce.get('ce_ltp',0), confidence, gamma_score_v7, shock_score_v7)
-                st.write(f"Live Premium: **₹{best_ce.get('ce_ltp',0):.2f}** | SL: **₹{_ce_st['sl']:.2f}** | Target: **₹{_ce_st['target1']:.2f} / ₹{_ce_st['target2']:.2f}**")
-                st.write(f"Sell Score: **{best_ce['ce_sell_score']}/98** | Delta: **{best_ce['ce_delta']:.3f}** | IV: **{best_ce['ce_iv']:.2f}**")
-                st.caption(best_ce.get("ce_sell_reason", ""))
-                if "Short Covering" in best_ce["ce_signal"] or "Buying" in best_ce["ce_signal"]:
-                    st.warning("CE sell risk: upside pressure detected.")
-        with c2:
-            if best_pe:
-                st.subheader(f"🟢 Best PE Candidate (only if final AI agrees): {best_pe['strike']} PE")
-                st.write(f"Signal: **{best_pe['pe_signal']}** ({best_pe['pe_signal_basis']})")
-                _pe_st = v12_sl_target_for_seller(best_pe.get('pe_ltp',0), confidence, gamma_score_v7, shock_score_v7)
-                st.write(f"Live Premium: **₹{best_pe.get('pe_ltp',0):.2f}** | SL: **₹{_pe_st['sl']:.2f}** | Target: **₹{_pe_st['target1']:.2f} / ₹{_pe_st['target2']:.2f}**")
-                st.write(f"Sell Score: **{best_pe['pe_sell_score']}/98** | Delta: **{best_pe['pe_delta']:.3f}** | IV: **{best_pe['pe_iv']:.2f}**")
-                st.caption(best_pe.get("pe_sell_reason", ""))
-                if "Short Covering" in best_pe["pe_signal"] or "Buying" in best_pe["pe_signal"]:
-                    st.warning("PE sell risk: downside pressure detected.")
-
-        st.warning("Candidate strike is NOT automatic entry. Final AI Decision + Action Plan must agree before trade.")
+        st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
         # V10 candidate safety verdicts
         try:
@@ -2876,17 +2846,27 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=True)
         h3.metric("HDFC + ICICI", heavy_analysis["banking_pair"])
         h4.metric("Divergence", heavy_analysis["divergence"])
 
-        hw_table = pd.DataFrame([
-            {
+        hw_rows = []
+        for r in heavy_analysis["rows"]:
+            _arrow, _cls, _delta = v13_trend(f"hw_{r['symbol']}_move", r["change_pct"], 2)
+            if _arrow == "↑":
+                _trend_text = "🟢 ↑ rising"
+            elif _arrow == "↓":
+                _trend_text = "🔴 ↓ falling"
+            else:
+                _trend_text = "⚪ → flat/first"
+            hw_rows.append({
                 "Stock": r["name"],
                 "Weight %": round(r["weight"], 2),
                 "Move %": round(r["change_pct"], 2),
+                "Trend vs Refresh": _trend_text,
+                "Change vs Refresh": _delta,
                 "Snapshot Shock %pt": round(r.get("shock_delta_pct", 0.0), 2),
                 "Est. Nifty pts": round(price * (r["weight"] / 100) * (r["change_pct"] / 100), 1),
-            }
-            for r in heavy_analysis["rows"]
-        ])
+            })
+        hw_table = pd.DataFrame(hw_rows)
         st.dataframe(hw_table, use_container_width=True, hide_index=True)
+        st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
 
         if final_trade == "SELL CE" and heavy_bias > 35:
             st.warning("CE SELL WARNING: top-5 drivers bullish hain — short-covering/upside risk.")
