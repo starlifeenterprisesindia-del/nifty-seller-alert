@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V14.0",
+    page_title="Nifty Seller AI Dashboard V15.1",
     page_icon="🧠",
     layout="wide",
 )
@@ -1795,13 +1795,167 @@ def v14_reason_breakdown(price_action_bias, option_bias, heavy_bias, smart_money
     ]
     return [(name, int(round(val))) for name, val in items]
 
+
+# =========================================================
+# V15 SAFE EXPIRY SCORE: ZERO PREMIUM / PREMIUM EXPLOSION RISK
+# =========================================================
+def v15_minutes_to_expiry_close(expiry_text=None):
+    """Minutes left till 15:30 IST expiry close. Lightweight, no API call."""
+    try:
+        now = now_ist()
+        if expiry_text:
+            exp_date = pd.to_datetime(str(expiry_text)).date()
+        else:
+            exp_date = now.date()
+        close_dt = datetime.combine(exp_date, datetime.strptime("15:30", "%H:%M").time()).replace(tzinfo=IST)
+        return int(max((close_dt - now).total_seconds() / 60.0, 0))
+    except Exception:
+        return 999
+
+
+def v15_remaining_expected_move(price, vix, minutes_left):
+    """Expiry remaining expected move estimate using VIX/16 daily shortcut scaled by sqrt(time)."""
+    price = v91_safe_num(price)
+    vix = max(v91_safe_num(vix), 0.0)
+    minutes_left = max(v91_safe_num(minutes_left), 1.0)
+    full_day_minutes = 375.0
+    daily_pct = vix / 16.0 / 100.0
+    move = price * daily_pct * (minutes_left / full_day_minutes) ** 0.5
+    return max(move, 1.0)
+
+
+def v15_safe_expiry_for_leg(side, row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label):
+    """Return Safe Expiry score for one CE/PE leg. Higher = higher chance premium dies safely."""
+    if not row:
+        return None
+    side = str(side).upper()
+    prefix = side.lower()
+    strike = int(row.get("strike", 0) or 0)
+    spot = v91_safe_num(spot)
+    premium = v91_safe_num(row.get(f"{prefix}_ltp", 0))
+    delta_abs = abs(v91_safe_num(row.get(f"{prefix}_delta", 0)))
+    iv = v91_safe_num(row.get(f"{prefix}_iv", 0))
+    sell_score = v91_safe_num(row.get(f"{prefix}_sell_score", 0))
+    signal = str(row.get(f"{prefix}_signal", ""))
+    oi_chg = v91_safe_num(row.get(f"{prefix}_oi_change", 0))
+    vol = v91_safe_num(row.get(f"{prefix}_volume", 0))
+
+    distance = (strike - spot) if side == "CE" else (spot - strike)
+    otm = distance > 0
+    rem_move = v15_remaining_expected_move(spot, vix, minutes_left)
+    distance_ratio = distance / rem_move if rem_move else 0
+
+    score = 35.0
+    reasons = []
+    warnings = []
+
+    if not otm:
+        score -= 40
+        warnings.append("ITM/ATM risk high")
+    elif distance_ratio >= 1.8:
+        score += 32; reasons.append("Strike expected range se kaafi door")
+    elif distance_ratio >= 1.2:
+        score += 24; reasons.append("Strike expected range se bahar")
+    elif distance_ratio >= 0.8:
+        score += 12; warnings.append("Strike range ke edge par")
+    else:
+        score -= 18; warnings.append("Strike expected range ke andar/near")
+
+    if delta_abs <= 0.08:
+        score += 18; reasons.append("Delta very low")
+    elif delta_abs <= 0.16:
+        score += 12; reasons.append("Delta seller-friendly")
+    elif delta_abs >= 0.35:
+        score -= 18; warnings.append("Delta high")
+    elif delta_abs >= 0.25:
+        score -= 8; warnings.append("Delta moderate/high")
+
+    if "Writing" in signal:
+        score += 10; reasons.append("OI writing support")
+    elif "Buying" in signal or "Short Covering" in signal:
+        score -= 12; warnings.append("Premium buying/covering risk")
+
+    if sell_score >= 85:
+        score += 10
+    elif sell_score <= 55:
+        score -= 8
+
+    if minutes_left <= 45:
+        score += 18; reasons.append("Expiry close: theta strong")
+    elif minutes_left <= 120:
+        score += 10; reasons.append("Time decay supportive")
+    elif minutes_left >= 300:
+        score -= 6; warnings.append("Time left high")
+
+    # Risk penalties: premium explosion risk ka core.
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    fake = v91_safe_num(fake_move_score)
+    risk_penalty = gamma * 0.12 + shock * 0.12 + fake * 0.18
+    score -= risk_penalty
+    if gamma >= 70: warnings.append("Gamma risk high")
+    if shock >= 65: warnings.append("Shock risk elevated")
+    if fake >= 50: warnings.append("Fake move risk active")
+    if "VOLATILE" in str(regime_label) or "GAMMA" in str(regime_label):
+        score -= 8; warnings.append("Volatile/expiry gamma regime")
+
+    if iv >= 25:
+        score -= 6; warnings.append("IV high")
+    if premium <= 1.0 and otm:
+        score += 8; reasons.append("Premium already near zero")
+    elif premium >= 30 and minutes_left <= 90:
+        score -= 6; warnings.append("Premium still heavy")
+
+    safe_score = int(round(clamp(score, 0, 100)))
+    explosion_risk = int(round(clamp(100 - safe_score + gamma * 0.08 + fake * 0.10, 0, 100)))
+    worthless_prob = int(round(clamp(safe_score * 0.82 + max(distance_ratio, 0) * 8, 0, 98)))
+
+    if safe_score >= 85:
+        label = "🟢 STRONG"
+    elif safe_score >= 70:
+        label = "🟡 CAUTION"
+    else:
+        label = "🔴 AVOID"
+
+    return {
+        "side": side,
+        "strike": strike,
+        "premium": premium,
+        "safe_score": safe_score,
+        "worthless_probability": worthless_prob,
+        "premium_explosion_risk": explosion_risk,
+        "distance": distance,
+        "distance_ratio": distance_ratio,
+        "delta": delta_abs,
+        "iv": iv,
+        "label": label,
+        "reasons": reasons[:3] or ["Distance/delta/time based score"],
+        "warnings": warnings[:3],
+        "oi_change": oi_chg,
+        "volume": vol,
+    }
+
+
+def v15_safe_expiry_watchlist(option_rows, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label, top_n=3):
+    """Build top CE/PE Safe Expiry watchlist from already fetched option-chain rows. No extra API calls."""
+    results = []
+    for row in option_rows or []:
+        ce = v15_safe_expiry_for_leg("CE", row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label)
+        pe = v15_safe_expiry_for_leg("PE", row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label)
+        if ce: results.append(ce)
+        if pe: results.append(pe)
+    # Prefer liquid, OTM, high safe score. Keep list small.
+    results = [x for x in results if x.get("distance", -1) > 0]
+    results.sort(key=lambda x: (x["safe_score"], x["worthless_probability"], -x["premium_explosion_risk"]), reverse=True)
+    return results[:int(top_n)]
+
 # =========================================================
 # SIDEBAR + SOURCE CONFIG
 # =========================================================
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V14.0 AI Brain Intelligence")
+st.sidebar.title("⚙️ V15.1 Final AI")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -2284,7 +2438,7 @@ if conflict_mode and final_trade != "WAIT":
     trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
 
 
-# V14 AI Brain Upgrade: rolling memory + decision freeze + stability.
+# AI Brain: rolling memory + decision freeze + stability.
 proposed_trade_v14 = final_trade
 try:
     vix_range = v132_vix_range_engine(price, vix)
@@ -2996,7 +3150,7 @@ if _auto_refresh_on and market_text == "Market Open":
     st.markdown("<meta http-equiv='refresh' content='60'>", unsafe_allow_html=True)
 top_time_col.caption(f"Last update: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V14.0</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V15.1</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -3020,8 +3174,8 @@ if "INVALID/EXPIRED" in source_text:
 elif "Fallback" in source_text:
     st.info("Observation Mode: live option-chain complete nahi hai. Real trade se pehle Dhan data verify karo.")
 
-# V14 AI Brain top panel
-st.markdown("### 🧠 V14 AI Brain — Memory + Freeze + Regime")
+# AI Brain top panel
+st.markdown("### 🧠 AI Brain — Memory + Freeze + Regime")
 v14c1, v14c2, v14c3, v14c4, v14c5 = st.columns(5)
 v14c1.metric("AI Proposed", proposed_trade_v14)
 v14c2.metric("Freeze", v14_freeze["status"], f"{v14_freeze['same_count']}/{v14_freeze['required']}")
@@ -3035,7 +3189,7 @@ elif v14_freeze["status"] == "SIGNAL CONFIRMED":
 else:
     st.info("🧊 Decision Freeze: " + v14_freeze["reason"])
 st.caption(v14_regime["note"] + " | " + v14_entry["note"])
-with st.expander("🔎 V14 Details — Memory, Candle, Seller Strength, Reasoning", expanded=False):
+with st.expander("🔎 AI Brain Details — Memory, Candle, Seller Strength, Reasoning", expanded=False):
     st.write("**Memory:**", v14_stability["note"])
     st.write(f"**15m Candle Confirmation:** {candle15['pattern']} | Score {candle15['score']} | {candle15['note']}")
     s1, s2, s3 = st.columns(3)
@@ -3084,7 +3238,7 @@ st.markdown(
     <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
     <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
     <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_display} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_display}</p>
-    <p><b>V12 Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
+    <p><b>Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -3123,7 +3277,7 @@ elif fake_move["tone"] == "warning":
     st.warning("⚠️ " + fake_move["action"])
 else:
     st.success("✅ " + fake_move["action"])
-with st.expander("🚨 V13.3 Fake Move Detector — WAIT Zone", expanded=True):
+with st.expander("🚨 Fake Move Detector — WAIT Zone", expanded=False):
     st.write(f"**Status:** {fake_move['label']} ({fake_move['score']}/100)")
     st.write(f"**Action:** {fake_move['action']}")
     st.write("**Warning reasons:**")
@@ -3134,8 +3288,64 @@ with st.expander("🚨 V13.3 Fake Move Detector — WAIT Zone", expanded=True):
         for note in fake_move["confirmations"]:
             st.write("✔", note)
 
+# Safe Expiry Score / near-zero premium probability. Uses already fetched option-chain rows only.
+_minutes_left_v15 = v15_minutes_to_expiry_close(selected_expiry)
+_v15_watchlist = v15_safe_expiry_watchlist(
+    option_analysis.get("rows", []) if option_analysis.get("success") else [],
+    price,
+    vix,
+    _minutes_left_v15,
+    gamma_score_v7,
+    shock_score_v7,
+    fake_move.get("score", 0),
+    v14_regime.get("label", ""),
+    top_n=3,
+)
+_best_ce_safe = v15_safe_expiry_for_leg("CE", best_ce, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_ce else None
+_best_pe_safe = v15_safe_expiry_for_leg("PE", best_pe, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_pe else None
+
+st.markdown("### 🎯 V15 Safe Expiry Score — Zero Premium Probability")
+se1, se2, se3, se4 = st.columns(4)
+se1.metric("Minutes Left", f"{_minutes_left_v15} min" if _minutes_left_v15 < 900 else "NA")
+se2.metric("Gamma Risk", f"{gamma_score_v7}/100")
+se3.metric("Fake Move", f"{fake_move.get('score',0)}/100")
+se4.metric("Mode", v14_regime.get("label", "NA"))
+
+if not option_analysis.get("success"):
+    st.info("Safe Expiry Score ke liye live Dhan option-chain active honi chahiye.")
+else:
+    cols_safe = st.columns(2)
+    for box, title, data in [(cols_safe[0], "🔴 Best CE Safe Score", _best_ce_safe), (cols_safe[1], "🟢 Best PE Safe Score", _best_pe_safe)]:
+        with box:
+            if data:
+                st.metric(title, f"{data['safe_score']}/100", data['label'])
+                st.write(f"**{data['strike']} {data['side']}** | Premium ₹{data['premium']:.2f} | Worthless Prob {data['worthless_probability']}% | Explosion Risk {data['premium_explosion_risk']}%")
+                if data["warnings"]:
+                    st.caption("⚠️ " + " | ".join(data["warnings"]))
+                else:
+                    st.caption("✔ " + " | ".join(data["reasons"]))
+            else:
+                st.info("Candidate unavailable")
+
+    with st.expander("🏆 V15 Smart Watchlist — Top 3 near-zero candidates", expanded=True):
+        if _v15_watchlist:
+            _watch_df = pd.DataFrame([{
+                "Rank": i + 1,
+                "Strike": f"{x['strike']} {x['side']}",
+                "Premium": round(x['premium'], 2),
+                "Safe Score": x['safe_score'],
+                "Worthless %": x['worthless_probability'],
+                "Explosion Risk %": x['premium_explosion_risk'],
+                "Distance": round(x['distance'], 1),
+                "Label": x['label'],
+            } for i, x in enumerate(_v15_watchlist)])
+            st.dataframe(_watch_df, use_container_width=True, hide_index=True)
+            st.caption("Safe Score guarantee nahi hai. Ye distance + delta + theta + gamma + fake move + VIX risk ka probability score hai. Hedge/SL mandatory.")
+        else:
+            st.info("No high-quality OTM candidates found in current option-chain range.")
+
 # V13: put the most actionable parts near the top for mobile trading.
-with st.expander("🎯 V13 Best Strategy Ranking — Top", expanded=True):
+with st.expander("🎯 Best Strategy Ranking — Final Reference", expanded=True):
     _rank_df_top = pd.DataFrame(v11_ranked_strategies)
     st.dataframe(_rank_df_top, use_container_width=True, hide_index=True)
     _top_top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
@@ -3144,7 +3354,7 @@ with st.expander("🎯 V13 Best Strategy Ranking — Top", expanded=True):
     st.subheader(f"⭐ Best Strategy: {_top_top['strategy']} ({_top_top['confidence']}%)")
     st.write(v11_strategy_text(_top_top["strategy"], _top_top["confidence"]))
 
-with st.expander("⚡ V13 Live Candidate Cards — Price + SL + Target", expanded=True):
+with st.expander("⚡ Live Candidate Cards — Price + SL + Target", expanded=True):
     if option_analysis.get("success"):
         ctop1, ctop2 = st.columns(2)
         with ctop1:
@@ -3155,7 +3365,7 @@ with st.expander("⚡ V13 Live Candidate Cards — Price + SL + Target", expande
     else:
         st.info("Live candidate cards ke liye Dhan option-chain active hona zaroori hai.")
 
-with st.expander("🎯 V13.1 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("🎯 Final Action Plan — Trade / No Trade", expanded=True):
     q1, q2, q3, q4 = st.columns(4)
     q1.metric("Data Quality", f"{data_quality}/100")
     q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
@@ -3172,7 +3382,7 @@ with st.expander("🎯 V13.1 Final Action Plan — Trade / No Trade", expanded=T
             st.write("•", reason)
 
 
-with st.expander("📊 V13.2 India VIX Range Engine — Expected Move", expanded=False):
+with st.expander("📊 India VIX Range Engine — Expected Move", expanded=False):
     if vix_range.get("ok"):
         st.write(f"**India VIX:** {vix:.2f}")
         st.write(f"**Formula:** VIX ÷ 16 = {vix_range['move_pct']:.2f}% expected 1-day move")
@@ -3183,42 +3393,7 @@ with st.expander("📊 V13.2 India VIX Range Engine — Expected Move", expanded
         st.info(vix_range.get("message", "VIX range unavailable."))
 
 
-with st.expander("🧠 V10 Probability + Conflict Brain", expanded=True):
-    p1, p2, p3, p4, p5 = st.columns(5)
-    p1.metric("Bullish Probability", f"{v10_probs['bullish']}%")
-    p2.metric("Bearish Probability", f"{v10_probs['bearish']}%")
-    p3.metric("Range Probability", f"{v10_probs['range']}%")
-    p4.metric("Breakout Risk", f"{v10_probs['breakout']}%")
-    p5.metric("Fake Breakout", v10_probs["fake_breakout"])
-    st.write("**Conflict Interpretation:**")
-    for note in v10_conflict_notes:
-        st.write("•", note)
-    if conflict_mode:
-        st.warning("V10 verdict: Conflict mode active. Fresh selling tabhi jab price action + OI + heavyweight ek direction mein align ho.")
-    else:
-        st.success("V10 verdict: Major conflict limited. Still use SL/hedge and checklist.")
-
-
-
-with st.expander("🚨 V12 Super Signal Engine — Only Strong Setups", expanded=True):
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Super Signal", v11_super["signal"])
-    s2.metric("Level", v11_super["level"])
-    s3.metric("Signal Score", f"{v11_super['score']}/100")
-    s4.metric("Votes B/B/R", f"{v11_super['bullish_votes']}/{v11_super['bearish_votes']}/{v11_super['range_votes']}")
-    for note in v11_super["notes"]:
-        st.write("•", note)
-    if v11_super["level"] == "SUPER":
-        st.success("Super Signal active: still use hedge, SL, and position size control.")
-    else:
-        st.info("No super signal. Normal AI decision/checklist follow karo.")
-
-# V13.1: Removed duplicate old V12 Best Strategy Ranking block.
-
-
-
-
-with st.expander("🎟️ V13.1 AI Trade Ticket — Strike + Price + SL + Target", expanded=True):
+with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", expanded=True):
     tt = v12_trade_ticket
     t1, t2, t3, t4, t5 = st.columns(5)
     t1.metric("Recommended", tt["summary"])
@@ -3244,7 +3419,7 @@ with st.expander("🎟️ V13.1 AI Trade Ticket — Strike + Price + SL + Target
 
 
 # V12 Position Manager + Expiry/Shock/Discipline panels
-with st.expander("🚀 V12 AI Position Manager — Hold / Exit / Trail SL", expanded=True):
+with st.expander("🚀 Position Manager — Hold / Exit / Trail SL", expanded=False):
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     try:
@@ -3268,7 +3443,7 @@ with st.expander("🚀 V12 AI Position Manager — Hold / Exit / Trail SL", expa
         elif "HOLD" in position_ai["action"]:
             st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
 
-with st.expander("🧠 V12 Expiry + Shock + Discipline Engine", expanded=True):
+with st.expander("🧠 Expiry + Shock + Discipline Engine", expanded=False):
     e1, e2, e3, e4, e5 = st.columns(5)
     with e1:
         v102_metric_card("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
@@ -3298,27 +3473,7 @@ st.markdown(
 )
 
 
-with st.expander("✅ Why AI gave this decision", expanded=True):
-    reasons = [
-        f"Price Action bias: {price_action_bias:+.0f}/100",
-        f"Option Chain bias: {option_bias:+.0f}/100",
-        f"Top-5 Heavyweight pressure: {heavy_bias:+.0f}/100",
-        f"FII/DII Smart Money: {smart_money_bias:+.0f}/100",
-        f"News Risk: {news['label']} ({news['score']}/100)",
-        f"India VIX: {vix:.2f} ({vix_change_pct:+.2f}%)",
-    ]
-    for item in reasons:
-        st.write("✔", item)
-    if heavy_analysis.get("divergence") != "NONE":
-        st.warning(f"Divergence: {heavy_analysis['divergence']}")
-    if heavy_analysis.get("shock_rows"):
-        names = ", ".join(r["name"] for r in heavy_analysis["shock_rows"])
-        st.warning(f"Heavyweight shock detected: {names}")
-
-
-
-
-with st.expander("✅ V12 Trade Checklist — Entry Allowed Only If Green", expanded=True):
+with st.expander("✅ Trade Checklist — Entry Allowed Only If Green", expanded=False):
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
@@ -3352,7 +3507,7 @@ with a4:
     st.metric("News Risk", f"{news['score']}/100", news["label"])
 
 
-with st.expander("📊 Market Snapshot", expanded=True):
+with st.expander("📊 Market Snapshot", expanded=False):
     m1, m2, m3, m4, m5 = st.columns(5)
     m1.metric("Nifty", f"{price:,.2f}", f"{nifty_change_pct:+.2f}%")
     m2.metric("India VIX", f"{vix:.2f}", f"{vix_change_pct:+.2f}%")
@@ -3361,7 +3516,7 @@ with st.expander("📊 Market Snapshot", expanded=True):
     m5.metric("Nearest S/R", f"{nearest_support:.0f} / {nearest_resistance:.0f}")
 
 
-with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded=True):
+with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded=False):
     o1, o2, o3, o4 = st.columns(4)
     o1.metric("PCR", f"{pcr:.2f}")
     o2.metric("Put OI Change", f"{put_oi_change:,}")
@@ -3406,7 +3561,7 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         try:
             ce_verdict = v10_candidate_verdict("CE", best_ce["strike"], best_ce.get("ce_sell_score", 0), best_ce.get("ce_signal", ""), best_ce.get("ce_delta", 0), best_ce.get("ce_iv", 0), best_ce.get("ce_spread_pct", 0), final_trade, conflict_mode) if best_ce else None
             pe_verdict = v10_candidate_verdict("PE", best_pe["strike"], best_pe.get("pe_sell_score", 0), best_pe.get("pe_signal", ""), best_pe.get("pe_delta", 0), best_pe.get("pe_iv", 0), best_pe.get("pe_spread_pct", 0), final_trade, conflict_mode) if best_pe else None
-            st.markdown("### 🧾 V10 Candidate Verdict")
+            st.markdown("### 🧾 Candidate Verdict")
             if ce_verdict:
                 st.write("🔴", ce_verdict["verdict"])
                 for rr in ce_verdict["reasons"]:
@@ -3426,7 +3581,7 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
             st.error(option_chain.get("message", "Dhan option chain unavailable."))
 
 
-with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=True):
+with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False):
     if heavy_analysis.get("success"):
         h1, h2, h3, h4 = st.columns(4)
         h1.metric("Weighted Pressure", f"{heavy_bias:+.0f}/100", bias_label(heavy_bias))
@@ -3467,7 +3622,7 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=True)
         st.warning(heavy_analysis.get("message", "Heavyweight data unavailable."))
 
 
-with st.expander("🚨 Automatic Market News Risk Indicator", expanded=True):
+with st.expander("🚨 Automatic Market News Risk Indicator", expanded=False):
     n1, n2, n3, n4 = st.columns(4)
     n1.metric("Final News Risk", f"{news['score']}/100", news["label"])
     n2.metric("Scheduled Event", f"{news['scheduled']}/100", "AUTO" if news["auto_calendar"] else "Manual fallback")
@@ -3526,7 +3681,7 @@ with st.expander("💰 Position & Risk Manager", expanded=False):
 
 
 
-with st.expander("🧪 V12 Live Dhan API Diagnostics", expanded=True):
+with st.expander("🧪 Live Dhan API Diagnostics", expanded=False):
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
     d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
