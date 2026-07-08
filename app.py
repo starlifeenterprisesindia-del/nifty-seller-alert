@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V18.6 - SNAPSHOT OBJECT FOUNDATION
+# NIFTY SELLER AI DASHBOARD V18.7 - SNAPSHOT DRIVEN AI
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V18.6 Snapshot Foundation",
+    page_title="Nifty Seller AI Dashboard V18.7 Snapshot Driven AI",
     page_icon="🧠",
     layout="wide",
 )
@@ -2308,7 +2308,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18.6 Snapshot AI")
+st.sidebar.title("⚙️ V18.7 Snapshot AI")
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -3977,7 +3977,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V18.6 Snapshot Foundation",
+        "version": "V18.7 Snapshot Driven AI",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4014,7 +4014,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V18.6 Snapshot Foundation",
+        "version": "V18.7 Snapshot Driven AI",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4233,7 +4233,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V18.6 Snapshot Foundation"
+    fd["version"] = "V18.7 Snapshot Driven AI"
 
     return fd
 
@@ -4341,7 +4341,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V18.6 Snapshot Foundation",
+        "version": "V18.7 Snapshot Driven AI",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4452,8 +4452,176 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V18.6 Snapshot Foundation", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V18.7 Snapshot Driven AI", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
+
+
+
+
+# =========================================================
+# V18.7 SNAPSHOT DRIVEN AI
+# =========================================================
+# Goal:
+# - Make V18 AI read from market_snapshot.
+# - Do not change DhanHQ / refresh / portfolio.
+# - Do not remove old variables yet.
+# - Strengthen one-snapshot architecture.
+
+def v187_score_from_snapshot(snapshot):
+    try:
+        m = snapshot.get("market", {}) if isinstance(snapshot.get("market", {}), dict) else {}
+        oc = snapshot.get("option_chain", {}) if isinstance(snapshot.get("option_chain", {}), dict) else {}
+        sig = snapshot.get("signals", {}) if isinstance(snapshot.get("signals", {}), dict) else {}
+        risk = snapshot.get("risk", {}) if isinstance(snapshot.get("risk", {}), dict) else {}
+        ai = snapshot.get("ai", {}) if isinstance(snapshot.get("ai", {}), dict) else {}
+
+        option_bias = float(sig.get("option_bias", 0) or 0)
+        price_bias = float(sig.get("price_action_bias", 0) or 0)
+        heavy_bias = float(sig.get("heavyweight_bias", 0) or 0)
+        market_bias = float(sig.get("market_bias", 0) or 0)
+
+        bullish_power = 0
+        bearish_power = 0
+        parts = [
+            ("Option", option_bias, 0.36),
+            ("Price", price_bias, 0.28),
+            ("Heavy", heavy_bias, 0.24),
+            ("Market", market_bias, 0.12),
+        ]
+        notes = []
+        for name, val, weight in parts:
+            if val > 0:
+                bullish_power += min(abs(val), 100) * weight
+                notes.append(f"{name} bullish {val:.0f}")
+            elif val < 0:
+                bearish_power += min(abs(val), 100) * weight
+                notes.append(f"{name} bearish {abs(val):.0f}")
+            else:
+                notes.append(f"{name} neutral")
+
+        net_bias = bullish_power - bearish_power
+        data_quality = float(risk.get("data_quality", 0) or 0)
+        seller_risk = float(risk.get("seller_risk", 100) or 100)
+        news_risk = float(risk.get("news_risk", 0) or 0)
+        gamma_risk = float(risk.get("gamma_risk", 0) or 0)
+        shock_risk = float(risk.get("shock_risk", 0) or 0)
+        pcr = float(oc.get("pcr", 0) or 0)
+
+        risk_score = seller_risk * 0.34 + news_risk * 0.18 + gamma_risk * 0.24 + shock_risk * 0.24
+        clean_risk = max(0, 100 - risk_score)
+
+        if net_bias >= 22:
+            proposed = "SELL PE"
+        elif net_bias <= -22:
+            proposed = "SELL CE"
+        else:
+            proposed = "WAIT"
+
+        # PCR sanity filter
+        warnings = []
+        if proposed == "SELL PE" and pcr > 1.65:
+            warnings.append("PCR overheated; bullish trade caution.")
+        if proposed == "SELL CE" and pcr < 0.75 and pcr > 0:
+            warnings.append("PCR bearish already; CE sell caution.")
+
+        confidence = int(round(max(0, min(98, data_quality * 0.28 + abs(net_bias) * 0.40 + clean_risk * 0.32))))
+
+        return {
+            "proposed_action": proposed,
+            "net_bias": int(round(net_bias)),
+            "bullish_power": int(round(bullish_power)),
+            "bearish_power": int(round(bearish_power)),
+            "risk_score": int(round(risk_score)),
+            "clean_risk": int(round(clean_risk)),
+            "snapshot_confidence": confidence,
+            "notes": notes[:6],
+            "warnings": warnings,
+        }
+    except Exception as exc:
+        return {"proposed_action": "WAIT", "net_bias": 0, "snapshot_confidence": 0, "notes": [str(exc)], "warnings": ["Snapshot AI error."]}
+
+
+def v187_apply_snapshot_ai(fd, snapshot, delta):
+    if not isinstance(fd, dict):
+        return fd
+    fd = dict(fd)
+    s_ai = v187_score_from_snapshot(snapshot)
+    fd["snapshot_ai"] = s_ai
+
+    current_action = str(fd.get("action", "WAIT")).upper()
+    proposed = str(s_ai.get("proposed_action", "WAIT")).upper()
+    material = 0
+    try:
+        material = int(delta.get("material_change", 0))
+    except Exception:
+        material = 0
+
+    blockers = fd.get("blockers", []) if isinstance(fd.get("blockers", []), list) else []
+    warnings = fd.get("warnings", []) if isinstance(fd.get("warnings", []), list) else []
+
+    for w in s_ai.get("warnings", []) or []:
+        if w not in warnings:
+            warnings.append(w)
+
+    # Snapshot AI should not aggressively overwrite a working final decision yet.
+    # It only blocks contradiction or improves WAIT explanation.
+    if current_action != proposed and proposed != "WAIT":
+        if material < 35:
+            blockers.append(f"Snapshot AI wants {proposed}, but material change only {material}/100. Wait for confirmation.")
+        else:
+            warnings.append(f"Snapshot AI bias shifted toward {proposed}; confirm before changing trade.")
+
+    if current_action != "WAIT" and proposed == "WAIT":
+        warnings.append("Snapshot AI sees no clean directional edge; manage existing trade carefully.")
+
+    # If current action is WAIT and snapshot confidence is strong, show opportunity but do not force trade.
+    if current_action == "WAIT" and proposed != "WAIT" and s_ai.get("snapshot_confidence", 0) >= 75 and material >= 35:
+        warnings.append(f"Possible setup forming: {proposed}. Need final strike/hedge validation.")
+
+    if blockers:
+        fd["action"] = "WAIT"
+        fd["quality"] = "BLOCKED"
+        fd["confidence"] = min(int(fd.get("confidence", 0) or 0), 64)
+        if isinstance(fd.get("strategy", {}), dict):
+            fd["strategy"]["type"] = "WAIT"
+            fd["strategy"]["sell_side"] = None
+            fd["strategy"]["sell_strike"] = "No Strike"
+            fd["strategy"]["hedge_strike"] = "No Hedge"
+            fd["strategy"]["sl"] = "No Trade"
+            fd["strategy"]["target"] = "No Trade"
+            fd["strategy"]["lots"] = 0
+
+    fd["blockers"] = blockers[:12]
+    fd["warnings"] = warnings[:12]
+
+    reasons = fd.get("reasons", []) if isinstance(fd.get("reasons", []), list) else []
+    snap_reason = f"Snapshot AI: {proposed} bias | Net bias {s_ai.get('net_bias',0)} | Confidence {s_ai.get('snapshot_confidence',0)}%."
+    if snap_reason not in reasons:
+        reasons.insert(0, snap_reason)
+    fd["reasons"] = reasons[:12]
+    fd["version"] = "V18.7 Snapshot Driven AI"
+
+    return fd
+
+
+try:
+    final_decision = v187_apply_snapshot_ai(final_decision, market_snapshot, snapshot_delta)
+except Exception as _v187_error:
+    try:
+        final_decision.setdefault("warnings", []).append(f"V18.7 snapshot AI error: {_v187_error}")
+    except Exception:
+        pass
+
+try:
+    final_trade = final_decision.get("action", "WAIT")
+    confidence = float(final_decision.get("confidence", 0))
+    selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
+    hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
+    suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
+    sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
+    target_display = final_decision.get("strategy", {}).get("target", "No Trade")
+except Exception:
+    pass
 
 
 
@@ -4535,7 +4703,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.6 Snapshot Foundation</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.7 Snapshot Driven AI</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4545,7 +4713,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V18.6 Snapshot Smart AI — {_quality}</h3>
+<h3>🧠 V18.7 Snapshot Driven AI — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4565,10 +4733,17 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V18.6: Snapshot object active — core engines untouched.")
+            st.caption("V18.7: AI reads from snapshot — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
+
+                try:
+                    _sai = _fd.get("snapshot_ai", {}) if isinstance(_fd.get("snapshot_ai", {}), dict) else {}
+                    if _sai:
+                        st.caption(f"Snapshot AI: {_sai.get('proposed_action','WAIT')} | Net Bias: {_sai.get('net_bias',0)} | Snapshot Confidence: {_sai.get('snapshot_confidence',0)}%")
+                except Exception:
+                    pass
             except Exception:
                 pass
     except Exception:
@@ -4604,6 +4779,9 @@ try:
                 st.json(market_snapshot)
                 st.markdown("#### Snapshot Delta")
                 st.json(snapshot_delta)
+
+                st.markdown("#### V18.7 Snapshot AI")
+                st.json(_fd.get("snapshot_ai", {}) if isinstance(_fd, dict) else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -4611,7 +4789,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: One Snapshot Object + One AI Output</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Snapshot Driven AI + One Final Decision</div>",
     unsafe_allow_html=True,
 )
 
