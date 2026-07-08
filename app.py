@@ -2321,7 +2321,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V16.2 Super App AI")
+st.sidebar.title("⚙️ V16.3 Super App AI")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -2929,12 +2929,12 @@ v14_reason_items = v14_reason_breakdown(price_action_bias, option_bias, heavy_bi
 
 # V9.1 stable defaults: prevent NameError if any earlier block skipped.
 try:
-    conflict_mode
+    _ = conflict_mode
 except NameError:
     conflict_mode, conflict_reasons = v91_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, locals().get("gamma_score_v7", 0))
 
 try:
-    data_quality
+    _ = data_quality
 except NameError:
     data_quality, data_quality_reasons = v91_data_quality_score(
         dhan_ready=locals().get("dhan_ready", False),
@@ -3102,7 +3102,7 @@ def v10_sl_target(entry_premium, gamma_score, shock_score, confidence):
 
 # V10 analytics calculated after all major signals are available.
 try:
-    v10_probs
+    _ = v10_probs
 except NameError:
     v10_probs = v10_probability_engine(
         price_action_bias,
@@ -3116,7 +3116,7 @@ except NameError:
     )
 
 try:
-    v10_conflict_notes
+    _ = v10_conflict_notes
 except NameError:
     v10_conflict_notes = v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr)
 
@@ -3290,7 +3290,7 @@ def v11_strategy_text(strategy, confidence):
 
 # V11 Super Signal + Strategy Ranking
 try:
-    v11_super
+    _ = v11_super
 except NameError:
     v11_super = v11_super_signal_engine(
         final_trade=locals().get("final_trade", "WAIT"),
@@ -3310,7 +3310,7 @@ except NameError:
     )
 
 try:
-    v11_ranked_strategies
+    _ = v11_ranked_strategies
 except NameError:
     v11_ranked_strategies = v11_strategy_ranker(
         price_action_bias=locals().get("price_action_bias", 0),
@@ -3530,12 +3530,12 @@ def v12_build_trade_ticket(
 
 # V12 AI Trade Ticket
 try:
-    v12_top_strategy
+    _ = v12_top_strategy
 except NameError:
     v12_top_strategy = v11_ranked_strategies[0] if locals().get("v11_ranked_strategies") else {"strategy": locals().get("final_trade", "WAIT"), "confidence": locals().get("confidence", 0)}
 
 try:
-    v12_trade_ticket
+    _ = v12_trade_ticket
 except NameError:
     v12_trade_ticket = v12_build_trade_ticket(
         top_strategy=v12_top_strategy,
@@ -3563,18 +3563,22 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 top_refresh_col, top_auto_col, top_time_col = st.columns([1, 1.4, 2.2])
-if top_refresh_col.button("🔄 Refresh Now", use_container_width=True):
+if top_refresh_col.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
+    st.session_state["v163_last_manual_refresh"] = fmt_time()
     st.rerun()
 
-# Persistent auto refresh: stays ON after meta/browser refresh and auto-stops after 30 minutes.
+# V16.3 Refresh Fix:
+# - Auto refresh is OFF unless the 30-min toggle is ON.
+# - Selected interval (20/30/60 sec) is respected.
+# - Scroll position is saved/restored to reduce top-jump during browser reload.
 with top_auto_col:
     _interval_options = [20, 30, 60]
     _saved_interval = int(st.session_state.get("v161_refresh_interval", 20) or 20)
     if _saved_interval not in _interval_options:
         _saved_interval = 20
-    _selected_interval = st.selectbox("Auto Refresh", _interval_options, index=_interval_options.index(_saved_interval), format_func=lambda x: f"{x} sec", key="v161_interval_widget")
-    _wanted_auto = st.toggle("Keep ON for 30 min", value=bool(st.session_state.get("v161_auto_refresh", False)), key="v161_auto_widget")
+    _selected_interval = st.selectbox("Auto interval", _interval_options, index=_interval_options.index(_saved_interval), format_func=lambda x: f"{x} sec", key="v163_interval_widget")
+    _wanted_auto = st.toggle("Auto ON for 30 min", value=bool(st.session_state.get("v161_auto_refresh", False)), key="v163_auto_widget")
     if _wanted_auto != bool(st.session_state.get("v161_auto_refresh", False)) or int(_selected_interval) != int(st.session_state.get("v161_refresh_interval", 20)):
         v161_set_auto_refresh(_wanted_auto, _selected_interval)
 
@@ -3586,14 +3590,28 @@ if _auto_refresh_on and _auto_remaining <= 0:
     _auto_refresh_on = False
 
 if _auto_refresh_on and market_text == "Market Open":
-    st.markdown(f"<meta http-equiv='refresh' content='{_auto_interval}'>", unsafe_allow_html=True)
-    top_time_col.success(f"Auto refresh ON: every {_auto_interval}s | Remaining ~{max(_auto_remaining//60,0)} min | Last full refresh: {fmt_time()}")
+    st.components.v1.html(f"""
+    <script>
+    try {{
+      const key = 'nifty_seller_scroll_y';
+      const saved = sessionStorage.getItem(key);
+      if (saved !== null) {{
+        setTimeout(() => window.parent.scrollTo(0, parseInt(saved || '0')), 150);
+      }}
+      setTimeout(() => {{
+        sessionStorage.setItem(key, String(window.parent.scrollY || 0));
+        window.parent.location.reload();
+      }}, {int(_auto_interval) * 1000});
+    }} catch(e) {{}}
+    </script>
+    """, height=0)
+    top_time_col.success(f"Auto ON: every {_auto_interval}s | Remaining ~{max(_auto_remaining//60,0)} min | Last refresh: {fmt_time()}")
 elif _auto_refresh_on and market_text != "Market Open":
-    top_time_col.warning(f"Auto refresh saved ON, but market closed. Last full refresh: {fmt_time()}")
+    top_time_col.warning(f"Auto saved ON, but market closed. No auto reload. Last refresh: {fmt_time()}")
 else:
-    top_time_col.caption(f"Auto refresh OFF | Last full refresh: {fmt_time()}")
+    top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V16.2 Super App</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V16.3 Super App</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Super Seller Terminal: Stable Refresh + Live Data + Multi-Position Portfolio + Exact Strike Execution</div>",
     unsafe_allow_html=True,
@@ -3665,6 +3683,101 @@ if not _signal_gate_v162["allowed"]:
         st.write("•", _r)
 else:
     st.success("Signal stable hai. Fir bhi broker price, spread, margin aur SL confirm karke hi order lagao.")
+
+
+# V16.3: Important Strategy Matrix moved near top.
+st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
+
+def _v163_side_plan(side, row, label=""):
+    if not row:
+        return {"Sell Strike": "-", "Entry": 0.0, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Hedge": "-"}
+    prefix = side.lower()
+    sell_strike = int(row.get("strike", 0) or 0)
+    premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+    plan = v12_sl_target_for_seller(premium, confidence, gamma_score_v7, shock_score_v7)
+    hedge_strike = v12_select_hedge_strike(sell_strike, side, hedge_gap)
+    return {
+        "Sell Strike": f"{sell_strike} {side}" if sell_strike else "-",
+        "Entry": round(premium, 2),
+        "SL": plan.get("sl", 0.0),
+        "Target 1": plan.get("target1", 0.0),
+        "Target 2": plan.get("target2", 0.0),
+        "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
+    }
+
+def _v163_conf(strategy_name):
+    try:
+        for r in v11_ranked_strategies:
+            if str(r.get("strategy", "")).upper() == strategy_name.upper():
+                return int(r.get("confidence", 0) or 0)
+    except Exception:
+        pass
+    return 0
+
+_ce_plan = _v163_side_plan("CE", best_ce)
+_pe_plan = _v163_side_plan("PE", best_pe)
+_ic_credit = round(float(_ce_plan.get("Entry", 0) or 0) + float(_pe_plan.get("Entry", 0) or 0), 2)
+_strategy_rows_v163 = [
+    {
+        "Strategy": "IRON CONDOR",
+        "Confidence": _v163_conf("IRON CONDOR"),
+        "Sell CE": _ce_plan["Sell Strike"],
+        "Buy CE Hedge": _ce_plan["Hedge"],
+        "Sell PE": _pe_plan["Sell Strike"],
+        "Buy PE Hedge": _pe_plan["Hedge"],
+        "Entry/Credit": _ic_credit,
+        "SL": f"CE {float(_ce_plan.get('SL',0)):.2f} / PE {float(_pe_plan.get('SL',0)):.2f}",
+        "Target": f"CE {float(_ce_plan.get('Target 1',0)):.2f} / PE {float(_pe_plan.get('Target 1',0)):.2f}",
+        "Entry Status": "✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade != "WAIT" else "⚠️ Wait",
+    },
+    {
+        "Strategy": "SELL CE",
+        "Confidence": _v163_conf("SELL CE"),
+        "Sell CE": _ce_plan["Sell Strike"],
+        "Buy CE Hedge": _ce_plan["Hedge"],
+        "Sell PE": "-", "Buy PE Hedge": "-",
+        "Entry/Credit": _ce_plan["Entry"],
+        "SL": _ce_plan["SL"],
+        "Target": _ce_plan["Target 1"],
+        "Entry Status": "✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait",
+    },
+    {
+        "Strategy": "SELL PE",
+        "Confidence": _v163_conf("SELL PE"),
+        "Sell CE": "-", "Buy CE Hedge": "-",
+        "Sell PE": _pe_plan["Sell Strike"],
+        "Buy PE Hedge": _pe_plan["Hedge"],
+        "Entry/Credit": _pe_plan["Entry"],
+        "SL": _pe_plan["SL"],
+        "Target": _pe_plan["Target 1"],
+        "Entry Status": "✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait",
+    },
+    {
+        "Strategy": "BUY PUT (Hedged)",
+        "Confidence": _v163_conf("BUY PUT (Hedged)"),
+        "Sell CE": "-", "Buy CE Hedge": "-",
+        "Sell PE": "-", "Buy PE Hedge": "ATM PE + hedge",
+        "Entry/Credit": "Defined risk",
+        "SL": "Use buyer SL",
+        "Target": "Use buyer target",
+        "Entry Status": "Only strong trend",
+    },
+    {
+        "Strategy": "WAIT",
+        "Confidence": _v163_conf("WAIT"),
+        "Sell CE": "-", "Buy CE Hedge": "-", "Sell PE": "-", "Buy PE Hedge": "-",
+        "Entry/Credit": 0, "SL": "No trade", "Target": "No trade",
+        "Entry Status": "Capital safe",
+    },
+]
+_strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
+st.dataframe(pd.DataFrame(_strategy_rows_v163), use_container_width=True, hide_index=True)
+_best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
+st.markdown(f"**Best Setup:** {_best_row_v163.get('Strategy','WAIT')} ({_best_row_v163.get('Confidence',0)}%)  |  **Final AI:** {final_trade} ({confidence:.0f}%)")
+if final_trade == "WAIT":
+    st.warning("Ranking high ho sakti hai, par entry tabhi jab Final AI + Signal Gate green ho. Abhi WAIT/blocked hai.")
+else:
+    st.success("Final AI active hai. Phir bhi broker price, spread, margin aur hedge confirm karo.")
 
 # AI Brain top panel
 st.markdown("### 🧠 AI Brain — Memory + Freeze + Regime")
@@ -3819,70 +3932,10 @@ else:
             else:
                 st.info("Candidate unavailable")
 
-    with st.expander("🛠️ Developer: V15 Smart Watchlist — internal candidate scores", expanded=developer_mode):
-        if _v15_watchlist:
-            _watch_df = pd.DataFrame([{
-                "Rank": i + 1,
-                "Strike": f"{x['strike']} {x['side']}",
-                "Premium": round(x['premium'], 2),
-                "Safe Score": x['safe_score'],
-                "Worthless %": x['worthless_probability'],
-                "Explosion Risk %": x['premium_explosion_risk'],
-                "Distance": round(x['distance'], 1),
-                "Label": x['label'],
-            } for i, x in enumerate(_v15_watchlist)])
-            st.dataframe(_watch_df, use_container_width=True, hide_index=True)
-            st.caption("Safe Score guarantee nahi hai. Ye distance + delta + theta + gamma + fake move + VIX risk ka probability score hai. Hedge/SL mandatory.")
-        else:
-            st.info("No high-quality OTM candidates found in current option-chain range.")
+    # V16.3: internal smart watchlist table removed from trading UI.
 
 # V13: put the most actionable parts near the top for mobile trading.
-with st.expander("🎯 Final Strategy Setup — Exact Strikes + SL + Target", expanded=True):
-    _rank_df_top = pd.DataFrame(v11_ranked_strategies)
-    _top_top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
-    if developer_mode:
-        st.caption("Developer view: Strategy Ranking sirf reference hai, entry signal nahi.")
-        st.dataframe(_rank_df_top, use_container_width=True, hide_index=True)
-    st.markdown(f"**Best Setup:** {_top_top.get('strategy','WAIT')} ({_top_top.get('confidence',0)}%)  |  **Final AI:** {final_trade} ({confidence:.0f}%)")
-    if final_trade == "WAIT":
-        st.warning("Entry blocked: ranking high ho sakti hai, par Final AI/Signal Gate green nahi hai.")
-
-    def _leg_setup(side, row):
-        if not row:
-            return {"Side": side, "Sell Strike": 0, "Entry": 0.0, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Hedge": 0}
-        prefix = side.lower()
-        premium = float(row.get(f"{prefix}_ltp", 0) or 0)
-        st_data = v12_sl_target_for_seller(premium, confidence, gamma_score_v7, shock_score_v7)
-        sell_strike = int(row.get("strike", 0) or 0)
-        return {
-            "Side": side,
-            "Sell Strike": sell_strike,
-            "Entry": round(premium, 2),
-            "SL": st_data.get("sl", 0.0),
-            "Target 1": st_data.get("target1", 0.0),
-            "Target 2": st_data.get("target2", 0.0),
-            "Hedge": v12_select_hedge_strike(sell_strike, side, hedge_gap),
-        }
-
-    setup_rows = []
-    top_strategy = str(_top_top.get("strategy", "WAIT"))
-    if top_strategy == "IRON CONDOR":
-        setup_rows = [_leg_setup("CE", best_ce), _leg_setup("PE", best_pe)]
-        st.success(f"⭐ Best Strategy: IRON CONDOR ({_top_top.get('confidence', 0)}%). Dono side hedge/SL mandatory.")
-    elif top_strategy == "SELL CE":
-        setup_rows = [_leg_setup("CE", best_ce)]
-        st.error(f"⭐ Best Strategy: SELL CE ({_top_top.get('confidence', 0)}%).")
-    elif top_strategy == "SELL PE":
-        setup_rows = [_leg_setup("PE", best_pe)]
-        st.success(f"⭐ Best Strategy: SELL PE ({_top_top.get('confidence', 0)}%).")
-    else:
-        st.info(f"⭐ Best Strategy: {top_strategy} ({_top_top.get('confidence', 0)}%).")
-
-    if setup_rows:
-        st.dataframe(pd.DataFrame(setup_rows), use_container_width=True, hide_index=True)
-        st.caption("Entry tabhi lena jab Final AI, Data Quality aur Health Monitor green ho. Ye execution reference hai, guarantee nahi.")
-    else:
-        st.write(v11_strategy_text(top_strategy, _top_top.get("confidence", 0)))
+# V16.3: Strategy setup moved near top as Smart Strategy Matrix.
 
 with st.expander("⚡ Live Candidate Cards — Price + SL + Target", expanded=True):
     if option_analysis.get("success"):
