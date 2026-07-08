@@ -27,7 +27,7 @@ try:
 except Exception:
     V19_UTILS_READY = False
 
-# V19.4 AI Brain Module module import.
+# V19.5 Risk Engine Module module import.
 try:
     from snapshot_engine import (
         build_market_snapshot as v19_build_market_snapshot,
@@ -45,9 +45,16 @@ try:
 except Exception:
     V19_AI_BRAIN_READY = False
 
+# V19.5 Risk Engine module import.
+try:
+    from risk_engine import build_risk_report as v19_build_risk_report
+    V19_RISK_ENGINE_READY = True
+except Exception:
+    V19_RISK_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.4 - AI BRAIN MODULE
+# NIFTY SELLER AI DASHBOARD V19.5 - RISK ENGINE MODULE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -68,7 +75,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.4 AI Brain Module",
+    page_title="Nifty Seller AI Dashboard V19.5 Risk Engine Module",
     page_icon="🧠",
     layout="wide",
 )
@@ -2392,12 +2399,13 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.4 Modular AI")
-st.sidebar.caption("V19.4: AI Brain module")
+st.sidebar.title("⚙️ V19.5 Modular AI")
+st.sidebar.caption("V19.5: Risk Engine module")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
+    st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
 except Exception:
     pass
 
@@ -4102,7 +4110,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V19.4 AI Brain Module",
+        "version": "V19.5 Risk Engine Module",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4139,7 +4147,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V19.4 AI Brain Module",
+        "version": "V19.5 Risk Engine Module",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4358,7 +4366,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V19.4 AI Brain Module"
+    fd["version"] = "V19.5 Risk Engine Module"
 
     return fd
 
@@ -4466,7 +4474,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V19.4 AI Brain Module",
+        "version": "V19.5 Risk Engine Module",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4577,7 +4585,7 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V19.4 AI Brain Module", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V19.5 Risk Engine Module", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
 
 
@@ -4724,7 +4732,7 @@ def v187_apply_snapshot_ai(fd, snapshot, delta):
     if snap_reason not in reasons:
         reasons.insert(0, snap_reason)
     fd["reasons"] = reasons[:12]
-    fd["version"] = "V19.4 AI Brain Module"
+    fd["version"] = "V19.5 Risk Engine Module"
 
     return fd
 
@@ -4874,7 +4882,7 @@ def v188_apply_snapshot_health_guard(fd, snapshot):
     if health_reason not in reasons:
         reasons.insert(0, health_reason)
     fd["reasons"] = reasons[:14]
-    fd["version"] = "V19.4 AI Brain Module"
+    fd["version"] = "V19.5 Risk Engine Module"
     return fd
 
 
@@ -4960,6 +4968,45 @@ except Exception as _v194_error:
 
 
 
+
+# =========================================================
+# V19.5 RISK ENGINE MODULE BRIDGE
+# =========================================================
+# External risk_engine produces one explainable risk authority report.
+# In this release it does NOT choose direction and does NOT overwrite final action.
+try:
+    if V19_RISK_ENGINE_READY:
+        _health_for_risk = {}
+        if isinstance(final_decision, dict):
+            _health_for_risk = final_decision.get("snapshot_health", {}) or final_decision.get("snapshot_health_external", {}) or {}
+        if not _health_for_risk and "snapshot_health_external" in globals():
+            _health_for_risk = snapshot_health_external
+
+        risk_engine_report = v19_build_risk_report(
+            market_snapshot,
+            snapshot_health=_health_for_risk,
+            snapshot_delta=snapshot_delta,
+            ai_report=ai_brain_report if "ai_brain_report" in globals() else {},
+        )
+
+        if isinstance(final_decision, dict):
+            final_decision["risk_engine_module"] = "READY"
+            final_decision["risk_report"] = risk_engine_report
+            # V19.5 migration rule:
+            # Risk Engine is report authority, not final decision authority yet.
+            # Direction/action remains unchanged until V19.6 Decision Engine.
+    else:
+        risk_engine_report = {}
+except Exception as _v195_error:
+    risk_engine_report = {"error": str(_v195_error)}
+    try:
+        if isinstance(final_decision, dict):
+            final_decision.setdefault("warnings", []).append(f"V19.5 Risk Engine error: {_v195_error}")
+    except Exception:
+        pass
+
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -4968,7 +5015,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.4 AI Brain Module</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.5 Risk Engine Module</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4978,7 +5025,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V19.4 AI Brain Module — {_quality}</h3>
+<h3>🧠 V19.5 Risk Engine Module — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4998,7 +5045,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.4: AI Brain module active — core engines untouched.")
+            st.caption("V19.5: Risk Engine module active — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -5039,6 +5086,56 @@ try:
         pass
 
 
+    
+    try:
+        _risk_report = _fd.get("risk_report", {}) if isinstance(_fd.get("risk_report", {}), dict) else {}
+        if _risk_report:
+            _risk_score = _risk_report.get("risk_score", 0)
+            _safety_score = _risk_report.get("safety_score", 0)
+            _risk_grade = _risk_report.get("risk_grade", "NA")
+            _guidance = _risk_report.get("guidance", "NA")
+
+            r1, r2, r3, r4 = st.columns(4)
+            r1.metric("Risk Score", f"{_risk_score}/100")
+            r2.metric("Safety Score", f"{_safety_score}/100")
+            r3.metric("Risk Grade", _risk_grade)
+            r4.metric("Risk Guidance", _guidance)
+
+            with st.expander("🛡️ Risk Engine Explanation", expanded=False):
+                st.write("**Hard Blockers:**")
+                if _risk_report.get("hard_blockers"):
+                    for _b in _risk_report.get("hard_blockers", [])[:8]:
+                        st.write("•", _b)
+                else:
+                    st.write("• No hard blocker from V19.5 Risk Engine.")
+
+                st.write("**Warnings:**")
+                if _risk_report.get("warnings"):
+                    for _w in _risk_report.get("warnings", [])[:8]:
+                        st.write("•", _w)
+                else:
+                    st.write("• No major warning.")
+
+                st.write("**Positive Risk Reasons:**")
+                if _risk_report.get("reasons"):
+                    for _r in _risk_report.get("reasons", [])[:8]:
+                        st.write("•", _r)
+                else:
+                    st.write("• No positive risk reason available.")
+
+                st.write("**Risk Components:**")
+                try:
+                    _risk_df = pd.DataFrame([
+                        {"Component": k, "Risk": v}
+                        for k, v in (_risk_report.get("components", {}) or {}).items()
+                    ])
+                    st.dataframe(_risk_df, use_container_width=True)
+                except Exception:
+                    st.json(_risk_report.get("components", {}))
+    except Exception:
+        pass
+
+
     if _fd.get("blockers"):
         with st.expander("🛑 Why WAIT / Blockers", expanded=False):
             for _b in _fd.get("blockers", [])[:8]:
@@ -5053,9 +5150,10 @@ try:
             st.write("V18.4 safe cleanup active.")
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
-            st.write("V19.4 AI Brain Module:", "READY" if V19_UTILS_READY else "FALLBACK")
+            st.write("V19.5 Risk Engine Module:", "READY" if V19_UTILS_READY else "FALLBACK")
             st.write("Snapshot Engine Module:", "READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK")
             st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
+            st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
             st.write("Next module target: ai_brain.py")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
             st.write("V18.5 removed: None")
@@ -5089,6 +5187,9 @@ try:
 
                 st.markdown("#### V19.4 AI Brain Report")
                 st.json(ai_brain_report if "ai_brain_report" in globals() else {})
+
+                st.markdown("#### V19.5 Risk Engine Report")
+                st.json(risk_engine_report if "risk_engine_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5096,7 +5197,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Modular AI Brain + Snapshot Engine</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Modular Risk Engine + AI Brain + Snapshot Engine</div>",
     unsafe_allow_html=True,
 )
 
