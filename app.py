@@ -73,9 +73,16 @@ try:
 except Exception:
     V19_INTELLIGENCE_ENGINE_READY = False
 
+# V19.12 Stability Engine module import.
+try:
+    from stability_engine import apply_stability_lock as v19_apply_stability_lock
+    V19_STABILITY_ENGINE_READY = True
+except Exception:
+    V19_STABILITY_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.11 - AI INTELLIGENCE ENGINE
+# NIFTY SELLER AI DASHBOARD V19.12 - DECISION STABILITY ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -96,7 +103,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.11 AI Intelligence Engine",
+    page_title="Nifty Seller AI Dashboard V19.12 Decision Stability Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2391,8 +2398,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.11 Modular AI")
-st.sidebar.caption("V19.11: AI Intelligence Engine")
+st.sidebar.title("⚙️ V19.12 Modular AI")
+st.sidebar.caption("V19.12: Decision Stability Engine")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -2401,6 +2408,7 @@ try:
     st.sidebar.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("strategy_engine: " + ("READY / PLAN AUTHORITY" if V19_STRATEGY_ENGINE_READY else "MISSING"))
     st.sidebar.caption("intelligence_engine: " + ("READY / EXPLAINER" if V19_INTELLIGENCE_ENGINE_READY else "MISSING"))
+    st.sidebar.caption("stability_engine: " + ("READY / LOCK" if V19_STABILITY_ENGINE_READY else "MISSING"))
 except Exception:
     pass
 
@@ -4430,6 +4438,71 @@ except Exception as _v1911_intelligence_error:
 
 
 # =========================================================
+# V19.12 STABILITY ENGINE — PREVENT REFRESH JUMPS
+# =========================================================
+# Runs after Decision Engine + Intelligence Engine.
+# It prevents SELL CE/PE or strike jumps from changing on one weak refresh.
+if not V19_STABILITY_ENGINE_READY:
+    st.error(
+        "V19.12 requires stability_engine.py. "
+        "Decision stability module is missing or failed to import."
+    )
+    st.stop()
+
+try:
+    _previous_stable_v1912 = st.session_state.get("v1912_stable_decision_lock", {})
+
+    _material_change_v1912 = 0
+    if isinstance(snapshot_delta, dict):
+        _material_change_v1912 = int(snapshot_delta.get("material_change", 0) or 0)
+
+    stability_result = v19_apply_stability_lock(
+        current_decision=decision_engine_report if isinstance(decision_engine_report, dict) else {},
+        previous_locked=_previous_stable_v1912,
+        material_change=_material_change_v1912,
+        risk_report=risk_engine_report if isinstance(risk_engine_report, dict) else {},
+        intelligence_report=intelligence_report if isinstance(intelligence_report, dict) else {},
+        max_strike_jump=100,
+        min_change_for_new_strike=45,
+        min_change_for_direction_flip=65,
+    )
+
+    stable_decision_report = stability_result.get("decision", decision_engine_report)
+    stability_report = stability_result.get("stability", {})
+    st.session_state["v1912_stable_decision_lock"] = stability_result.get("lock_state", {})
+
+    decision_engine_report = stable_decision_report
+
+    if isinstance(final_decision, dict):
+        final_decision["decision_engine"] = decision_engine_report
+        final_decision["stability_engine_module"] = "READY"
+        final_decision["stability_report"] = stability_report
+
+        final_decision["analysis_action"] = decision_engine_report.get("analysis_action", "WAIT")
+        final_decision["action"] = decision_engine_report.get("final_action", "WAIT")
+        final_decision["confidence"] = decision_engine_report.get("calibrated_confidence", 0)
+        final_decision["execution_status"] = decision_engine_report.get("execution_status", "WAIT")
+
+        _status_v1912 = decision_engine_report.get("execution_status", "WAIT")
+        final_decision["quality"] = {
+            "APPROVED": "OK",
+            "BLOCKED": "BLOCKED",
+            "PREVIEW_ONLY": "PREVIEW",
+            "WAIT": "WAIT",
+        }.get(_status_v1912, "WAIT")
+
+        final_trade = final_decision.get("action", "WAIT")
+        confidence = float(final_decision.get("confidence", 0) or 0)
+        suggested_lots = int(decision_engine_report.get("approved_lots", 0) or 0)
+
+except Exception as _v1912_stability_error:
+    st.error("Stability Engine failed: " + str(_v1912_stability_error))
+    st.stop()
+
+
+
+
+# =========================================================
 # UI
 # =========================================================
 market_text, day_name = market_status()
@@ -4437,7 +4510,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.11 AI Intelligence Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.12 Decision Stability Engine</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4450,7 +4523,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.11 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.12 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -4458,7 +4531,8 @@ try:
 <b>{_action_label}:</b> {_final_action_card} &nbsp; | &nbsp;
 <b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
 <b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
-<b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')}<br>
+<b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')} &nbsp; | &nbsp;
+<b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')}<br>
 <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4472,6 +4546,27 @@ try:
 """, unsafe_allow_html=True)
 
     
+    try:
+        _stab_report_ui = (
+            _fd.get("stability_report", {})
+            if isinstance(_fd.get("stability_report", {}), dict)
+            else {}
+        )
+        if _stab_report_ui:
+            with st.expander("🔒 Decision Stability Lock — Refresh Jump Protection", expanded=False):
+                st1, st2, st3, st4 = st.columns(4)
+                st1.metric("Stability Status", _stab_report_ui.get("status", "NA"))
+                st2.metric("Locked", "YES" if _stab_report_ui.get("locked") else "NO")
+                st3.metric("Material Change", f"{_stab_report_ui.get('material_change',0)}/100")
+                st4.metric("Strike Jump", f"{_stab_report_ui.get('strike_jump',0):.0f} pts")
+                st.write("**Reason:**", _stab_report_ui.get("reason", "NA"))
+                st.caption(
+                    "Rule: Strike/direction change tabhi accept hoga jab material change strong ho "
+                    "ya risk safety override ho. Isse refresh par 102 CE → 78 CE type jump block hoga."
+                )
+    except Exception:
+        pass
+
     try:
         _intel_report_ui = (
             _fd.get("intelligence_report", {})
@@ -4719,6 +4814,7 @@ try:
             st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
             st.write("Strategy Engine Authority:", "READY" if V19_STRATEGY_ENGINE_READY else "MISSING")
             st.write("Intelligence Engine:", "READY" if V19_INTELLIGENCE_ENGINE_READY else "MISSING")
+            st.write("Stability Engine:", "READY" if V19_STABILITY_ENGINE_READY else "MISSING")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
@@ -4777,6 +4873,9 @@ try:
 
                 st.markdown("#### V19.11 Intelligence Engine Report")
                 st.json(intelligence_report if "intelligence_report" in globals() else {})
+
+                st.markdown("#### V19.12 Stability Engine Report")
+                st.json(stability_report if "stability_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5560,6 +5659,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.11 build: intelligence_engine.py explains signal reliability, conflict, fake-move risk and trade quality. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.12 build: stability_engine.py prevents one-refresh decision and strike jumps. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
