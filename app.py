@@ -61,7 +61,7 @@ except Exception:
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.7 - DECISION AUTHORITY CLEANUP
+# NIFTY SELLER AI DASHBOARD V19.8 - CONFIDENCE RANKING CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -82,7 +82,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.7 Decision Authority Cleanup",
+    page_title="Nifty Seller AI Dashboard V19.8 Confidence Ranking Cleanup",
     page_icon="🧠",
     layout="wide",
 )
@@ -2377,8 +2377,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.7 Modular AI")
-st.sidebar.caption("V19.7: Single Decision Authority Cleanup")
+st.sidebar.title("⚙️ V19.8 Modular AI")
+st.sidebar.caption("V19.8: Confidence + Ranking Cleanup")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
@@ -3765,154 +3765,14 @@ def v12_sl_target_for_buyer(premium, confidence=0):
         "target2": round(premium * 1.70, 2),
     }
 
-def v12_build_trade_ticket(
-    top_strategy,
-    final_trade,
-    best_ce,
-    best_pe,
-    option_analysis,
-    price,
-    confidence,
-    seller_risk,
-    shock_score,
-    gamma_score,
-    hedge_gap=100,
-    max_lots=1,
-    conflict_mode=True,
-    data_quality=0,
-):
-    """
-    Builds a human-readable trade ticket. Recommendation only, no auto-order.
-    """
-    strategy = (top_strategy or {}).get("strategy", final_trade or "WAIT")
-    # V13: final WAIT must lock the ticket to NO TRADE. Ranking is only reference.
-    if str(final_trade).upper() == "WAIT" or conflict_mode or data_quality < 70:
-        strategy = "WAIT"
-    strategy_conf = int((top_strategy or {}).get("confidence", confidence or 0))
-    confidence = max(v91_safe_num(confidence), strategy_conf)
-    data_quality = v91_safe_num(data_quality)
-    max_lots = int(max(0, max_lots or 0))
-    lots = 0 if strategy == "WAIT" else min(max_lots, 1 if confidence < 82 else 2 if confidence < 90 else 3)
-
-    reasons = []
-    warnings = []
-    legs = []
-    summary = "WAIT"
-
-    if data_quality < 70:
-        warnings.append("Data quality low/medium hai. Real trade avoid karo.")
-    if conflict_mode:
-        warnings.append("Conflict mode active hai. Fresh trade avoid.")
-    if seller_risk > 60:
-        warnings.append("Seller risk elevated hai.")
-    if shock_score > 60:
-        warnings.append("Shock risk elevated hai.")
-    if gamma_score > 70:
-        warnings.append("Gamma risk high hai.")
-
-    def add_seller_leg(side, strike, label):
-        row = v12_option_row_by_strike(option_analysis, strike)
-        prem = v12_premium_from_row(row, side)
-        plan = v12_sl_target_for_seller(prem, confidence, gamma_score, shock_score)
-        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap)
-        hedge_row = v12_option_row_by_strike(option_analysis, hedge_strike)
-        hedge_prem = v12_premium_from_row(hedge_row, side)
-        legs.append({"Action": "SELL", "Leg": label, "Side": side, "Strike": int(strike), "Premium": prem, "SL": plan["sl"], "Target 1": plan["target1"], "Target 2": plan["target2"], "Trail After": plan["trail_after"]})
-        if hedge_strike:
-            legs.append({"Action": "BUY", "Leg": f"{label} Hedge", "Side": side, "Strike": int(hedge_strike), "Premium": hedge_prem, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Trail After": 0.0})
-        return prem, hedge_prem
-
-    def add_buyer_leg(side, strike, label):
-        row = v12_option_row_by_strike(option_analysis, strike)
-        prem = v12_premium_from_row(row, side)
-        plan = v12_sl_target_for_buyer(prem, confidence)
-        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap)
-        hedge_row = v12_option_row_by_strike(option_analysis, hedge_strike)
-        hedge_prem = v12_premium_from_row(hedge_row, side)
-        legs.append({"Action": "BUY", "Leg": label, "Side": side, "Strike": int(strike), "Premium": prem, "SL": plan["sl"], "Target 1": plan["target1"], "Target 2": plan["target2"], "Trail After": 0.0})
-        if hedge_strike:
-            legs.append({"Action": "SELL", "Leg": f"{label} Cost Hedge", "Side": side, "Strike": int(hedge_strike), "Premium": hedge_prem, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Trail After": 0.0})
-        return prem, hedge_prem
-
-    if strategy == "WAIT" or warnings:
-        summary = "NO TRADE / WAIT"
-        reasons.append("Capital protection priority. Trade tabhi jab Action Plan + Checklist agree kare.")
-    elif strategy == "SELL CE":
-        strike = int(best_ce.get("strike", v12_round_strike(price) + 100)) if best_ce else v12_round_strike(price) + 100
-        add_seller_leg("CE", strike, "Main CE Sell")
-        summary = f"SELL {strike} CE with hedge"
-        reasons.append("CE selling selected by strategy engine.")
-    elif strategy == "SELL PE":
-        strike = int(best_pe.get("strike", v12_round_strike(price) - 100)) if best_pe else v12_round_strike(price) - 100
-        add_seller_leg("PE", strike, "Main PE Sell")
-        summary = f"SELL {strike} PE with hedge"
-        reasons.append("PE selling selected by strategy engine.")
-    elif strategy == "IRON CONDOR":
-        ce_strike = int(best_ce.get("strike", v12_round_strike(price) + 150)) if best_ce else v12_round_strike(price) + 150
-        pe_strike = int(best_pe.get("strike", v12_round_strike(price) - 150)) if best_pe else v12_round_strike(price) - 150
-        ce_credit, ce_hedge = add_seller_leg("CE", ce_strike, "Condor CE Sell")
-        pe_credit, pe_hedge = add_seller_leg("PE", pe_strike, "Condor PE Sell")
-        summary = f"IRON CONDOR: Sell {ce_strike} CE + {pe_strike} PE"
-        reasons.append("Range strategy selected. Both sides must be hedged.")
-    elif strategy == "BUY CALL (Hedged)":
-        atm = v12_round_strike(price)
-        add_buyer_leg("CE", atm, "Hedged Call Buy")
-        summary = f"BUY {atm} CE with cost hedge"
-        reasons.append("Strong bullish/trend strategy selected. Defined risk only.")
-    elif strategy == "BUY PUT (Hedged)":
-        atm = v12_round_strike(price)
-        add_buyer_leg("PE", atm, "Hedged Put Buy")
-        summary = f"BUY {atm} PE with cost hedge"
-        reasons.append("Strong bearish/trend strategy selected. Defined risk only.")
-    else:
-        summary = "WAIT"
-        reasons.append("Strategy not clear.")
-
-    # Approx totals
-    sell_credit = sum(float(x["Premium"]) for x in legs if x["Action"] == "SELL")
-    buy_debit = sum(float(x["Premium"]) for x in legs if x["Action"] == "BUY")
-    net_credit = round(sell_credit - buy_debit, 2)
-    estimated_points_risk = int(hedge_gap) - net_credit if net_credit > 0 else buy_debit - sell_credit
-    return {
-        "summary": summary,
-        "strategy": strategy,
-        "confidence": int(confidence),
-        "lots": lots,
-        "legs": legs,
-        "net_credit": round(net_credit, 2),
-        "estimated_points_risk": round(max(0, estimated_points_risk), 2),
-        "reasons": reasons,
-        "warnings": warnings,
-    }
+# V19.8 CLEANUP: removed old v12_build_trade_ticket().
+# Decision Engine Ticket below is built from final authority output.
 
 
 
-# V12 AI Trade Ticket
-try:
-    _ = v12_top_strategy
-except NameError:
-    v12_top_strategy = v11_ranked_strategies[0] if locals().get("v11_ranked_strategies") else {"strategy": locals().get("final_trade", "WAIT"), "confidence": locals().get("confidence", 0)}
-
-try:
-    _ = v12_trade_ticket
-except NameError:
-    v12_trade_ticket = v12_build_trade_ticket(
-        top_strategy=v12_top_strategy,
-        final_trade=locals().get("final_trade", "WAIT"),
-        best_ce=locals().get("best_ce", None),
-        best_pe=locals().get("best_pe", None),
-        option_analysis=locals().get("option_analysis", {}),
-        price=locals().get("price", 0),
-        confidence=locals().get("confidence", 0),
-        seller_risk=locals().get("seller_risk", 100),
-        shock_score=locals().get("shock_score_v7", 100),
-        gamma_score=locals().get("gamma_score_v7", 100),
-        hedge_gap=locals().get("hedge_gap", 100),
-        max_lots=locals().get("max_lots", 1),
-        conflict_mode=locals().get("conflict_mode", True),
-        data_quality=locals().get("data_quality", 0),
-    )
-
+# V19.8 CLEANUP:
+# Old pre-authority V12 ticket setup removed.
+# Ticket UI now reads Decision Engine verdict + validated final strategy.
 
 
 # =========================================================
@@ -4171,211 +4031,10 @@ except Exception:
 
 
 # =========================================================
-# V18.3 SMART AI CONFIDENCE + MARKET REGIME
+# V19.8 CLEANUP — OLD V18.3 INTERNAL CONFIDENCE REWRITER REMOVED
 # =========================================================
-# Safe intelligence layer over V18.2. No data/refresh/portfolio changes.
-
-def v183_abs(value):
-    try:
-        return abs(float(value))
-    except Exception:
-        return 0.0
-
-
-def v183_direction_alignment(scores, action):
-    action = str(action or "WAIT").upper()
-    if action == "SELL PE" or "BUY CALL" in action:
-        direction = 1
-    elif action == "SELL CE" or "BUY PUT" in action:
-        direction = -1
-    else:
-        return 0, ["WAIT has no directional alignment requirement."]
-
-    components = [
-        ("Option Chain", float(scores.get("option_bias", 0)), 0.36),
-        ("Price Action", float(scores.get("price_action_bias", 0)), 0.28),
-        ("Heavyweights", float(scores.get("heavyweight_bias", 0)), 0.24),
-        ("Market Bias", float(scores.get("market_bias", 0)), 0.12),
-    ]
-
-    support = 0.0
-    weight_sum = 0.0
-    notes = []
-    for name, bias, weight in components:
-        weight_sum += weight
-        signed = bias * direction
-        if signed >= 45:
-            support += 100 * weight
-            notes.append(f"{name} strongly supports action.")
-        elif signed >= 20:
-            support += 75 * weight
-            notes.append(f"{name} supports action.")
-        elif signed >= -15:
-            support += 45 * weight
-            notes.append(f"{name} is neutral/mixed.")
-        else:
-            support += 10 * weight
-            notes.append(f"{name} opposes action.")
-
-    return int(round(max(0, min(100, support / max(weight_sum, 0.01))))), notes
-
-
-def v183_detect_market_regime(scores, ctx):
-    news_risk = float(scores.get("news_risk", 0))
-    gamma_risk = float(scores.get("gamma_risk", 0))
-    shock_risk = float(scores.get("shock_risk", 0))
-    seller_risk = float(scores.get("seller_risk", 0))
-    option_bias = float(scores.get("option_bias", 0))
-    price_bias = float(scores.get("price_action_bias", 0))
-    heavy_bias = float(scores.get("heavyweight_bias", 0))
-    expiry_mode = str(ctx.get("expiry_mode", ctx.get("mode", ""))).upper()
-
-    if news_risk >= 75:
-        return "NEWS DRIVEN", "High news/event risk is dominating normal signals."
-    if gamma_risk >= 75 or "EXPIRY" in expiry_mode:
-        return "EXPIRY / GAMMA", "Expiry/gamma risk requires extra safety."
-    if shock_risk >= 70 or seller_risk >= 72:
-        return "VOLATILE", "Shock/seller risk is elevated."
-    if abs(option_bias) >= 45 and abs(price_bias) >= 35 and (option_bias * price_bias) > 0:
-        return "TRENDING", "Option chain and price action are aligned."
-    if abs(price_bias) <= 25 and abs(option_bias) <= 35 and abs(heavy_bias) <= 30:
-        return "RANGE / NO EDGE", "Major signals are mixed or flat."
-    return "MIXED", "Market is not clean enough for aggressive confidence."
-
-
-def v183_trade_quality(scores, action, alignment_score, regime):
-    if str(action).upper() == "WAIT":
-        return 0, "NO TRADE"
-
-    data_quality = float(scores.get("data_quality", 0))
-    seller_risk = float(scores.get("seller_risk", 100))
-    news_risk = float(scores.get("news_risk", 100))
-    gamma_risk = float(scores.get("gamma_risk", 100))
-    shock_risk = float(scores.get("shock_risk", 100))
-
-    risk_clean = max(0, 100 - (seller_risk * 0.36 + news_risk * 0.20 + gamma_risk * 0.24 + shock_risk * 0.20))
-    regime_bonus = {
-        "TRENDING": 10,
-        "RANGE / NO EDGE": -12,
-        "VOLATILE": -15,
-        "NEWS DRIVEN": -25,
-        "EXPIRY / GAMMA": -10,
-        "MIXED": -7,
-    }.get(regime, 0)
-
-    quality = data_quality * 0.25 + alignment_score * 0.38 + risk_clean * 0.37 + regime_bonus
-    quality = int(round(max(0, min(100, quality))))
-
-    if quality >= 85:
-        label = "EXCELLENT"
-    elif quality >= 72:
-        label = "GOOD"
-    elif quality >= 60:
-        label = "CAUTION"
-    else:
-        label = "WEAK"
-    return quality, label
-
-
-def v183_rewrite_confidence(fd, ctx):
-    if not isinstance(fd, dict):
-        return fd
-
-    fd = dict(fd)
-    scores = dict(fd.get("scores", {}) if isinstance(fd.get("scores", {}), dict) else {})
-    action = str(fd.get("action", "WAIT")).upper()
-
-    regime, regime_reason = v183_detect_market_regime(scores, ctx)
-    alignment_score, alignment_notes = v183_direction_alignment(scores, action)
-    quality_score, quality_label = v183_trade_quality(scores, action, alignment_score, regime)
-
-    old_conf = float(fd.get("confidence", 0))
-    data_quality = float(scores.get("data_quality", 0))
-    seller_risk = float(scores.get("seller_risk", 100))
-    news_risk = float(scores.get("news_risk", 100))
-    gamma_risk = float(scores.get("gamma_risk", 100))
-    shock_risk = float(scores.get("shock_risk", 100))
-
-    risk_penalty = seller_risk * 0.20 + news_risk * 0.14 + gamma_risk * 0.16 + shock_risk * 0.12
-
-    if action == "WAIT":
-        smart_conf = max(45, min(88, 55 + risk_penalty * 0.35 + (100 - data_quality) * 0.25))
-    else:
-        smart_conf = old_conf * 0.25 + data_quality * 0.20 + alignment_score * 0.32 + quality_score * 0.23 - risk_penalty * 0.10
-        if regime in ("NEWS DRIVEN", "VOLATILE") and smart_conf < 85:
-            fd.setdefault("warnings", []).append(f"{regime} regime: avoid aggressive size.")
-        if quality_score < 60:
-            fd.setdefault("blockers", []).append(f"Trade quality weak: {quality_score}/100.")
-
-    smart_conf = int(round(max(0, min(98, smart_conf))))
-
-    blockers = fd.get("blockers", []) if isinstance(fd.get("blockers", []), list) else []
-    if blockers:
-        fd["action"] = "WAIT"
-        fd["quality"] = "BLOCKED"
-        fd["confidence"] = min(smart_conf, 64)
-        if isinstance(fd.get("strategy", {}), dict):
-            fd["strategy"]["type"] = "WAIT"
-            fd["strategy"]["sell_side"] = None
-            fd["strategy"]["sell_strike"] = "No Strike"
-            fd["strategy"]["hedge_strike"] = "No Hedge"
-            fd["strategy"]["sl"] = "No Trade"
-            fd["strategy"]["target"] = "No Trade"
-            fd["strategy"]["lots"] = 0
-    else:
-        fd["confidence"] = smart_conf
-        if quality_score >= 72 and smart_conf >= 70:
-            fd["quality"] = "OK"
-        elif action != "WAIT":
-            fd["quality"] = "CAUTION"
-
-    fd["ai_intelligence"] = {
-        "regime": regime,
-        "regime_reason": regime_reason,
-        "alignment_score": int(alignment_score),
-        "alignment_notes": alignment_notes[:5],
-        "trade_quality_score": int(quality_score),
-        "trade_quality_label": quality_label,
-        "old_confidence": int(round(old_conf)),
-        "smart_confidence": int(fd.get("confidence", smart_conf)),
-    }
-
-    reasons = fd.get("reasons", []) if isinstance(fd.get("reasons", []), list) else []
-    smart_reasons = [
-        f"Market regime: {regime} — {regime_reason}",
-        f"Signal alignment score: {alignment_score}/100.",
-        f"Trade quality: {quality_score}/100 ({quality_label}).",
-    ]
-    for item in reversed(smart_reasons):
-        if item not in reasons:
-            reasons.insert(0, item)
-    fd["reasons"] = reasons[:10]
-    fd["version"] = "V19.5.1 Full Audit Fix"
-
-    return fd
-
-
-try:
-    final_decision = v183_rewrite_confidence(final_decision, locals())
-except Exception as _v183_error:
-    try:
-        final_decision.setdefault("warnings", []).append(f"V18.3 confidence layer error: {_v183_error}")
-    except Exception:
-        pass
-
-try:
-    final_trade = final_decision.get("action", "WAIT")
-    confidence = float(final_decision.get("confidence", 0))
-    selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
-    hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
-    suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
-    sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
-    target_display = final_decision.get("strategy", {}).get("target", "No Trade")
-except Exception:
-    pass
-
-
-
+# ai_brain.py is now the only AI evidence/confidence layer.
+# decision_engine.py is the only final Decision Confidence authority.
 
 # =========================================================
 # V19.7 CLEANUP — OLD V18.5 CONSISTENCY GUARD REMOVED
@@ -4832,7 +4491,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.7 Decision Authority Cleanup</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.8 Confidence Ranking Cleanup</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4845,7 +4504,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.6 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.8 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -4871,7 +4530,7 @@ try:
                 d1, d2, d3, d4 = st.columns(4)
                 d1.metric("Final Verdict", _de_card.get("final_action", "WAIT"))
                 d2.metric("Execution Status", _de_card.get("execution_status", "WAIT"))
-                d3.metric("Calibrated Confidence", f"{_de_card.get('calibrated_confidence',0)}%")
+                d3.metric("Decision Confidence", f"{_de_card.get('calibrated_confidence',0)}%")
                 d4.metric("Approved Lots", _de_card.get("approved_lots", 0))
 
                 st.write("**Analysis Bias:**", _de_card.get("analysis_action", "WAIT"))
@@ -4899,39 +4558,39 @@ try:
         pass
 
     try:
-        _intel = _fd.get("ai_intelligence", {}) if isinstance(_fd.get("ai_intelligence", {}), dict) else {}
-        if _intel:
+        _brain_top = ai_brain_report if isinstance(ai_brain_report, dict) else {}
+        if _brain_top:
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Regime", _intel.get("regime", "NA"))
-            m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
-            m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
-            m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.7: Decision Engine is the single execution authority; rankings and AI bias are advisory inputs.")
+            m1.metric("Regime", _brain_top.get("regime", "NA"))
+            m2.metric("Alignment", f"{_brain_top.get('alignment_score', 0)}/100")
+            m3.metric("Trade Quality", f"{_brain_top.get('trade_quality_score', 0)}/100")
+            m4.metric("AI Evidence Score", f"{_brain_top.get('smart_confidence', 0)}%")
 
-            try:
-                st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
+            st.caption(
+                "Score meaning: Decision Confidence = execution authority | "
+                "AI Evidence Score = advisory evidence | Rank Score = strategy ordering only."
+            )
 
-                try:
-                    _sai = (
-                        ai_brain_report.get("snapshot_bias", {})
-                        if isinstance(ai_brain_report, dict)
-                        else {}
-                    )
-                    if isinstance(_sai, dict) and _sai:
-                        st.caption(
-                            f"AI Brain Snapshot Bias: {_sai.get('proposed_action','WAIT')} | "
-                            f"Net Bias: {_sai.get('net_bias',0)} | "
-                            f"Bull Power: {_sai.get('bullish_power',0)} | "
-                            f"Bear Power: {_sai.get('bearish_power',0)}"
-                        )
+            st.caption(
+                f"Snapshot: {snapshot_delta.get('status','NA')} | "
+                f"Material Change: {snapshot_delta.get('material_change',0)}/100"
+            )
 
-                    _health = _fd.get("snapshot_health", {}) if isinstance(_fd.get("snapshot_health", {}), dict) else {}
-                    if _health:
-                        st.caption(f"Snapshot Health: {_health.get('score',0)}/100 ({_health.get('label','NA')})")
-                except Exception:
-                    pass
-            except Exception:
-                pass
+            _sai = _brain_top.get("snapshot_bias", {}) if isinstance(_brain_top.get("snapshot_bias", {}), dict) else {}
+            if _sai:
+                st.caption(
+                    f"AI Brain Snapshot Bias: {_sai.get('proposed_action','WAIT')} | "
+                    f"Net Bias: {_sai.get('net_bias',0)} | "
+                    f"Bull Power: {_sai.get('bullish_power',0)} | "
+                    f"Bear Power: {_sai.get('bearish_power',0)}"
+                )
+
+            _health = _fd.get("snapshot_health", {}) if isinstance(_fd.get("snapshot_health", {}), dict) else {}
+            if _health:
+                st.caption(
+                    f"Snapshot Health: {_health.get('score',0)}/100 "
+                    f"({_health.get('label','NA')})"
+                )
     except Exception:
         pass
 
@@ -4943,7 +4602,7 @@ try:
             with st.expander("🧠 AI Brain Explanation / Scorecard", expanded=False):
                 st.write("**Decision ID:**", _brain.get("decision_id", "NA"))
                 st.write("**Regime:**", _brain.get("regime", "NA"))
-                st.write("**Smart Confidence:**", str(_brain.get("smart_confidence", 0)) + "%")
+                st.write("**AI Evidence Score (Advisory):**", str(_brain.get("smart_confidence", 0)) + "%")
                 st.write("**Top Reasons:**")
                 for _r in _brain.get("reasons", [])[:5]:
                     st.write("•", _r)
@@ -5031,6 +4690,11 @@ try:
             st.write("Removed duplicate Snapshot Health:", "V18.8 internal scorer")
             st.write("Removed old consistency guard:", "V18.5")
             st.write("Single execution authority:", "decision_engine.py")
+            st.write("Decision Confidence:", "decision_engine.py only")
+            st.write("AI Evidence Score:", "ai_brain.py advisory only")
+            st.write("Rank Score:", "strategy ordering only")
+            st.write("Removed old confidence rewriter:", "V18.3")
+            st.write("Removed stale trade-ticket confidence:", "V12 ticket")
             st.write(
                 "Next cleanup target:",
                 "legacy confidence / ranking overlap after live-market validation",
@@ -5255,7 +4919,7 @@ def _v17_buy_plan(side):
         "Target": target,
     }
 
-def _v163_conf(strategy_name):
+def _v163_rank_score(strategy_name):
     try:
         for r in v11_ranked_strategies:
             if str(r.get("strategy", "")).upper() == strategy_name.upper():
@@ -5270,19 +4934,23 @@ _buy_call = _v17_buy_plan("CE")
 _buy_put = _v17_buy_plan("PE")
 _ic_credit = round(float(_ce_plan.get("Entry", 0) or 0) + float(_pe_plan.get("Entry", 0) or 0), 2)
 _strategy_rows_v163 = [
-    {"Strategy":"SELL CE","Confidence":_v163_conf("SELL CE"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_ce_plan["Entry"],"SL":_ce_plan["SL"],"Target":_ce_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait"},
-    {"Strategy":"SELL PE","Confidence":_v163_conf("SELL PE"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_pe_plan["Entry"],"SL":_pe_plan["SL"],"Target":_pe_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait"},
-    {"Strategy":"IRON CONDOR","Confidence":_v163_conf("IRON CONDOR"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_ic_credit,"SL":f"CE {_ce_plan.get('SL',0)} / PE {_pe_plan.get('SL',0)}","Target":f"CE {_ce_plan.get('Target 1',0)} / PE {_pe_plan.get('Target 1',0)}","Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "IRON CONDOR" else "⚠️ Wait"},
-    {"Strategy":"BUY PUT (Hedged)","Confidence":_v163_conf("BUY PUT (Hedged)"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_buy_put["Buy Strike"],"Buy PE Hedge":_buy_put["Hedge"],"Entry/Credit":_buy_put["Entry"],"SL":_buy_put["SL"],"Target":_buy_put["Target"],"Entry Status":"Only strong trend"},
-    {"Strategy":"BUY CALL (Hedged)","Confidence":_v163_conf("BUY CALL (Hedged)"),"Sell CE":_buy_call["Buy Strike"],"Buy CE Hedge":_buy_call["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_buy_call["Entry"],"SL":_buy_call["SL"],"Target":_buy_call["Target"],"Entry Status":"Only strong trend"},
-    {"Strategy":"WAIT","Confidence":_v163_conf("WAIT"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":0,"SL":"No trade","Target":"No trade","Entry Status":"Capital safe"},
+    {"Strategy":"SELL CE","Rank Score":_v163_rank_score("SELL CE"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_ce_plan["Entry"],"SL":_ce_plan["SL"],"Target":_ce_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait"},
+    {"Strategy":"SELL PE","Rank Score":_v163_rank_score("SELL PE"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_pe_plan["Entry"],"SL":_pe_plan["SL"],"Target":_pe_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait"},
+    {"Strategy":"IRON CONDOR","Rank Score":_v163_rank_score("IRON CONDOR"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_ic_credit,"SL":f"CE {_ce_plan.get('SL',0)} / PE {_pe_plan.get('SL',0)}","Target":f"CE {_ce_plan.get('Target 1',0)} / PE {_pe_plan.get('Target 1',0)}","Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "IRON CONDOR" else "⚠️ Wait"},
+    {"Strategy":"BUY PUT (Hedged)","Rank Score":_v163_rank_score("BUY PUT (Hedged)"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_buy_put["Buy Strike"],"Buy PE Hedge":_buy_put["Hedge"],"Entry/Credit":_buy_put["Entry"],"SL":_buy_put["SL"],"Target":_buy_put["Target"],"Entry Status":"Only strong trend"},
+    {"Strategy":"BUY CALL (Hedged)","Rank Score":_v163_rank_score("BUY CALL (Hedged)"),"Sell CE":_buy_call["Buy Strike"],"Buy CE Hedge":_buy_call["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_buy_call["Entry"],"SL":_buy_call["SL"],"Target":_buy_call["Target"],"Entry Status":"Only strong trend"},
+    {"Strategy":"WAIT","Rank Score":_v163_rank_score("WAIT"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":0,"SL":"No trade","Target":"No trade","Entry Status":"Capital safe"},
 ]
-_strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
+_strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
 st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
-_best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
+st.caption(
+    "Rank Score sirf strategy ordering hai; trade approval aur Decision Confidence "
+    "sirf Decision Engine se aate hain."
+)
+_best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Rank Score": 0}
 st.markdown(
     f"**Best Ranked Setup:** {_best_row_v163.get('Strategy','WAIT')} "
-    f"(Rank {_best_row_v163.get('Confidence',0)}/100)  |  "
+    f"(Rank {_best_row_v163.get('Rank Score',0)}/100)  |  "
     f"**Decision Engine Verdict:** {_de_final_v197} "
     f"({_de_gate_v197.get('calibrated_confidence',0)}%)"
 )
@@ -5441,18 +5109,36 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
             else:
                 st.error("Position save failed.")
 
-with st.expander("🎯 Final Action Plan — Trade / No Trade", expanded=True):
+with st.expander("⚖️ Decision Engine Action Plan — Trade / No Trade", expanded=True):
+    _de_plan = decision_engine_report if isinstance(decision_engine_report, dict) else {}
     q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Data Quality", f"{data_quality}/100")
-    q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
-    q3.metric("Final Confidence", f"{confidence:.0f}%")
-    q4.metric("Suggested Lots", f"{suggested_lots}/{max_lots}")
-    for item in action_plan:
-        st.write("✔", item)
-    if conflict_mode:
-        st.warning("Conflict mode active hai. Iska matlab market ke major parts same direction mein nahi hain.")
-    if data_quality < 70:
-        st.info("Data quality 70 se kam ho to real trade avoid karo. Pehle data source verify karo.")
+    q1.metric("Execution Status", _de_plan.get("execution_status", "WAIT"))
+    q2.metric("Consensus", _de_plan.get("consensus", "NA"))
+    q3.metric("Decision Confidence", f"{_de_plan.get('calibrated_confidence',0)}%")
+    q4.metric(
+        "Approved / Preview Lots",
+        f"{_de_plan.get('approved_lots',0)} / {_de_plan.get('preview_lots',0)}",
+    )
+
+    st.write("**Final Verdict:**", _de_plan.get("final_action", "WAIT"))
+    st.write("**AI Bias:**", _de_plan.get("analysis_action", "WAIT"))
+    st.write("**Execution Reason:**", _de_plan.get("execution_reason", "NA"))
+
+    if _de_plan.get("blockers"):
+        st.write("**Blockers:**")
+        for _item in _de_plan.get("blockers", [])[:10]:
+            st.write("•", _item)
+
+    if _de_plan.get("warnings"):
+        st.write("**Warnings:**")
+        for _item in _de_plan.get("warnings", [])[:8]:
+            st.write("•", _item)
+
+    if _de_plan.get("reasons"):
+        st.write("**Positive Reasons:**")
+        for _item in _de_plan.get("reasons", [])[:10]:
+            st.write("•", _item)
+
     with st.expander("Data quality details", expanded=False):
         for reason in data_quality_reasons:
             st.write("•", reason)
@@ -5460,30 +5146,75 @@ with st.expander("🎯 Final Action Plan — Trade / No Trade", expanded=True):
 
 # V19.5.1: duplicate VIX range UI removed; primary VIX range panel retained above.
 
-with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", expanded=not trading_mode_clean):
-    tt = v12_trade_ticket
+with st.expander(
+    "🎟️ Decision Engine Ticket — Strike + Price + SL + Target",
+    expanded=not trading_mode_clean,
+):
+    _de_ticket = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+    _fd_ticket = final_decision if isinstance(final_decision, dict) else {}
+    _strategy_ticket = (
+        _fd_ticket.get("strategy", {})
+        if isinstance(_fd_ticket.get("strategy", {}), dict)
+        else {}
+    )
+
+    _ticket_status = _de_ticket.get("execution_status", "WAIT")
+    _ticket_bias = _de_ticket.get("analysis_action", "WAIT")
+    _ticket_final = _de_ticket.get("final_action", "WAIT")
+    _ticket_conf = int(_de_ticket.get("calibrated_confidence", 0) or 0)
+    _ticket_lots = int(
+        _de_ticket.get("approved_lots", 0)
+        or _de_ticket.get("preview_lots", 0)
+        or 0
+    )
+
     t1, t2, t3, t4, t5 = st.columns(5)
-    t1.metric("Recommended", tt["summary"])
-    t2.metric("Strategy", tt["strategy"])
-    t3.metric("Confidence", f"{tt['confidence']}%")
-    t4.metric("Safe Ticket Lots", tt["lots"])
-    t5.metric("Net Credit", f"{tt['net_credit']} pts")
-    if tt["warnings"]:
-        for w in tt["warnings"]:
-            st.warning(w)
+    t1.metric("Status", _ticket_status)
+    t2.metric("AI Bias", _ticket_bias)
+    t3.metric("Decision Confidence", f"{_ticket_conf}%")
+    t4.metric("Ticket Lots", _ticket_lots)
+    t5.metric("Final Verdict", _ticket_final)
+
+    _ticket_rows = [
+        {"Field": "Sell Strike", "Value": _strategy_ticket.get("sell_strike", "No Strike")},
+        {"Field": "Hedge Strike", "Value": _strategy_ticket.get("hedge_strike", "No Hedge")},
+        {"Field": "Entry", "Value": _strategy_ticket.get("entry", "No Trade")},
+        {"Field": "Stop Loss", "Value": _strategy_ticket.get("sl", "No Trade")},
+        {"Field": "Target", "Value": _strategy_ticket.get("target", "No Trade")},
+    ]
+    st.dataframe(pd.DataFrame(_ticket_rows), use_container_width=True, hide_index=True)
+
+    _plan_check = (
+        _de_ticket.get("plan_validation", {})
+        if isinstance(_de_ticket.get("plan_validation", {}), dict)
+        else {}
+    )
+    if _plan_check.get("valid"):
+        st.success("Decision Engine trade plan validated hai.")
     else:
-        st.success("Trade ticket clean hai. Still confirm broker price, spread, margin and SL before execution.")
-    if tt["legs"]:
-        _legs_df = pd.DataFrame(tt["legs"])
-        st.dataframe(_legs_df, width="stretch", hide_index=True)
-        st.caption(f"Approx points risk: {tt['estimated_points_risk']} | Hedge gap: {hedge_gap} pts")
-        st.caption("Safe Ticket Lots conservative cap hai; final suggested lots alag risk-sizing layer se aa sakte hain.")
+        st.warning("Trade plan validation incomplete/blocked hai.")
+        for _issue in _plan_check.get("issues", [])[:8]:
+            st.write("•", _issue)
+
+    if _ticket_status == "APPROVED":
+        st.success(
+            "Fresh entry approved hai. Broker price, spread, margin, hedge aur SL confirm karo."
+        )
+    elif _ticket_status == "PREVIEW_ONLY":
+        st.info("Market closed/preview mode: plan reference ke liye hai, fresh entry nahi.")
+    elif _ticket_status == "BLOCKED":
+        st.error("Decision Engine ne fresh entry block ki hai.")
     else:
-        st.info("No legs generated because current verdict is WAIT/NO TRADE.")
-    st.write("**Why this ticket:**")
-    for r in tt["reasons"]:
-        st.write("•", r)
-    st.error("Important: Ye recommendation/order-ticket hai, auto execution nahi. Final order price broker screen par confirm karo.")
+        st.info("No approved fresh trade.")
+
+    st.caption(
+        "Decision Confidence execution authority hai. Rank Score aur AI Evidence Score "
+        "is ticket ko independently approve nahi kar sakte."
+    )
+    st.error(
+        "Important: Ye decision-support ticket hai, auto execution nahi. "
+        "Final order price broker screen par confirm karo."
+    )
 
 
 # V12 Position Manager + Expiry/Shock/Discipline panels
@@ -5498,7 +5229,7 @@ with st.expander("🚀 Position Manager — Hold / Exit / Trail SL", expanded=Fa
         pass
     else:
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Position AI", position_ai["action"], f"Confidence {position_ai['confidence']}%")
+        p1.metric("Position AI", position_ai["action"], f"Position Score {position_ai['confidence']}%")
         p2.metric("Profit in Premium", f"{position_ai['profit_pct']:.1f}%")
         p3.metric("Trail SL", f"₹{position_ai['trail_sl']:.2f}" if position_ai["trail_sl"] else "--")
         p4.metric("Position Risk", f"{position_ai['risk']}/100")
@@ -5785,6 +5516,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.7 build: one Decision Engine authority; duplicate gate, snapshot-AI mutation and internal health scorer removed. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.8 build: one Decision Confidence authority; AI Evidence Score and Rank Score are advisory only. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
