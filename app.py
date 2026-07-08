@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V16.2 - SUPER APP EDITION
+# NIFTY SELLER AI DASHBOARD V17 - SMART LITE EDITION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V16.2",
+    page_title="Nifty Seller AI Dashboard V17 Smart Lite",
     page_icon="🧠",
     layout="wide",
 )
@@ -64,6 +64,18 @@ st.markdown(
 .super-bad {background:rgba(220,38,38,.16); border-left:5px solid #dc2626; padding:12px; border-radius:12px;}
 .super-muted {opacity:.76; font-size:.88rem;}
 </style>
+<style>
+.v17-strip {padding:14px 18px;border-radius:14px;margin:10px 0 12px 0;font-weight:800;border-left:7px solid rgba(255,255,255,.3);}
+.v17-red {background:rgba(170,38,38,.25); border-left-color:#ef4444; color:#fecaca;}
+.v17-green {background:rgba(22,135,75,.23); border-left-color:#22c55e; color:#bbf7d0;}
+.v17-yellow {background:rgba(170,126,22,.22); border-left-color:#f59e0b; color:#fde68a;}
+.v17-grey {background:rgba(82,88,99,.22); border-left-color:#94a3b8; color:#e5e7eb;}
+.v17-final {padding:24px;border-radius:18px;margin:12px 0 16px 0;border-left:8px solid #f59e0b;background:rgba(170,126,22,.22);}
+.v17-final.green {border-left-color:#22c55e;background:rgba(22,135,75,.24);}
+.v17-final.red {border-left-color:#ef4444;background:rgba(170,38,38,.24);}
+.v17-kpi {padding:16px;border-radius:14px;background:rgba(128,128,128,.08);border:1px solid rgba(128,128,128,.25);}
+</style>
+
 """,
     unsafe_allow_html=True,
 )
@@ -1537,7 +1549,11 @@ def v162_analyze_position(pos):
     }
 
 def v162_signal_gate(final_trade_value, top_strategy_value, confidence_value, selected_strike_value):
-    """Require 2 stable refreshes before entry. Prevent 102 -> 45 type jump confusion."""
+    """Smart entry gate.
+    90%+ high-confidence directional signals can pass on first refresh.
+    70-89% signals need 2 stable refresh confirmations.
+    This prevents random strike flips without blocking a very strong move.
+    """
     sig = f"{final_trade_value}|{top_strategy_value}|{selected_strike_value}"
     prev = st.session_state.get("v162_prev_signal")
     count = int(st.session_state.get("v162_signal_count", 0) or 0)
@@ -1547,17 +1563,22 @@ def v162_signal_gate(final_trade_value, top_strategy_value, confidence_value, se
         count = 1
     st.session_state["v162_prev_signal"] = sig
     st.session_state["v162_signal_count"] = count
+    conf = float(confidence_value or 0)
     reasons = []
     allowed = True
+    required = 1 if conf >= 90 else 2
     if final_trade_value == "WAIT":
         allowed = False; reasons.append("Final AI WAIT hai.")
-    if float(confidence_value or 0) < 70:
-        allowed = False; reasons.append(f"Final confidence {float(confidence_value or 0):.0f}% hai; minimum 70% chahiye.")
+    if conf < 70:
+        allowed = False; reasons.append(f"Final confidence {conf:.0f}% hai; minimum 70% chahiye.")
     if not selected_strike_value or int(float(selected_strike_value or 0)) <= 0:
         allowed = False; reasons.append("Valid strike select nahi hui.")
-    if count < 2:
-        allowed = False; reasons.append("Signal 2 refresh tak stable nahi hua.")
-    return {"allowed": allowed, "count": count, "signature": sig, "reasons": reasons or ["Entry checklist green."]}
+    if count < required:
+        allowed = False; reasons.append(f"Signal {required} refresh tak stable nahi hua.")
+    if conf >= 90 and count >= 1 and final_trade_value != "WAIT" and selected_strike_value:
+        reasons = [r for r in reasons if "stable" not in r.lower()]
+        allowed = not any(("WAIT" in r or "confidence" in r or "Valid strike" in r) for r in reasons)
+    return {"allowed": allowed, "count": count, "required": required, "signature": sig, "reasons": reasons or ["Entry checklist green."]}
 
 
 def v102_metric_card(label, value, delta=None):
@@ -2321,17 +2342,29 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V16.4 Super App AI")
-if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
-    st.cache_data.clear()
-
+st.sidebar.title("⚙️ V17 Smart Lite AI")
+# V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
 else:
     st.sidebar.info("DhanHQ credentials not added yet — safe fallbacks active")
 
-developer_mode = st.sidebar.checkbox("🛠️ Developer Mode", value=False, help="OFF rakho to app clean rahegi. ON karoge to diagnostics/watchlist/internal tables dikhenge.")
-trading_mode_clean = st.sidebar.checkbox("🎯 Trading Mode Clean UI", value=True, help="Duplicate/internal sections hide karta hai.")
+# Persist UI mode settings across auto/manual refresh.
+if "developer_mode" not in st.session_state:
+    st.session_state["developer_mode"] = False
+if "trading_mode_clean" not in st.session_state:
+    st.session_state["trading_mode_clean"] = True
+
+developer_mode = st.sidebar.checkbox(
+    "🛠️ Developer Mode",
+    key="developer_mode",
+    help="OFF rakho to app clean rahegi. ON karoge to diagnostics/internal calculations dikhenge.",
+)
+trading_mode_clean = st.sidebar.checkbox(
+    "🎯 Trading Mode Clean UI",
+    key="trading_mode_clean",
+    help="Duplicate/internal sections hide karta hai.",
+)
 
 with st.sidebar.expander("1️⃣ Data Source", expanded=True):
     prefer_dhan = st.checkbox("Prefer DhanHQ Live Data", value=dhan_ready, disabled=not dhan_ready)
@@ -2418,7 +2451,7 @@ with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True
         st.success(f"{pd.to_datetime(fii_data_date).strftime('%d-%m-%Y')} ka saved data loaded.")
     else:
         st.info("Is date ka data abhi save nahi hai.")
-    if st.button("💾 Save Selected Date FII/DII", use_container_width=True):
+    if st.button("💾 Save Selected Date FII/DII", width="stretch"):
         _new_row = pd.DataFrame([{
             "Date": fii_data_date,
             "FII Cash Cr": fii_today,
@@ -2525,12 +2558,12 @@ with st.sidebar.expander("9️⃣ V16 Active Trade / Discipline", expanded=True)
     trades_taken_today = int(st.number_input("Trades Taken Today", value=int(_pos_saved.get("Trades Taken Today", 0) or 0), step=1, key="v16_trades_taken"))
     daily_loss_hit = st.checkbox("Daily Loss Hit / Stop Trading", value=bool(_pos_saved.get("Daily Loss Hit / Stop Trading", False)), key="v16_daily_loss_hit")
     pcol1, pcol2 = st.columns(2)
-    if pcol1.button("💾 Save Position", use_container_width=True):
+    if pcol1.button("💾 Save Position", width="stretch"):
         if v16_save_active_position(active_side, active_strike, active_entry_price, active_current_price, active_lots, trades_taken_today, daily_loss_hit):
             st.success("Position saved. Refresh/restart ke baad bhi load hogi.")
         else:
             st.error("Position save failed.")
-    if pcol2.button("🧹 Clear Position", use_container_width=True):
+    if pcol2.button("🧹 Clear Position", width="stretch"):
         if v16_clear_active_position():
             st.success("Saved position cleared.")
             st.rerun()
@@ -3806,7 +3839,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 top_refresh_col, top_auto_col, top_time_col = st.columns([1, 1.4, 2.2])
-if top_refresh_col.button("🔄 Refresh Live Data", use_container_width=True):
+if top_refresh_col.button("🔄 Refresh Live Data", width="stretch"):
     st.cache_data.clear()
     st.session_state["v163_last_manual_refresh"] = fmt_time()
     st.rerun()
@@ -3854,9 +3887,9 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V16.4 AI Audit</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V17 Smart Lite</div>", unsafe_allow_html=True)
 st.markdown(
-    "<div class='sub-title'>Super Seller Terminal: Single AI Engine + Best Strike Audit + Market Move Guard</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Clean UI + Single AI Brain + Portfolio Intelligence</div>",
     unsafe_allow_html=True,
 )
 
@@ -3874,26 +3907,46 @@ r6.markdown(f"<div class='ribbon'>Mode: {market_mode}</div>", unsafe_allow_html=
 r7.markdown(f"<div class='ribbon'>Shock: {shock_score_v7}/100</div>", unsafe_allow_html=True)
 r8.markdown(f"<div class='ribbon'>Discipline: {discipline_score}/100</div>", unsafe_allow_html=True)
 
-# V16 Health Monitor: one look status for live trading.
+# V17 Health Monitor: compact trading status. Details go to Developer Mode.
 _oc_age_note = "Live" if option_chain.get("success") else "Not Live"
 _pa_status = "Live" if price_action_result.get("success") else "Manual"
 _pos_status = "Saved" if ACTIVE_POSITION_STORE.exists() else "Not saved"
-with st.expander("🩺 V16 Live Health Monitor", expanded=True):
-    h1, h2, h3, h4, h5, h6 = st.columns(6)
+_mg = locals().get("v164_move_guard", {}) or {}
+_mg_label = str(_mg.get("label", "NORMAL") or "NORMAL")
+_mg_move = float(_mg.get("move_points", 0) or 0)
+_mg_daily = float(_mg.get("daily_pct", 0) or 0)
+if _mg_label == "FAST FALL":
+    _mcls, _memoji, _marrow = "v17-red", "🔴", "↘↘↓"
+elif _mg_label == "FAST RISE":
+    _mcls, _memoji, _marrow = "v17-green", "🟢", "↗↗↑"
+elif _mg_label not in ("NA", "NORMAL"):
+    _mcls, _memoji, _marrow = "v17-yellow", "🟡", "↕"
+else:
+    _mcls, _memoji, _marrow = "v17-grey", "⚪", "→"
+st.markdown(
+    f"""
+<div class='v17-strip {_mcls}'>
+{_memoji} <b>MARKET:</b> {_mg_label} &nbsp; | &nbsp; <b>Direction:</b> {_marrow} &nbsp; | &nbsp;
+<b>Last:</b> {_mg_move:+.1f} pts &nbsp; | &nbsp; <b>Today:</b> {_mg_daily:+.2f}%
+</div>
+""",
+    unsafe_allow_html=True,
+)
+with st.expander("🩺 Live Health Monitor", expanded=False):
+    h1, h2, h3, h4, h5 = st.columns(5)
     h1.metric("Dhan API", "🟢 Ready" if dhan_ready else "🔴 Missing")
     h2.metric("Option Chain", "🟢 " + _oc_age_note if option_chain.get("success") else "🔴 " + _oc_age_note)
     h3.metric("Price Action", "🟢 " + _pa_status if price_action_result.get("success") else "🟡 " + _pa_status)
-    h4.metric("Nifty Source", nifty_source)
-    h5.metric("Position Save", _pos_status)
-    h6.metric("Last Refresh", fmt_time())
-    _mg = locals().get("v164_move_guard", {}) or {}
-    st.caption(f"Market Move Guard: {_mg.get('label','NA')} | Refresh move: {_mg.get('move_points',0)} pts | Daily: {_mg.get('daily_pct',0)}% | Score: {_mg.get('score',0)}/100")
-    if option_chain.get("success"):
-        st.caption(f"OC fetched: {option_chain.get('fetched_at', 'NA')} | Expiry: {option_chain.get('expiry', selected_expiry)} | ATM: {option_chain.get('atm_strike', 'NA')}")
-    if price_action_result.get("success"):
-        st.caption(f"Price Action fetched: {price_action_result.get('fetched_at', 'NA')} | Source: {price_action_source}")
-    else:
-        st.caption(f"Price Action auto not live: {price_action_result.get('message', 'Manual fallback')}")
+    h4.metric("Position Save", _pos_status)
+    h5.metric("Last Refresh", fmt_time())
+    if developer_mode:
+        st.caption(f"Market Move Guard: {_mg_label} | Refresh move: {_mg_move} pts | Daily: {_mg_daily}% | Score: {_mg.get('score',0)}/100")
+        if option_chain.get("success"):
+            st.caption(f"OC fetched: {option_chain.get('fetched_at', 'NA')} | Expiry: {option_chain.get('expiry', selected_expiry)} | ATM: {option_chain.get('atm_strike', 'NA')}")
+        if price_action_result.get("success"):
+            st.caption(f"Price Action fetched: {price_action_result.get('fetched_at', 'NA')} | Source: {price_action_source}")
+        else:
+            st.caption(f"Price Action auto not live: {price_action_result.get('message', 'Manual fallback')}")
 
 if "INVALID/EXPIRED" in source_text:
     st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
@@ -3912,14 +3965,15 @@ except Exception:
 _signal_gate_v162 = v162_signal_gate(final_trade, _top_strategy_v162.get("strategy", "WAIT"), confidence, _strike_num_v162)
 
 st.markdown("### 🎯 Super Final Decision — Entry Allowed Only If Green")
-_status_class = "super-good" if _signal_gate_v162["allowed"] else "super-warn"
+_status_class = "green" if _signal_gate_v162["allowed"] else ("red" if final_trade != "WAIT" and confidence >= 90 else "")
 _status_text = "ENTRY ALLOWED ✅" if _signal_gate_v162["allowed"] else "ENTRY BLOCKED / WAIT ⚠️"
 st.markdown(f"""
-<div class='{_status_class}'>
+<div class='v17-final {_status_class}'>
 <h2>{_status_text}</h2>
 <b>Final AI:</b> {final_trade} &nbsp; | &nbsp; <b>Best Setup:</b> {_top_strategy_v162.get('strategy','WAIT')} ({_top_strategy_v162.get('confidence',0)}%) &nbsp; | &nbsp;
-<b>Final Confidence:</b> {confidence:.0f}% &nbsp; | &nbsp; <b>Stable Refresh:</b> {_signal_gate_v162['count']}/2<br>
-<b>Strike:</b> {selected_strike} &nbsp; | &nbsp; <b>Hedge:</b> {hedge} &nbsp; | &nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%
+<b>Final Confidence:</b> {confidence:.0f}% &nbsp; | &nbsp; <b>Stable:</b> {_signal_gate_v162['count']}/{_signal_gate_v162.get('required',2)}<br>
+<b>Strike:</b> {selected_strike} &nbsp; | &nbsp; <b>Hedge:</b> {hedge} &nbsp; | &nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%<br>
+<b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)
 </div>
 """, unsafe_allow_html=True)
 if not _signal_gate_v162["allowed"]:
@@ -3929,17 +3983,23 @@ if not _signal_gate_v162["allowed"]:
     for _r in (locals().get("v164_unified", {}) or {}).get("blockers", []):
         st.write("•", _r)
 else:
-    st.success("Signal stable hai. Fir bhi broker price, spread, margin aur SL confirm karke hi order lagao.")
+    st.success("Signal green hai. Broker price, spread, margin aur SL confirm karke hi order lagao.")
+if developer_mode:
+    for _r in (locals().get("v164_unified", {}) or {}).get("reasons", []):
+        st.info(_r)
 
-if (locals().get("v164_move_guard", {}) or {}).get("label") not in (None, "NA", "NORMAL"):
-    _mg = locals().get("v164_move_guard", {})
-    st.warning(f"Market Move Guard: {_mg.get('label')} | Last refresh move {_mg.get('move_points')} pts | Daily {_mg.get('daily_pct')}% | Score {_mg.get('score')}/100")
-for _r in (locals().get("v164_unified", {}) or {}).get("reasons", []):
-    st.info(_r)
-
-
-# V16.3: Important Strategy Matrix moved near top.
+# V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
+
+def _v17_find_row(strike_value):
+    try:
+        strike_value = int(float(strike_value or 0))
+        for rr in (option_analysis.get("rows", []) if option_analysis.get("success") else []):
+            if int(rr.get("strike", 0) or 0) == strike_value:
+                return rr
+    except Exception:
+        pass
+    return None
 
 def _v163_side_plan(side, row, label=""):
     if not row:
@@ -3952,10 +4012,32 @@ def _v163_side_plan(side, row, label=""):
     return {
         "Sell Strike": f"{sell_strike} {side}" if sell_strike else "-",
         "Entry": round(premium, 2),
-        "SL": plan.get("sl", 0.0),
-        "Target 1": plan.get("target1", 0.0),
-        "Target 2": plan.get("target2", 0.0),
+        "SL": round(float(plan.get("sl", 0.0) or 0), 2),
+        "Target 1": round(float(plan.get("target1", 0.0) or 0), 2),
+        "Target 2": round(float(plan.get("target2", 0.0) or 0), 2),
         "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
+    }
+
+def _v17_buy_plan(side):
+    # Buyer plan is for rare strong trend only; use ATM/near-ATM option from live chain.
+    try:
+        atm = int(option_chain.get("atm_strike", round(float(price or 0)/50)*50) or 0)
+    except Exception:
+        atm = 0
+    hedge_gap_local = int(locals().get("hedge_gap", 100) or 100)
+    buy_strike = atm
+    hedge_strike = atm + hedge_gap_local if side == "CE" else atm - hedge_gap_local
+    row = _v17_find_row(buy_strike)
+    prefix = side.lower()
+    entry = float((row or {}).get(f"{prefix}_ltp", 0) or 0)
+    sl = round(entry * 0.72, 2) if entry else "Use buyer SL"
+    target = round(entry * 1.45, 2) if entry else "Use buyer target"
+    return {
+        "Buy Strike": f"{buy_strike} {side}" if buy_strike else "-",
+        "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
+        "Entry": round(entry, 2) if entry else "Defined risk",
+        "SL": sl,
+        "Target": target,
     }
 
 def _v163_conf(strategy_name):
@@ -3969,87 +4051,40 @@ def _v163_conf(strategy_name):
 
 _ce_plan = _v163_side_plan("CE", best_ce)
 _pe_plan = _v163_side_plan("PE", best_pe)
+_buy_call = _v17_buy_plan("CE")
+_buy_put = _v17_buy_plan("PE")
 _ic_credit = round(float(_ce_plan.get("Entry", 0) or 0) + float(_pe_plan.get("Entry", 0) or 0), 2)
 _strategy_rows_v163 = [
-    {
-        "Strategy": "IRON CONDOR",
-        "Confidence": _v163_conf("IRON CONDOR"),
-        "Sell CE": _ce_plan["Sell Strike"],
-        "Buy CE Hedge": _ce_plan["Hedge"],
-        "Sell PE": _pe_plan["Sell Strike"],
-        "Buy PE Hedge": _pe_plan["Hedge"],
-        "Entry/Credit": _ic_credit,
-        "SL": f"CE {float(_ce_plan.get('SL',0)):.2f} / PE {float(_pe_plan.get('SL',0)):.2f}",
-        "Target": f"CE {float(_ce_plan.get('Target 1',0)):.2f} / PE {float(_pe_plan.get('Target 1',0)):.2f}",
-        "Entry Status": "✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade != "WAIT" else "⚠️ Wait",
-    },
-    {
-        "Strategy": "SELL CE",
-        "Confidence": _v163_conf("SELL CE"),
-        "Sell CE": _ce_plan["Sell Strike"],
-        "Buy CE Hedge": _ce_plan["Hedge"],
-        "Sell PE": "-", "Buy PE Hedge": "-",
-        "Entry/Credit": _ce_plan["Entry"],
-        "SL": _ce_plan["SL"],
-        "Target": _ce_plan["Target 1"],
-        "Entry Status": "✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait",
-    },
-    {
-        "Strategy": "SELL PE",
-        "Confidence": _v163_conf("SELL PE"),
-        "Sell CE": "-", "Buy CE Hedge": "-",
-        "Sell PE": _pe_plan["Sell Strike"],
-        "Buy PE Hedge": _pe_plan["Hedge"],
-        "Entry/Credit": _pe_plan["Entry"],
-        "SL": _pe_plan["SL"],
-        "Target": _pe_plan["Target 1"],
-        "Entry Status": "✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait",
-    },
-    {
-        "Strategy": "BUY PUT (Hedged)",
-        "Confidence": _v163_conf("BUY PUT (Hedged)"),
-        "Sell CE": "-", "Buy CE Hedge": "-",
-        "Sell PE": "-", "Buy PE Hedge": "ATM PE + hedge",
-        "Entry/Credit": "Defined risk",
-        "SL": "Use buyer SL",
-        "Target": "Use buyer target",
-        "Entry Status": "Only strong trend",
-    },
-    {
-        "Strategy": "WAIT",
-        "Confidence": _v163_conf("WAIT"),
-        "Sell CE": "-", "Buy CE Hedge": "-", "Sell PE": "-", "Buy PE Hedge": "-",
-        "Entry/Credit": 0, "SL": "No trade", "Target": "No trade",
-        "Entry Status": "Capital safe",
-    },
+    {"Strategy":"SELL CE","Confidence":_v163_conf("SELL CE"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_ce_plan["Entry"],"SL":_ce_plan["SL"],"Target":_ce_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait"},
+    {"Strategy":"SELL PE","Confidence":_v163_conf("SELL PE"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_pe_plan["Entry"],"SL":_pe_plan["SL"],"Target":_pe_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait"},
+    {"Strategy":"IRON CONDOR","Confidence":_v163_conf("IRON CONDOR"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_ic_credit,"SL":f"CE {_ce_plan.get('SL',0)} / PE {_pe_plan.get('SL',0)}","Target":f"CE {_ce_plan.get('Target 1',0)} / PE {_pe_plan.get('Target 1',0)}","Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "IRON CONDOR" else "⚠️ Wait"},
+    {"Strategy":"BUY PUT (Hedged)","Confidence":_v163_conf("BUY PUT (Hedged)"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_buy_put["Buy Strike"],"Buy PE Hedge":_buy_put["Hedge"],"Entry/Credit":_buy_put["Entry"],"SL":_buy_put["SL"],"Target":_buy_put["Target"],"Entry Status":"Only strong trend"},
+    {"Strategy":"BUY CALL (Hedged)","Confidence":_v163_conf("BUY CALL (Hedged)"),"Sell CE":_buy_call["Buy Strike"],"Buy CE Hedge":_buy_call["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_buy_call["Entry"],"SL":_buy_call["SL"],"Target":_buy_call["Target"],"Entry Status":"Only strong trend"},
+    {"Strategy":"WAIT","Confidence":_v163_conf("WAIT"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":0,"SL":"No trade","Target":"No trade","Entry Status":"Capital safe"},
 ]
 _strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
-st.dataframe(pd.DataFrame(_strategy_rows_v163), use_container_width=True, hide_index=True)
+st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
 _best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
 st.markdown(f"**Best Setup:** {_best_row_v163.get('Strategy','WAIT')} ({_best_row_v163.get('Confidence',0)}%)  |  **Unified Final AI:** {final_trade} ({confidence:.0f}%)")
 if final_trade == "WAIT":
-    st.warning("Unified AI ne abhi WAIT/block kiya hai. Reason upar Super Final Decision mein diya hai.")
+    st.warning("Unified AI abhi WAIT/block kar raha hai. Reason upar Super Final Decision mein diya hai.")
 else:
-    st.success("Final AI active hai. Phir bhi broker price, spread, margin aur hedge confirm karo.")
+    st.success("Final AI active hai. Broker price, spread, margin aur hedge confirm karo.")
 
-# AI Brain top panel
-st.markdown("### 🧠 AI Brain — Memory + Freeze + Regime")
-v14c1, v14c2, v14c3, v14c4, v14c5 = st.columns(5)
-v14c1.metric("AI Proposed", proposed_trade_v14)
-v14c2.metric("Freeze", v14_freeze["status"], f"{v14_freeze['same_count']}/{v14_freeze['required']}")
-v14c3.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
-v14c4.metric("Market Regime", v14_regime["label"])
-v14c5.metric("Entry Window", v14_entry["label"])
-if v14_freeze["status"] == "FREEZE ACTIVE":
-    st.warning("🧊 Decision Freeze: " + v14_freeze["reason"])
-elif v14_freeze["status"] == "SIGNAL CONFIRMED":
-    st.success("✅ Decision Freeze: " + v14_freeze["reason"])
-else:
-    st.info("🧊 Decision Freeze: " + v14_freeze["reason"])
-st.caption(v14_regime["note"] + " | " + v14_entry["note"])
-with st.expander("🔎 AI Brain Details — Memory, Candle, Seller Strength, Reasoning", expanded=False):
+# V17 Compact AI Brain - details only in Developer Mode.
+st.markdown("### 🧠 AI Brain")
+ai1, ai2, ai3, ai4, ai5 = st.columns(5)
+ai1.metric("Decision", final_trade)
+ai2.metric("Confidence", f"{confidence:.0f}%")
+ai3.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
+ai4.metric("Market", v14_regime["label"])
+ai5.metric("Entry", "OPEN" if _signal_gate_v162.get("allowed") else "WAIT")
+_reason_line = "OI + Price + Heavyweights align" if final_trade != "WAIT" else ("Signal unstable / confirmation pending" if not _signal_gate_v162.get("allowed") else "Capital safe")
+st.caption("Reason: " + _reason_line)
+with st.expander("🔎 AI Brain Details — Developer Reasoning", expanded=False):
     st.write("**Memory:**", v14_stability["note"])
-    st.write(f"**15m Candle Confirmation:** {candle15['pattern']} | Score {candle15['score']} | {candle15['note']}")
+    st.write(f"**Freeze:** {v14_freeze['status']} | {v14_freeze['reason']}")
+    st.write(f"**15m Candle:** {candle15['pattern']} | Score {candle15['score']} | {candle15['note']}")
     s1, s2, s3 = st.columns(3)
     s1.metric("CE Seller Strength", f"{v14_seller_strength['ce']}/100")
     s2.metric("PE Seller Strength", f"{v14_seller_strength['pe']}/100")
@@ -4059,59 +4094,19 @@ with st.expander("🔎 AI Brain Details — Memory, Candle, Seller Strength, Rea
         sign = "+" if pts >= 0 else ""
         st.write(f"• {name}: {sign}{pts}")
 
-# V13.2: India VIX Expected Range Engine
-if vix_range.get("ok"):
-    vr1, vr2, vr3, vr4 = st.columns(4)
-    vr1.metric("VIX Expected Move", f"±{vix_range['move_points']:.0f} pts", f"{vix_range['move_pct']:.2f}%")
-    vr2.metric("Upper Range", f"{vix_range['upper']:.0f}")
-    vr3.metric("Lower Range", f"{vix_range['lower']:.0f}")
-    vr4.metric("Range Risk", vix_range['risk'])
-    st.caption("India VIX shortcut: VIX ÷ 16 ≈ expected 1-day % move. Ye guarantee nahi, sirf option-seller range estimate hai.")
-    _vix_note = v132_vix_trade_note(final_trade, price, vix_range)
-    if vix_range['risk'] == "HIGH RANGE":
-        st.warning("📊 VIX Range Engine: " + _vix_note)
+# VIX range is useful, but not required in default trading flow.
+with st.expander("📊 India VIX Range Engine — Expected Move", expanded=False):
+    if vix_range.get("ok"):
+        vr1, vr2, vr3, vr4 = st.columns(4)
+        vr1.metric("VIX Expected Move", f"±{vix_range['move_points']:.0f} pts", f"{vix_range['move_pct']:.2f}%")
+        vr2.metric("Upper Range", f"{vix_range['upper']:.0f}")
+        vr3.metric("Lower Range", f"{vix_range['lower']:.0f}")
+        vr4.metric("Range Risk", vix_range['risk'])
+        st.caption("India VIX shortcut: VIX ÷ 16 ≈ expected 1-day % move. Ye guarantee nahi, sirf option-seller range estimate hai.")
     else:
-        st.info("📊 VIX Range Engine: " + _vix_note)
-else:
-    st.info("📊 VIX Range Engine unavailable: VIX/price data missing.")
+        st.info("VIX/price data missing.")
 
-if final_trade == "SELL PE":
-    card_class = "card-green"
-    status_text = "🟢 Bullish Seller Setup"
-elif final_trade == "SELL CE":
-    card_class = "card-red"
-    status_text = "🔴 Bearish Seller Setup"
-elif seller_risk >= 70:
-    card_class = "card-yellow"
-    status_text = "🟡 Risk Block / Wait"
-else:
-    card_class = "card-wait"
-    status_text = "⚪ No Clear Edge"
-
-st.markdown(
-    f"""
-<div class="advisor-card {card_class}">
-    <h3>{status_text}</h3>
-    <h1>{final_trade}</h1>
-    <p><b>Direction:</b> {final_direction:+.1f}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Confidence:</b> {confidence:.0f}% &nbsp;&nbsp; | &nbsp;&nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%</p>
-    <p><b>Strike:</b> {selected_strike} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Hedge:</b> {hedge} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Strike Score:</b> {selected_strike_score}/98</p>
-    <p><b>Suggested Lots:</b> {suggested_lots}/{max_lots} &nbsp;&nbsp; | &nbsp;&nbsp; <b>SL:</b> {sl_display} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Target:</b> {target_display}</p>
-    <p><b>Mode:</b> {market_mode} &nbsp;&nbsp; | &nbsp;&nbsp; <b>Shock:</b> {shock_score_v7}/100 &nbsp;&nbsp; | &nbsp;&nbsp; <b>Trade Quality:</b> {trade_quality}/100</p>
-</div>
-""",
-    unsafe_allow_html=True,
-)
-
-if hard_block:
-    st.error("Fresh selling blocked: critical news/event risk ya overall seller risk bahut high hai.")
-elif final_trade == "SELL PE":
-    st.success("PE side preferred — hedge aur strict SL ke saath. Heavyweight/OI confirmation ko priority do.")
-elif final_trade == "SELL CE":
-    st.error("CE side preferred — hedge aur strict SL ke saath. Short-covering warning ko ignore mat karo.")
-else:
-    st.warning("Clear edge nahi hai. WAIT is a valid seller decision.")
-
-# V13.3: Fake Move Detector placed exactly in the WAIT / no-clear-edge area.
+# Fake move calculation remains in AI engine, but duplicate UI is hidden.
 fake_move = v133_fake_move_engine(
     price_action_bias=price_action_bias,
     option_bias=option_bias,
@@ -4125,67 +4120,16 @@ fake_move = v133_fake_move_engine(
     final_trade=final_trade,
     vix_range=vix_range,
 )
-fm1, fm2, fm3 = st.columns(3)
-fm1.metric("Fake Move Risk", f"{fake_move['score']}/100")
-fm2.metric("Fake Move Status", fake_move["label"])
-fm3.metric("AI Action", "WAIT" if fake_move["score"] >= 50 or final_trade == "WAIT" else final_trade)
-if fake_move["tone"] == "error":
-    st.error("🚨 " + fake_move["action"])
-elif fake_move["tone"] == "warning":
-    st.warning("⚠️ " + fake_move["action"])
-else:
-    st.success("✅ " + fake_move["action"])
-with st.expander("🚨 Fake Move Detector — WAIT Zone", expanded=False):
-    st.write(f"**Status:** {fake_move['label']} ({fake_move['score']}/100)")
-    st.write(f"**Action:** {fake_move['action']}")
-    st.write("**Warning reasons:**")
-    for reason in fake_move["reasons"]:
-        st.write("•", reason)
-    if fake_move["confirmations"]:
-        st.write("**Positive confirmations:**")
-        for note in fake_move["confirmations"]:
-            st.write("✔", note)
-
-# Safe Expiry Score / near-zero premium probability. Uses already fetched option-chain rows only.
-_minutes_left_v15 = v15_minutes_to_expiry_close(selected_expiry)
-_v15_watchlist = v15_safe_expiry_watchlist(
-    option_analysis.get("rows", []) if option_analysis.get("success") else [],
-    price,
-    vix,
-    _minutes_left_v15,
-    gamma_score_v7,
-    shock_score_v7,
-    fake_move.get("score", 0),
-    v14_regime.get("label", ""),
-    top_n=3,
-)
-_best_ce_safe = v15_safe_expiry_for_leg("CE", best_ce, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_ce else None
-_best_pe_safe = v15_safe_expiry_for_leg("PE", best_pe, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_pe else None
-
-st.markdown("### 🎯 V15 Safe Expiry Score — Zero Premium Probability")
-se1, se2, se3, se4 = st.columns(4)
-se1.metric("Minutes Left", f"{_minutes_left_v15} min" if _minutes_left_v15 < 900 else "NA")
-se2.metric("Gamma Risk", f"{gamma_score_v7}/100")
-se3.metric("Fake Move", f"{fake_move.get('score',0)}/100")
-se4.metric("Mode", v14_regime.get("label", "NA"))
-
-if not option_analysis.get("success"):
-    st.info("Safe Expiry Score ke liye live Dhan option-chain active honi chahiye.")
-else:
-    cols_safe = st.columns(2)
-    for box, title, data in [(cols_safe[0], "🔴 Best CE Safe Score", _best_ce_safe), (cols_safe[1], "🟢 Best PE Safe Score", _best_pe_safe)]:
-        with box:
-            if data:
-                st.metric(title, f"{data['safe_score']}/100", data['label'])
-                st.write(f"**{data['strike']} {data['side']}** | Premium ₹{data['premium']:.2f} | Worthless Prob {data['worthless_probability']}% | Explosion Risk {data['premium_explosion_risk']}%")
-                if data["warnings"]:
-                    st.caption("⚠️ " + " | ".join(data["warnings"]))
-                else:
-                    st.caption("✔ " + " | ".join(data["reasons"]))
-            else:
-                st.info("Candidate unavailable")
-
-    # V16.3: internal smart watchlist table removed from trading UI.
+if developer_mode:
+    with st.expander("🚨 Fake Move + Safe Expiry Details", expanded=False):
+        st.write(f"Fake Move: {fake_move['label']} ({fake_move['score']}/100)")
+        for reason in fake_move.get("reasons", []):
+            st.write("•", reason)
+        _minutes_left_v15 = v15_minutes_to_expiry_close(selected_expiry)
+        _best_ce_safe = v15_safe_expiry_for_leg("CE", best_ce, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_ce else None
+        _best_pe_safe = v15_safe_expiry_for_leg("PE", best_pe, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_pe else None
+        st.write("CE Safe:", _best_ce_safe)
+        st.write("PE Safe:", _best_pe_safe)
 
 # V13: put the most actionable parts near the top for mobile trading.
 # V16.3: Strategy setup moved near top as Smart Strategy Matrix.
@@ -4197,12 +4141,12 @@ with st.expander("⚡ Live Candidate Cards — Price + SL + Target", expanded=Tr
             v13_candidate_card("🔴 Best CE Candidate", "CE", best_ce, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
         with ctop2:
             v13_candidate_card("🟢 Best PE Candidate", "PE", best_pe, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
-        st.warning("Candidate automatic entry nahi hai. Final AI Decision + Action Plan must agree before trade.")
+        st.caption("Candidate reference hai. Entry sirf Super Final Decision green hone par.")
     else:
         st.info("Live candidate cards ke liye Dhan option-chain active hona zaroori hai.")
 
 
-with st.expander("💼 Portfolio Manager Pro — Multiple Entries + Hedge + AI Action", expanded=True):
+with st.expander("💼 Active Positions + Add Position", expanded=False):
     _pf = v162_portfolio_load()
     _active_pf = _pf[_pf["Status"].astype(str).str.upper() == "ACTIVE"] if not _pf.empty else pd.DataFrame(columns=PORTFOLIO_COLUMNS)
     if _active_pf.empty:
@@ -4231,7 +4175,7 @@ with st.expander("💼 Portfolio Manager Pro — Multiple Entries + Hedge + AI A
         pc2.metric("Total P/L", f"₹{_total_pnl:,.0f}")
         pc3.metric("Portfolio Risk", "HIGH" if max(gamma_score_v7, shock_score_v7) >= 70 else "MEDIUM" if max(gamma_score_v7, shock_score_v7) >= 45 else "LOW")
         pc4.metric("Fresh Entry", "Allowed" if _signal_gate_v162.get("allowed") else "Blocked")
-        st.dataframe(pd.DataFrame(_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
         st.caption("AI Action har refresh par live premium + hedge + risk ke hisab se update hota hai. Current price zero aaye to option chain range/strike check karo.")
         with st.expander("Position Actions — mark exit", expanded=False):
             _exit_id = st.selectbox("Position ID", list(_active_pf["Position ID"].astype(str)), key="v162_exit_id")
@@ -4319,7 +4263,7 @@ with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", exp
         st.success("Trade ticket clean hai. Still confirm broker price, spread, margin and SL before execution.")
     if tt["legs"]:
         _legs_df = pd.DataFrame(tt["legs"])
-        st.dataframe(_legs_df, use_container_width=True, hide_index=True)
+        st.dataframe(_legs_df, width="stretch", hide_index=True)
         st.caption(f"Approx points risk: {tt['estimated_points_risk']} | Hedge gap: {hedge_gap} pts")
     else:
         st.info("No legs generated because current verdict is WAIT/NO TRADE.")
@@ -4462,9 +4406,9 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
             def _highlight_atm(row):
                 return ["background-color: rgba(37, 99, 235, 0.35); border-top: 1px solid #60a5fa; border-bottom: 1px solid #60a5fa;" if int(row.get("Strike", 0)) == _atm_strike else "" for _ in row]
             st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
-            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), use_container_width=True, hide_index=True)
+            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), width="stretch", hide_index=True)
         except Exception:
-            st.dataframe(_oc_df, use_container_width=True, hide_index=True)
+            st.dataframe(_oc_df, width="stretch", hide_index=True)
 
         st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
@@ -4519,7 +4463,7 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False
                 "Est. Nifty pts": round(price * (r["weight"] / 100) * (r["change_pct"] / 100), 1),
             })
         hw_table = pd.DataFrame(hw_rows)
-        st.dataframe(hw_table, use_container_width=True, hide_index=True)
+        st.dataframe(hw_table, width="stretch", hide_index=True)
         st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
 
         if final_trade == "SELL CE" and heavy_bias > 35:
@@ -4577,7 +4521,7 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
         st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
     st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
     if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
-        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), use_container_width=True, hide_index=True)
+        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
 
 
 with st.expander("💰 Position & Risk Manager", expanded=False):
