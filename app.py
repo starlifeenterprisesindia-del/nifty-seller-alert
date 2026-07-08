@@ -2321,7 +2321,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V16.3 Super App AI")
+st.sidebar.title("⚙️ V16.4 Super App AI")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -3288,6 +3288,170 @@ def v11_strategy_text(strategy, confidence):
 
 
 
+# =========================================================
+# V16.4 AI AUDIT + SINGLE DECISION + BEST STRIKE ENGINE
+# =========================================================
+def v164_live_move_detector(price, nifty_change_pct, atr5=40):
+    """Detect fast Nifty movement between app refreshes and daily move shock."""
+    try:
+        price = float(price or 0)
+        atr5 = max(float(atr5 or 40), 1.0)
+        prev = st.session_state.get("v164_prev_nifty_price")
+        st.session_state["v164_prev_nifty_price"] = price
+        move_points = 0.0 if prev in (None, 0) else price - float(prev)
+        move_abs = abs(move_points)
+        daily_abs_pct = abs(float(nifty_change_pct or 0))
+        # Intraday shock if move from last app snapshot is meaningful versus ATR.
+        fast_shock = move_abs >= max(35.0, atr5 * 0.70)
+        daily_shock = daily_abs_pct >= 0.45
+        direction = "DOWN" if move_points < 0 or float(nifty_change_pct or 0) < -0.45 else "UP" if move_points > 0 or float(nifty_change_pct or 0) > 0.45 else "FLAT"
+        score = 0
+        score += min(move_abs / max(atr5, 1) * 45, 60)
+        score += min(daily_abs_pct * 75, 40)
+        score = int(clamp(score, 0, 100))
+        return {
+            "fast_shock": bool(fast_shock),
+            "daily_shock": bool(daily_shock),
+            "direction": direction,
+            "move_points": round(move_points, 2),
+            "daily_pct": round(float(nifty_change_pct or 0), 2),
+            "score": score,
+            "label": "FAST FALL" if direction == "DOWN" and (fast_shock or daily_shock) else "FAST RISE" if direction == "UP" and (fast_shock or daily_shock) else "NORMAL",
+        }
+    except Exception:
+        return {"fast_shock": False, "daily_shock": False, "direction": "FLAT", "move_points": 0.0, "daily_pct": 0.0, "score": 0, "label": "NA"}
+
+
+def v164_score_candidate(row, side, spot, preferred_min=30, preferred_max=150):
+    """Robust best strike scoring: live OTM, premium zone, OI, volume, delta, spread."""
+    try:
+        side = side.upper()
+        prefix = side.lower()
+        strike = int(row.get("strike", 0) or 0)
+        spot = float(spot or 0)
+        premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+        delta_abs = abs(float(row.get(f"{prefix}_delta", 0) or 0))
+        spread_pct = float(row.get(f"{prefix}_spread_pct", 0) or 0)
+        oi_chg_pct = float(row.get(f"{prefix}_oi_change_pct", 0) or 0)
+        vol_ratio = float(row.get(f"{prefix}_volume_ratio", 0) or 0)
+        base_sell_score = float(row.get(f"{prefix}_sell_score", 0) or 0)
+        # SELL CE should be above/at spot; SELL PE should be below/at spot.
+        otm_ok = (strike >= int(round(spot / 50) * 50)) if side == "CE" else (strike <= int(round(spot / 50) * 50))
+        if not otm_ok or premium <= 0:
+            return -9999
+        distance = abs(strike - spot)
+        score = base_sell_score
+        # Premium zone: seller-friendly but not too cheap or too dangerous.
+        if preferred_min <= premium <= preferred_max:
+            score += 28
+        elif 20 <= premium < preferred_min:
+            score += 8
+        elif preferred_max < premium <= 220:
+            score -= 10
+        else:
+            score -= 35
+        # Delta: avoid very high delta and very far useless options.
+        if 0.12 <= delta_abs <= 0.34:
+            score += 18
+        elif 0.08 <= delta_abs <= 0.42:
+            score += 8
+        else:
+            score -= 18
+        # Distance: enough distance but not too far.
+        if 80 <= distance <= 350:
+            score += 14
+        elif distance < 50:
+            score -= 22
+        elif distance > 500:
+            score -= 16
+        # OI/volume/spread.
+        if oi_chg_pct > 0:
+            score += min(oi_chg_pct * 0.25, 12)
+        if vol_ratio >= 1.0:
+            score += min(vol_ratio * 4, 12)
+        if 0 < spread_pct <= 1.0:
+            score += 10
+        elif spread_pct > 2.0:
+            score -= 20
+        return score
+    except Exception:
+        return -9999
+
+
+def v164_select_best_strikes(option_analysis, spot, premium_min=30, premium_max=150):
+    rows = option_analysis.get("rows", []) if isinstance(option_analysis, dict) else []
+    best = {"CE": None, "PE": None}
+    for side in ("CE", "PE"):
+        scored = []
+        for row in rows:
+            sc = v164_score_candidate(row, side, spot, premium_min, premium_max)
+            if sc > -1000:
+                rr = row.copy()
+                rr[f"{side.lower()}_v164_score"] = round(sc, 2)
+                scored.append((sc, rr))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if scored:
+            best[side] = scored[0][1]
+    return best
+
+
+def v164_unified_decision_engine(ranked, price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, seller_risk, shock_score, gamma_score, news_score, data_quality, conflict_mode, move_guard):
+    """One engine for final decision. Strategy Matrix and final card must not contradict."""
+    ranked = ranked or [{"strategy": "WAIT", "confidence": 25}]
+    top = dict(ranked[0])
+    top_strategy = str(top.get("strategy", "WAIT")).upper()
+    top_conf = int(top.get("confidence", 0) or 0)
+    reasons = []
+    blockers = []
+    # Hard blocks.
+    if data_quality < 70:
+        blockers.append(f"Data quality {data_quality}/100 hai; minimum 70 chahiye.")
+    if news_score >= 75:
+        blockers.append(f"News risk high {news_score}/100.")
+    if seller_risk >= 72:
+        blockers.append(f"Seller risk high {seller_risk:.0f}/100.")
+    if gamma_score >= 78:
+        blockers.append(f"Gamma risk high {gamma_score:.0f}/100.")
+    # Conflict is blocker only when real disagreement, but trend shock can override to directional seller/buyer view.
+    if conflict_mode and not (move_guard.get("score", 0) >= 55):
+        blockers.append("AI modules conflict mein hain.")
+    # Market move override: if Nifty falls sharply, don't allow bullish PE sell.
+    if move_guard.get("label") == "FAST FALL":
+        reasons.append(f"Fast fall detected: {move_guard.get('move_points',0)} pts from last refresh / daily {move_guard.get('daily_pct',0)}%")
+        if top_strategy == "SELL PE":
+            top_strategy, top_conf = "SELL CE", max(70, min(92, top_conf - 5))
+            reasons.append("SELL PE blocked due to fast fall; CE side preferred.")
+    elif move_guard.get("label") == "FAST RISE":
+        reasons.append(f"Fast rise detected: {move_guard.get('move_points',0)} pts from last refresh / daily {move_guard.get('daily_pct',0)}%")
+        if top_strategy == "SELL CE":
+            top_strategy, top_conf = "SELL PE", max(70, min(92, top_conf - 5))
+            reasons.append("SELL CE blocked due to fast rise; PE side preferred.")
+    # Contributor confidence.
+    directional_alignment = abs(float(price_action_bias or 0)) * 0.18 + abs(float(option_bias or 0)) * 0.22 + abs(float(heavy_bias or 0)) * 0.16 + abs(float(smart_money_bias or 0)) * 0.10 + abs(float(pcr_bias or 0)) * 0.08
+    risk_penalty = float(seller_risk or 0) * 0.20 + float(shock_score or 0) * 0.13 + float(gamma_score or 0) * 0.10 + float(news_score or 0) * 0.12
+    final_conf = clamp(top_conf * 0.55 + directional_alignment + (data_quality * 0.12) - risk_penalty * 0.20, 0, 98)
+    if top_strategy == "WAIT":
+        blockers.append("Top strategy WAIT hai.")
+    if top_conf < 65:
+        blockers.append(f"Top setup confidence {top_conf}% hai; minimum 65 chahiye.")
+    # If top setup is very strong, use it as final unless hard blockers remain.
+    if blockers:
+        final = "WAIT"
+        final_conf = min(final_conf, 64)
+    else:
+        final = top_strategy
+        final_conf = max(final_conf, min(top_conf, 95))
+    return {
+        "final_trade": final,
+        "confidence": int(round(clamp(final_conf, 0, 98))),
+        "top_strategy": top_strategy,
+        "top_confidence": top_conf,
+        "blockers": blockers,
+        "reasons": reasons,
+    }
+
+
+
 # V11 Super Signal + Strategy Ranking
 try:
     _ = v11_super
@@ -3325,6 +3489,85 @@ except NameError:
         conflict_mode=locals().get("conflict_mode", True),
         data_quality=locals().get("data_quality", 0),
     )
+
+
+# V16.4 AI Audit: current market move + best strike + single final decision.
+try:
+    v164_move_guard = v164_live_move_detector(price, nifty_change_pct, atr5)
+except Exception:
+    v164_move_guard = {"fast_shock": False, "daily_shock": False, "direction": "FLAT", "move_points": 0.0, "daily_pct": 0.0, "score": 0, "label": "NA"}
+
+try:
+    _v164_best = v164_select_best_strikes(option_analysis, price, 30, 150) if option_analysis.get("success") else {"CE": best_ce, "PE": best_pe}
+    if _v164_best.get("CE"):
+        best_ce = _v164_best["CE"]
+        ce_strike = int(best_ce.get("strike", ce_strike))
+    if _v164_best.get("PE"):
+        best_pe = _v164_best["PE"]
+        pe_strike = int(best_pe.get("strike", pe_strike))
+except Exception:
+    pass
+
+try:
+    v164_unified = v164_unified_decision_engine(
+        ranked=v11_ranked_strategies,
+        price_action_bias=price_action_bias,
+        option_bias=option_bias,
+        heavy_bias=heavy_bias,
+        smart_money_bias=smart_money_bias,
+        pcr_bias=pcr_bias,
+        seller_risk=seller_risk,
+        shock_score=shock_score_v7,
+        gamma_score=gamma_score_v7,
+        news_score=news.get("score", 0),
+        data_quality=data_quality,
+        conflict_mode=conflict_mode,
+        move_guard=v164_move_guard,
+    )
+    proposed_trade_v14 = v164_unified.get("final_trade", final_trade)
+    final_trade = proposed_trade_v14
+    confidence = float(v164_unified.get("confidence", confidence))
+    # Reorder strategy matrix so top row and final AI are aligned.
+    if final_trade != "WAIT":
+        _found = False
+        for _r in v11_ranked_strategies:
+            if str(_r.get("strategy", "")).upper() == final_trade:
+                _r["confidence"] = max(int(_r.get("confidence", 0) or 0), int(confidence))
+                _found = True
+        if not _found:
+            v11_ranked_strategies.insert(0, {"strategy": final_trade, "confidence": int(confidence), "type": "Seller"})
+        v11_ranked_strategies = sorted(v11_ranked_strategies, key=lambda x: int(x.get("confidence",0) or 0), reverse=True)
+except Exception as _v164_exc:
+    v164_unified = {"final_trade": final_trade, "confidence": confidence, "blockers": [str(_v164_exc)], "reasons": []}
+
+# Re-select strike after unified decision.
+if final_trade == "SELL PE":
+    selected_strike = f"{pe_strike} PE"
+    hedge = f"{pe_strike - hedge_gap} PE"
+    selected_strike_score = best_pe.get("pe_sell_score", best_pe.get("pe_v164_score", 0)) if best_pe else 0
+elif final_trade == "SELL CE":
+    selected_strike = f"{ce_strike} CE"
+    hedge = f"{ce_strike + hedge_gap} CE"
+    selected_strike_score = best_ce.get("ce_sell_score", best_ce.get("ce_v164_score", 0)) if best_ce else 0
+elif final_trade == "IRON CONDOR":
+    selected_strike = f"CE {ce_strike} + PE {pe_strike}"
+    hedge = f"CE {ce_strike + hedge_gap} + PE {pe_strike - hedge_gap}"
+    selected_strike_score = int(min((best_ce.get("ce_sell_score", 0) if best_ce else 0), (best_pe.get("pe_sell_score", 0) if best_pe else 0)))
+else:
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+
+if final_trade == "WAIT":
+    suggested_lots = 0
+    sl_display = "No Trade"
+    target_display = "No Trade"
+else:
+    risk_multiplier = max(0.0, (100 - seller_risk) / 100)
+    confidence_multiplier = confidence / 100
+    raw_lots = int(max_lots * risk_multiplier * confidence_multiplier)
+    suggested_lots = max(1, min(max_lots, raw_lots)) if max_lots > 0 else 0
+
 
 
 
@@ -3611,9 +3854,9 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V16.3 Super App</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V16.4 AI Audit</div>", unsafe_allow_html=True)
 st.markdown(
-    "<div class='sub-title'>Super Seller Terminal: Stable Refresh + Live Data + Multi-Position Portfolio + Exact Strike Execution</div>",
+    "<div class='sub-title'>Super Seller Terminal: Single AI Engine + Best Strike Audit + Market Move Guard</div>",
     unsafe_allow_html=True,
 )
 
@@ -3643,6 +3886,8 @@ with st.expander("🩺 V16 Live Health Monitor", expanded=True):
     h4.metric("Nifty Source", nifty_source)
     h5.metric("Position Save", _pos_status)
     h6.metric("Last Refresh", fmt_time())
+    _mg = locals().get("v164_move_guard", {}) or {}
+    st.caption(f"Market Move Guard: {_mg.get('label','NA')} | Refresh move: {_mg.get('move_points',0)} pts | Daily: {_mg.get('daily_pct',0)}% | Score: {_mg.get('score',0)}/100")
     if option_chain.get("success"):
         st.caption(f"OC fetched: {option_chain.get('fetched_at', 'NA')} | Expiry: {option_chain.get('expiry', selected_expiry)} | ATM: {option_chain.get('atm_strike', 'NA')}")
     if price_action_result.get("success"):
@@ -3681,8 +3926,16 @@ if not _signal_gate_v162["allowed"]:
     st.write("**Why blocked:**")
     for _r in _signal_gate_v162["reasons"]:
         st.write("•", _r)
+    for _r in (locals().get("v164_unified", {}) or {}).get("blockers", []):
+        st.write("•", _r)
 else:
     st.success("Signal stable hai. Fir bhi broker price, spread, margin aur SL confirm karke hi order lagao.")
+
+if (locals().get("v164_move_guard", {}) or {}).get("label") not in (None, "NA", "NORMAL"):
+    _mg = locals().get("v164_move_guard", {})
+    st.warning(f"Market Move Guard: {_mg.get('label')} | Last refresh move {_mg.get('move_points')} pts | Daily {_mg.get('daily_pct')}% | Score {_mg.get('score')}/100")
+for _r in (locals().get("v164_unified", {}) or {}).get("reasons", []):
+    st.info(_r)
 
 
 # V16.3: Important Strategy Matrix moved near top.
@@ -3773,9 +4026,9 @@ _strategy_rows_v163 = [
 _strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
 st.dataframe(pd.DataFrame(_strategy_rows_v163), use_container_width=True, hide_index=True)
 _best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
-st.markdown(f"**Best Setup:** {_best_row_v163.get('Strategy','WAIT')} ({_best_row_v163.get('Confidence',0)}%)  |  **Final AI:** {final_trade} ({confidence:.0f}%)")
+st.markdown(f"**Best Setup:** {_best_row_v163.get('Strategy','WAIT')} ({_best_row_v163.get('Confidence',0)}%)  |  **Unified Final AI:** {final_trade} ({confidence:.0f}%)")
 if final_trade == "WAIT":
-    st.warning("Ranking high ho sakti hai, par entry tabhi jab Final AI + Signal Gate green ho. Abhi WAIT/blocked hai.")
+    st.warning("Unified AI ne abhi WAIT/block kiya hai. Reason upar Super Final Decision mein diya hai.")
 else:
     st.success("Final AI active hai. Phir bhi broker price, spread, margin aur hedge confirm karo.")
 
