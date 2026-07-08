@@ -39,7 +39,7 @@ def build_market_snapshot(ctx, fmt_time_func=None):
     pcr_value = _safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V19.3 Snapshot Engine",
+        "version": "V19.5.1 Snapshot Engine",
         "created_at": created_at,
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -106,7 +106,7 @@ def build_market_snapshot(ctx, fmt_time_func=None):
 
 def snapshot_delta(current_snapshot, previous_snapshot=None):
     if not previous_snapshot:
-        return {"status": "FIRST", "material_change": 100, "changes": ["First snapshot created."]}
+        return {"status": "FIRST", "material_change": 0, "changes": ["First snapshot created; no prior snapshot available for comparison."]}
 
     changes = []
     cur_m = current_snapshot.get("market", {})

@@ -27,7 +27,7 @@ try:
 except Exception:
     V19_UTILS_READY = False
 
-# V19.5 Risk Engine Module module import.
+# V19.5.1 Full Audit Fix module import.
 try:
     from snapshot_engine import (
         build_market_snapshot as v19_build_market_snapshot,
@@ -75,7 +75,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.5 Risk Engine Module",
+    page_title="Nifty Seller AI Dashboard V19.5.1 Full Audit Fix",
     page_icon="🧠",
     layout="wide",
 )
@@ -1768,7 +1768,7 @@ def v13_candidate_card(title, side, row, final_trade, hedge_gap, confidence, gam
 <div class='v13-card'>
 <h3>{title}: {strike} {side}</h3>
 <div class='v13-badge'>{badge}</div>
-<p><b>Live Premium:</b> ₹{premium:.2f} <span class='{cls}'>{arrow} {delta}</span></p>
+<p><b>{("Live Premium" if market_status()[0] == "Market Open" else "Last Premium (Market Closed)")}:</b> ₹{premium:.2f} <span class='{cls}'>{arrow} {delta}</span></p>
 <p><b>Suggested Entry:</b> ₹{premium:.2f} &nbsp; | &nbsp; <b>SL:</b> ₹{st_data.get('sl',0):.2f} &nbsp; | &nbsp; <b>Target 1:</b> ₹{st_data.get('target1',0):.2f} &nbsp; | &nbsp; <b>Target 2:</b> ₹{st_data.get('target2',0):.2f}</p>
 <p><b>Hedge:</b> {hedge_strike} {side} &nbsp; | &nbsp; <b>OI:</b> {int(row.get(f'{prefix}_oi',0) or 0):,} &nbsp; | &nbsp; <b>OI Δ:</b> {int(row.get(f'{prefix}_oi_change',0) or 0):,} &nbsp; | &nbsp; <b>Volume:</b> {int(row.get(f'{prefix}_volume',0) or 0):,}</p>
 <p><b>Delta:</b> {float(row.get(f'{prefix}_delta',0) or 0):.3f} &nbsp; | &nbsp; <b>IV:</b> {float(row.get(f'{prefix}_iv',0) or 0):.2f} &nbsp; | &nbsp; <b>Sell Score:</b> {int(row.get(f'{prefix}_sell_score',0) or 0)}/98</p>
@@ -2400,7 +2400,7 @@ client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
 st.sidebar.title("⚙️ V19.5 Modular AI")
-st.sidebar.caption("V19.5: Risk Engine module")
+st.sidebar.caption("V19.5.1: Full app consistency audit")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
@@ -2436,7 +2436,12 @@ st.sidebar.toggle(
 )
 
 st.sidebar.caption(
-    "Last: " + (st.session_state.get("last_manual_refresh") or st.session_state.get("last_refresh", "First refresh"))
+    "Last refresh: " + (
+        st.session_state.get("last_manual_refresh")
+        or st.session_state.get("v163_last_manual_refresh")
+        or st.session_state.get("last_refresh")
+        or "First app run"
+    )
 )
 st.sidebar.caption("State lock: Developer/Trading mode preserved")
 st.sidebar.caption("Top duplicate removed: YES | Snapshot module: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK") + "")
@@ -2545,7 +2550,7 @@ with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True
     _bias_index = 0 if _bias_default not in ["Neutral", "Bullish", "Bearish"] else _bias_options.index(_bias_default)
     _bias_choice = st.selectbox("FII Futures Bias", _bias_options, index=_bias_index, key=f"v135_fut_bias_{_date_key}")
     fii_index_futures_bias = _auto_bias if _bias_choice == "Auto" else _bias_choice
-    st.caption(f"Auto Futures Bias: {fii_index_futures_bias} | Long {fii_long_pct:.2f}% / Short {fii_short_pct:.2f}%")
+    st.caption(f"Auto Derived Bias: {_auto_bias} | Selected Bias: {fii_index_futures_bias} | Long {fii_long_pct:.2f}% / Short {fii_short_pct:.2f}%")
     if _saved_row_for_date:
         st.success(f"{pd.to_datetime(fii_data_date).strftime('%d-%m-%Y')} ka saved data loaded.")
     else:
@@ -4110,7 +4115,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V19.5 Risk Engine Module",
+        "version": "V19.5.1 Full Audit Fix",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4147,7 +4152,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V19.5 Risk Engine Module",
+        "version": "V19.5.1 Full Audit Fix",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4366,7 +4371,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V19.5 Risk Engine Module"
+    fd["version"] = "V19.5.1 Full Audit Fix"
 
     return fd
 
@@ -4474,7 +4479,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V19.5 Risk Engine Module",
+        "version": "V19.5.1 Full Audit Fix",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4585,7 +4590,7 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V19.5 Risk Engine Module", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V19.5.1 Full Audit Fix", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
 
 
@@ -4732,7 +4737,7 @@ def v187_apply_snapshot_ai(fd, snapshot, delta):
     if snap_reason not in reasons:
         reasons.insert(0, snap_reason)
     fd["reasons"] = reasons[:12]
-    fd["version"] = "V19.5 Risk Engine Module"
+    fd["version"] = "V19.5.1 Full Audit Fix"
 
     return fd
 
@@ -4882,7 +4887,7 @@ def v188_apply_snapshot_health_guard(fd, snapshot):
     if health_reason not in reasons:
         reasons.insert(0, health_reason)
     fd["reasons"] = reasons[:14]
-    fd["version"] = "V19.5 Risk Engine Module"
+    fd["version"] = "V19.5.1 Full Audit Fix"
     return fd
 
 
@@ -5007,6 +5012,70 @@ except Exception as _v195_error:
 
 
 
+
+# =========================================================
+# V19.5.1 FULL APP CONSISTENCY AUDIT BRIDGE
+# =========================================================
+# Goal: keep analysis, execution gating, trade plan and risk messaging consistent.
+try:
+    _market_text_v1951, _market_day_v1951 = market_status()
+    _market_open_v1951 = (_market_text_v1951 == "Market Open")
+except Exception:
+    _market_text_v1951, _market_day_v1951, _market_open_v1951 = "Unknown", "", False
+
+# Sync entry/SL/target from the selected live candidate after the final action is known.
+try:
+    if isinstance(final_decision, dict):
+        _fd_action_v1951 = str(final_decision.get("action", "WAIT")).upper()
+        _fd_strategy_v1951 = final_decision.get("strategy", {}) if isinstance(final_decision.get("strategy", {}), dict) else {}
+        _fd_conf_v1951 = float(final_decision.get("confidence", confidence) or 0)
+
+        _plan_row_v1951 = None
+        _plan_side_v1951 = None
+        if _fd_action_v1951 == "SELL CE" and best_ce:
+            _plan_row_v1951, _plan_side_v1951 = best_ce, "CE"
+        elif _fd_action_v1951 == "SELL PE" and best_pe:
+            _plan_row_v1951, _plan_side_v1951 = best_pe, "PE"
+
+        if _plan_row_v1951 and _plan_side_v1951:
+            _prefix_v1951 = _plan_side_v1951.lower()
+            _premium_v1951 = float(_plan_row_v1951.get(f"{_prefix_v1951}_ltp", 0) or 0)
+            if _premium_v1951 > 0:
+                _prem_plan_v1951 = v12_sl_target_for_seller(
+                    _premium_v1951,
+                    _fd_conf_v1951,
+                    gamma_score_v7,
+                    shock_score_v7,
+                )
+                _fd_strategy_v1951["entry"] = f"₹{_premium_v1951:.2f}"
+                _fd_strategy_v1951["sl"] = f"₹{float(_prem_plan_v1951.get('sl',0) or 0):.2f}"
+                _fd_strategy_v1951["target"] = f"₹{float(_prem_plan_v1951.get('target1',0) or 0):.2f}"
+                final_decision["strategy"] = _fd_strategy_v1951
+
+        final_decision["entry_context"] = {
+            "market_open": bool(_market_open_v1951),
+            "market_status": _market_text_v1951,
+            "freeze_confirmed": bool((v14_freeze or {}).get("confirmed", False)) if isinstance(v14_freeze, dict) else False,
+            "freeze_count": int((v14_freeze or {}).get("same_count", 0) or 0) if isinstance(v14_freeze, dict) else 0,
+            "freeze_required": int((v14_freeze or {}).get("required", 3) or 3) if isinstance(v14_freeze, dict) else 3,
+        }
+
+        # Re-sync legacy display variables after trade-plan repair.
+        final_trade = final_decision.get("action", "WAIT")
+        confidence = float(final_decision.get("confidence", 0) or 0)
+        selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
+        hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
+        suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
+        sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
+        target_display = final_decision.get("strategy", {}).get("target", "No Trade")
+except Exception as _v1951_plan_error:
+    try:
+        final_decision.setdefault("warnings", []).append(f"V19.5.1 trade-plan sync: {_v1951_plan_error}")
+    except Exception:
+        pass
+
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -5015,7 +5084,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.5 Risk Engine Module</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.5.1 Full Audit Fix</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -5023,16 +5092,20 @@ try:
     _quality = _fd.get("quality", "NA")
     _class = "green" if _quality == "OK" else ("red" if _quality in ("BLOCKED", "ERROR", "DATA_WEAK", "RISK_HIGH") else "")
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
+    _market_open_card = (market_text == "Market Open")
+    _card_heading = f"🧠 V19.5.1 Full Audit Fix — {_quality}" if _market_open_card else f"🧠 MARKET CLOSED PREVIEW — {_quality}"
+    _action_label = "Final Action" if _market_open_card else "Plan Bias"
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V19.5 Risk Engine Module — {_quality}</h3>
-<b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
+<h3>{_card_heading}</h3>
+<b>{_action_label}:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
 <b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
+<b>Entry:</b> {_strategy.get('entry','No Trade')} &nbsp; | &nbsp;
 <b>SL:</b> {_strategy.get('sl','No Trade')} &nbsp; | &nbsp;
 <b>Target:</b> {_strategy.get('target','No Trade')} &nbsp; | &nbsp;
-<b>Lots:</b> {_strategy.get('lots',0)}
+<b>Suggested Lots:</b> {_strategy.get('lots',0)}
 </div>
 """, unsafe_allow_html=True)
 
@@ -5045,7 +5118,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.5: Risk Engine module active — core engines untouched.")
+            st.caption("V19.5.1: Full app consistency audit active — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -5150,11 +5223,11 @@ try:
             st.write("V18.4 safe cleanup active.")
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
-            st.write("V19.5 Risk Engine Module:", "READY" if V19_UTILS_READY else "FALLBACK")
+            st.write("V19.5.1 App:", "READY")
             st.write("Snapshot Engine Module:", "READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK")
             st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
             st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
-            st.write("Next module target: ai_brain.py")
+            st.write("Next module target: decision_engine.py")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
             st.write("V18.5 removed: None")
             st.write("Decision consistency:", v185_consistency.get("status", "NA"))
@@ -5197,7 +5270,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Modular Risk Engine + AI Brain + Snapshot Engine</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Audited Risk + AI Brain + Snapshot Engine</div>",
     unsafe_allow_html=True,
 )
 
@@ -5272,9 +5345,35 @@ except Exception:
     _strike_num_v162 = 0
 _signal_gate_v162 = v162_signal_gate(final_trade, _top_strategy_v162.get("strategy", "WAIT"), confidence, _strike_num_v162)
 
-st.markdown("### 🎯 Super Final Decision — Entry Allowed Only If Green")
+# V19.5.1 execution consistency gate:
+# analytical bias may exist while fresh entry remains blocked.
+try:
+    _gate_reasons_v1951 = list(_signal_gate_v162.get("reasons", []) or [])
+    if market_text != "Market Open":
+        _signal_gate_v162["allowed"] = False
+        _gate_reasons_v1951.append("Market closed hai — plan preview only, fresh entry allowed nahi.")
+
+    if final_trade != "WAIT" and isinstance(v14_freeze, dict) and not bool(v14_freeze.get("confirmed", False)):
+        _signal_gate_v162["allowed"] = False
+        _gate_reasons_v1951.append(
+            f"Freeze confirmation pending: {int(v14_freeze.get('same_count',0) or 0)}/{int(v14_freeze.get('required',3) or 3)} refresh."
+        )
+
+    _rr_v1951 = risk_engine_report if isinstance(risk_engine_report, dict) else {}
+    if _rr_v1951.get("hard_blockers"):
+        _signal_gate_v162["allowed"] = False
+        _gate_reasons_v1951.append("Risk Engine hard blocker active.")
+    if str(_rr_v1951.get("guidance", "")).upper() in ("BLOCK TRADE", "WAIT / REDUCE SIZE"):
+        _signal_gate_v162["allowed"] = False
+        _gate_reasons_v1951.append(f"Risk guidance: {_rr_v1951.get('guidance')}.")
+
+    _signal_gate_v162["reasons"] = list(dict.fromkeys(_gate_reasons_v1951)) or ["Entry checklist green."]
+except Exception:
+    pass
+
+st.markdown("### 🎯 Super Final Decision — Fresh Entry Allowed Only If Green")
 _status_class = "green" if _signal_gate_v162["allowed"] else ("red" if final_trade != "WAIT" and confidence >= 90 else "")
-_status_text = "ENTRY ALLOWED ✅" if _signal_gate_v162["allowed"] else "ENTRY BLOCKED / WAIT ⚠️"
+_status_text = "ENTRY ALLOWED ✅" if _signal_gate_v162["allowed"] else ("MARKET CLOSED — PLAN PREVIEW 🔒" if market_text != "Market Open" else "ENTRY BLOCKED / WAIT ⚠️")
 st.markdown(f"""
 <div class='v17-final {_status_class}'>
 <h2>{_status_text}</h2>
@@ -5373,7 +5472,7 @@ _strategy_rows_v163 = [
 _strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
 st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
 _best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
-st.markdown(f"**Best Setup:** {_best_row_v163.get('Strategy','WAIT')} ({_best_row_v163.get('Confidence',0)}%)  |  **Unified Final AI:** {final_trade} ({confidence:.0f}%)")
+st.markdown(f"**Best Ranked Setup:** {_best_row_v163.get('Strategy','WAIT')} (Rank {_best_row_v163.get('Confidence',0)}/100)  |  **Unified Final AI:** {final_trade} ({confidence:.0f}%)")
 if final_trade == "WAIT":
     st.warning("Unified AI abhi WAIT/block kar raha hai. Reason upar Super Final Decision mein diya hai.")
 else:
@@ -5386,7 +5485,7 @@ ai1.metric("Decision", final_trade)
 ai2.metric("Confidence", f"{confidence:.0f}%")
 ai3.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
 ai4.metric("Market", v14_regime["label"])
-ai5.metric("Entry", "OPEN" if _signal_gate_v162.get("allowed") else "WAIT")
+ai5.metric("Entry", "OPEN" if _signal_gate_v162.get("allowed") else ("CLOSED/PREVIEW" if market_text != "Market Open" else "WAIT"))
 _reason_line = "OI + Price + Heavyweights align" if final_trade != "WAIT" else ("Signal unstable / confirmation pending" if not _signal_gate_v162.get("allowed") else "Capital safe")
 st.caption("Reason: " + _reason_line)
 with st.expander("🔎 AI Brain Details — Developer Reasoning", expanded=False):
@@ -5545,16 +5644,7 @@ with st.expander("🎯 Final Action Plan — Trade / No Trade", expanded=True):
             st.write("•", reason)
 
 
-with st.expander("📊 India VIX Range Engine — Expected Move", expanded=False):
-    if vix_range.get("ok"):
-        st.write(f"**India VIX:** {vix:.2f}")
-        st.write(f"**Formula:** VIX ÷ 16 = {vix_range['move_pct']:.2f}% expected 1-day move")
-        st.write(f"**Nifty Expected Range:** {vix_range['lower']:.0f} to {vix_range['upper']:.0f} (approx ±{vix_range['move_points']:.0f} points)")
-        st.write("**Use:** Agar price expected range ke edge ke paas ho to fresh option selling me extra caution. Agar market range ke beech ho aur OI/price action support kare to setup safer ho sakta hai.")
-        st.caption("Note: News/event days par market VIX range se bahar bhi ja sakta hai.")
-    else:
-        st.info(vix_range.get("message", "VIX range unavailable."))
-
+# V19.5.1: duplicate VIX range UI removed; primary VIX range panel retained above.
 
 with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", expanded=not trading_mode_clean):
     tt = v12_trade_ticket
@@ -5562,7 +5652,7 @@ with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", exp
     t1.metric("Recommended", tt["summary"])
     t2.metric("Strategy", tt["strategy"])
     t3.metric("Confidence", f"{tt['confidence']}%")
-    t4.metric("Lots", tt["lots"])
+    t4.metric("Safe Ticket Lots", tt["lots"])
     t5.metric("Net Credit", f"{tt['net_credit']} pts")
     if tt["warnings"]:
         for w in tt["warnings"]:
@@ -5573,6 +5663,7 @@ with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", exp
         _legs_df = pd.DataFrame(tt["legs"])
         st.dataframe(_legs_df, width="stretch", hide_index=True)
         st.caption(f"Approx points risk: {tt['estimated_points_risk']} | Hedge gap: {hedge_gap} pts")
+        st.caption("Safe Ticket Lots conservative cap hai; final suggested lots alag risk-sizing layer se aa sakte hain.")
     else:
         st.info("No legs generated because current verdict is WAIT/NO TRADE.")
     st.write("**Why this ticket:**")
@@ -5640,12 +5731,15 @@ with st.expander("✅ Trade Checklist — Entry Allowed Only If Green", expanded
     checks = [
         ("Dhan credentials detected", bool(dhan_ready)),
         ("Live or fallback market price available", price > 0),
+        ("Market open for fresh entry", market_text == "Market Open"),
+        ("Freeze confirmation complete", final_trade == "WAIT" or bool((v14_freeze or {}).get("confirmed", False))),
         ("Option-chain edge not opposite", abs(option_bias) >= 8),
         ("Seller risk acceptable", seller_risk < 65),
         ("News risk not high", news["score"] < 60),
         ("VIX risk acceptable", vix_risk < 65),
         ("AI confidence acceptable", confidence >= 58),
-        ("No hard block", not hard_block),
+        ("Risk Engine no hard blocker", not bool((risk_engine_report or {}).get("hard_blockers", [])) if isinstance(risk_engine_report, dict) else True),
+        ("No legacy hard block", not hard_block),
     ]
     passed = sum(1 for _, ok in checks if ok)
     checklist_score = int((passed / len(checks)) * 100)
@@ -5860,7 +5954,7 @@ with st.expander("🧪 Live Dhan API Diagnostics", expanded=False):
         st.error("Option chain issue: " + str(option_chain.get("message", "No option-chain response")))
         st.info("If Data API subscription is still inactive on DhanHQ, option-chain/OI/PCR will stay on fallback. Once active, press Refresh Live Data after market open.")
     else:
-        st.success(f"Live option chain loaded for expiry {option_chain.get('expiry')} | ATM {option_chain.get('atm_strike')} | Rows {len(option_chain.get('rows', []))}")
+        st.success(f"Option chain loaded for expiry {option_chain.get('expiry')} | ATM {option_chain.get('atm_strike')} | Rows {len(option_chain.get('rows', []))}")
 
 with st.expander("🔐 DhanHQ Setup Status", expanded=False):
     if dhan_ready:
@@ -5877,6 +5971,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V8 build: live-data diagnostics + checklist + position intelligence. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.5.1 audited build: modular snapshot + AI brain + risk engine + consistency gates. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )

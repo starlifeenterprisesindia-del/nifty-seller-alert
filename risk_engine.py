@@ -95,7 +95,8 @@ def build_risk_report(snapshot, snapshot_health=None, snapshot_delta=None, ai_re
     conflict_mode = bool(signals.get("conflict_mode", False))
 
     snapshot_health_score = _clip(snapshot_health.get("score", data_quality))
-    material_change = _clip(snapshot_delta.get("material_change", 0))
+    delta_status = str(snapshot_delta.get("status", "") or "").upper()
+    material_change = 0 if delta_status == "FIRST" else _clip(snapshot_delta.get("material_change", 0))
 
     regime = str(ai_report.get("regime", "") or "")
     alignment_score = _clip(ai_report.get("alignment_score", 0))
@@ -229,7 +230,7 @@ def build_risk_report(snapshot, snapshot_health=None, snapshot_delta=None, ai_re
         warnings.append("Signal conflict risk is high.")
     if pcr_risk >= 65:
         warnings.append(f"PCR is extreme/unreliable for aggressive action: {pcr:.2f}.")
-    if material_change >= 70:
+    if delta_status != "FIRST" and material_change >= 70:
         warnings.append(f"Market changed materially: {material_change:.0f}/100.")
     if expiry_risk >= 75:
         warnings.append("Expiry/Gamma environment requires smaller size and faster protection.")
@@ -257,17 +258,20 @@ def build_risk_report(snapshot, snapshot_health=None, snapshot_delta=None, ai_re
     safety_label = _safety_label(safety_score)
 
     # Decision guidance from risk only; never chooses direction.
+    severe_component = max(components.values()) if components else 0
     if hard_blockers:
         guidance = "BLOCK TRADE"
     elif risk_score >= 70:
         guidance = "WAIT / REDUCE SIZE"
     elif risk_score >= 50:
         guidance = "CAUTION / SMALL SIZE"
+    elif safety_score <= 60 or severe_component >= 80:
+        guidance = "CAUTION / SMALL SIZE"
     else:
         guidance = "RISK ACCEPTABLE"
 
     return {
-        "version": "V19.5 Risk Engine Module",
+        "version": "V19.5.1 Risk Engine",
         "risk_score": risk_score,
         "safety_score": safety_score,
         "risk_grade": grade,
@@ -281,6 +285,7 @@ def build_risk_report(snapshot, snapshot_health=None, snapshot_delta=None, ai_re
         "context": {
             "snapshot_health": int(round(snapshot_health_score)),
             "material_change": int(round(material_change)),
+            "delta_status": delta_status,
             "regime": regime,
             "alignment_score": int(round(alignment_score)),
             "trade_quality": int(round(trade_quality)),
