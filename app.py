@@ -29,7 +29,7 @@ except Exception:
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.0 - UTILITY MODULE FOUNDATION
+# NIFTY SELLER AI DASHBOARD V19.1 - SIDEBAR REFRESH STATE FIX
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -50,10 +50,27 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.0 Utility Module",
+    page_title="Nifty Seller AI Dashboard V19.1 Sidebar Refresh Fix",
     page_icon="🧠",
     layout="wide",
 )
+
+
+# =========================================================
+# V19.1 PERSISTENT UI STATE + REFRESH CONTROL FIX
+# =========================================================
+# Keeps Developer Mode / Trading Mode / Auto Refresh stable across reruns.
+if "developer_mode" not in st.session_state:
+    st.session_state["developer_mode"] = False
+if "trading_mode_clean" not in st.session_state:
+    st.session_state["trading_mode_clean"] = True
+if "auto_refresh_enabled" not in st.session_state:
+    st.session_state["auto_refresh_enabled"] = False
+if "auto_refresh_interval" not in st.session_state:
+    st.session_state["auto_refresh_interval"] = "20 sec"
+if "last_manual_refresh" not in st.session_state:
+    st.session_state["last_manual_refresh"] = ""
+
 
 st.markdown(
     """
@@ -94,6 +111,21 @@ st.markdown(
 .v17-final.red {border-left-color:#ef4444;background:rgba(170,38,38,.24);}
 .v17-kpi {padding:16px;border-radius:14px;background:rgba(128,128,128,.08);border:1px solid rgba(128,128,128,.25);}
 </style>
+
+<script>
+(function() {
+  const key = "nifty_ai_scroll_y";
+  window.addEventListener("beforeunload", function() {
+    try { localStorage.setItem(key, String(window.scrollY || 0)); } catch(e) {}
+  });
+  setTimeout(function() {
+    try {
+      const y = parseInt(localStorage.getItem(key) || "0");
+      if (y > 200) window.scrollTo(0, y);
+    } catch(e) {}
+  }, 250);
+})();
+</script>
 
 """,
     unsafe_allow_html=True,
@@ -202,6 +234,20 @@ def dhan_headers(client_id, access_token):
         "client-id": str(client_id),
         "access-token": str(access_token),
     }
+
+
+
+# V19.1 Refresh compatibility variables
+try:
+    auto_refresh = bool(st.session_state.get("auto_refresh_enabled", False))
+    auto_refresh_enabled = auto_refresh
+    auto_interval_label = st.session_state.get("auto_refresh_interval", "20 sec")
+    auto_interval_seconds = int(str(auto_interval_label).split()[0])
+except Exception:
+    auto_refresh = False
+    auto_refresh_enabled = False
+    auto_interval_label = "20 sec"
+    auto_interval_seconds = 20
 
 
 # =========================================================
@@ -2327,12 +2373,43 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.0 Modular AI")
-st.sidebar.caption("V19.0: Utility module foundation")
+st.sidebar.title("⚙️ V19.1 Modular AI")
+st.sidebar.caption("V19.1: Sidebar refresh + state fix")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
 except Exception:
     pass
+
+# V19.1 Sidebar Refresh Control Center
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🔄 Refresh Control")
+if st.sidebar.button("🔄 Refresh Live Data", key="v191_sidebar_refresh_btn", use_container_width=True):
+    st.session_state["last_manual_refresh"] = fmt_time()
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    st.rerun()
+
+_interval_options_v191 = ["10 sec", "20 sec", "30 sec", "60 sec"]
+if st.session_state.get("auto_refresh_interval") not in _interval_options_v191:
+    st.session_state["auto_refresh_interval"] = "20 sec"
+st.sidebar.selectbox(
+    "Auto interval",
+    _interval_options_v191,
+    key="auto_refresh_interval",
+)
+
+st.sidebar.toggle(
+    "Auto ON for 30 min",
+    key="auto_refresh_enabled",
+)
+
+st.sidebar.caption(
+    "Last: " + (st.session_state.get("last_manual_refresh") or st.session_state.get("last_refresh", "First refresh"))
+)
+
+
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -4001,7 +4078,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V19.0 Utility Module",
+        "version": "V19.1 Sidebar Refresh Fix",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4038,7 +4115,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V19.0 Utility Module",
+        "version": "V19.1 Sidebar Refresh Fix",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4257,7 +4334,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V19.0 Utility Module"
+    fd["version"] = "V19.1 Sidebar Refresh Fix"
 
     return fd
 
@@ -4365,7 +4442,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V19.0 Utility Module",
+        "version": "V19.1 Sidebar Refresh Fix",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4476,7 +4553,7 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V19.0 Utility Module", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V19.1 Sidebar Refresh Fix", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
 
 
@@ -4623,7 +4700,7 @@ def v187_apply_snapshot_ai(fd, snapshot, delta):
     if snap_reason not in reasons:
         reasons.insert(0, snap_reason)
     fd["reasons"] = reasons[:12]
-    fd["version"] = "V19.0 Utility Module"
+    fd["version"] = "V19.1 Sidebar Refresh Fix"
 
     return fd
 
@@ -4773,7 +4850,7 @@ def v188_apply_snapshot_health_guard(fd, snapshot):
     if health_reason not in reasons:
         reasons.insert(0, health_reason)
     fd["reasons"] = reasons[:14]
-    fd["version"] = "V19.0 Utility Module"
+    fd["version"] = "V19.1 Sidebar Refresh Fix"
     return fd
 
 
@@ -4876,7 +4953,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.0 Utility Module</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.1 Sidebar Refresh Fix</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4886,7 +4963,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V19.0 Modular Smart AI — {_quality}</h3>
+<h3>🧠 V19.1 Stable Refresh AI — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4906,7 +4983,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.0: Utility module active — core engines untouched.")
+            st.caption("V19.1: Sidebar refresh/state fix active — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -4941,7 +5018,7 @@ try:
             st.write("V18.4 safe cleanup active.")
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
-            st.write("V19.0 Utility Module:", "READY" if V19_UTILS_READY else "FALLBACK")
+            st.write("V19.1 Sidebar Refresh Fix:", "READY" if V19_UTILS_READY else "FALLBACK")
             st.write("Next module target: snapshot_engine.py")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
             st.write("V18.5 removed: None")
@@ -4971,7 +5048,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Modular Foundation + Snapshot Health + Guarded AI Decision</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Sidebar Refresh + Persistent State + Modular Foundation</div>",
     unsafe_allow_html=True,
 )
 
