@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V8 - SELLER INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V16 - LIVE STABLE EDITION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V15.1",
+    page_title="Nifty Seller AI Dashboard V16",
     page_icon="🧠",
     layout="wide",
 )
@@ -429,6 +429,77 @@ def get_yahoo_vix():
     except Exception as exc:
         return {"success": False, "message": f"Yahoo VIX error: {exc}"}
 
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def get_yahoo_price_action():
+    """Automatic Price Action from Nifty intraday candles.
+    Dhan option-chain remains primary; this gives live auto EMA/VWAP/ATR/High-Low fallback
+    instead of stale manual sidebar values.
+    """
+    try:
+        ticker = yf.Ticker("^NSEI")
+        df = ticker.history(period="5d", interval="5m").dropna()
+        if df.empty or len(df) < 60:
+            return {"success": False, "message": "Not enough Nifty candles for Price Action."}
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC").tz_convert(IST)
+        else:
+            df.index = df.index.tz_convert(IST)
+        close = df["Close"].astype(float)
+        high = df["High"].astype(float)
+        low = df["Low"].astype(float)
+        volume = df["Volume"].astype(float) if "Volume" in df.columns else pd.Series([0]*len(df), index=df.index)
+        ema20_v = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
+        ema50_v = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
+        # VWAP for current trading date. If volume is unavailable/zero, fall back to typical price mean.
+        today_date = df.index[-1].date()
+        today_df = df[df.index.date == today_date].copy()
+        if today_df.empty:
+            today_df = df.tail(75).copy()
+        typical = (today_df["High"] + today_df["Low"] + today_df["Close"]) / 3.0
+        vol = today_df["Volume"] if "Volume" in today_df.columns else pd.Series([0]*len(today_df), index=today_df.index)
+        if float(vol.sum() or 0) > 0:
+            vwap_v = float((typical * vol).sum() / vol.sum())
+        else:
+            vwap_v = float(typical.mean())
+        prev_dates = sorted(set(df.index.date))
+        prev_day_high_v = float(high.max())
+        prev_day_low_v = float(low.min())
+        if len(prev_dates) >= 2:
+            prev_df = df[df.index.date == prev_dates[-2]]
+            if not prev_df.empty:
+                prev_day_high_v = float(prev_df["High"].max())
+                prev_day_low_v = float(prev_df["Low"].min())
+        today_high_v = float(today_df["High"].max())
+        today_low_v = float(today_df["Low"].min())
+        # Opening range 09:15 to 09:30/09:45 if available
+        or_df = today_df.between_time("09:15", "09:45")
+        if or_df.empty:
+            or_df = today_df.head(6)
+        or_high_v = float(or_df["High"].max()) if not or_df.empty else today_high_v
+        or_low_v = float(or_df["Low"].min()) if not or_df.empty else today_low_v
+        prev_close = close.shift(1)
+        tr = pd.concat([(high-low).abs(), (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
+        atr5_v = float(tr.rolling(14).mean().dropna().iloc[-1]) if not tr.rolling(14).mean().dropna().empty else 0.0
+        return {
+            "success": True,
+            "ema20": ema20_v,
+            "ema50": ema50_v,
+            "vwap": vwap_v,
+            "atr5": atr5_v,
+            "previous_day_high": prev_day_high_v,
+            "previous_day_low": prev_day_low_v,
+            "today_high": today_high_v,
+            "today_low": today_low_v,
+            "opening_range_high": or_high_v,
+            "opening_range_low": or_low_v,
+            "fetched_at": fmt_time(),
+            "source": "Yahoo candles auto",
+            "message": "OK",
+        }
+    except Exception as exc:
+        return {"success": False, "message": f"Price Action auto error: {exc}", "source": "Manual"}
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yahoo_heavyweights():
@@ -1265,6 +1336,58 @@ from pathlib import Path as _Path
 
 FII_DII_STORE = _Path("data/fii_dii_journal.csv")
 
+ACTIVE_POSITION_STORE = _Path("data/active_position.csv")
+
+def v16_load_active_position():
+    defaults = {
+        "Active Sold Side": "None", "Active Strike": 0, "Entry Premium ₹": 0.0,
+        "Current Premium ₹": 0.0, "Active Lots": 0, "Trades Taken Today": 0,
+        "Daily Loss Hit / Stop Trading": False, "Saved At": ""
+    }
+    try:
+        if ACTIVE_POSITION_STORE.exists():
+            df = pd.read_csv(ACTIVE_POSITION_STORE)
+            if not df.empty:
+                row = df.iloc[-1].to_dict()
+                defaults.update(row)
+                defaults["Active Strike"] = int(float(defaults.get("Active Strike", 0) or 0))
+                defaults["Active Lots"] = int(float(defaults.get("Active Lots", 0) or 0))
+                defaults["Trades Taken Today"] = int(float(defaults.get("Trades Taken Today", 0) or 0))
+                defaults["Entry Premium ₹"] = float(defaults.get("Entry Premium ₹", 0) or 0)
+                defaults["Current Premium ₹"] = float(defaults.get("Current Premium ₹", 0) or 0)
+                defaults["Daily Loss Hit / Stop Trading"] = str(defaults.get("Daily Loss Hit / Stop Trading", False)).lower() in ("true", "1", "yes")
+    except Exception:
+        pass
+    return defaults
+
+def v16_save_active_position(side, strike, entry_price, current_price, lots, trades_taken, daily_loss_hit):
+    try:
+        ACTIVE_POSITION_STORE.parent.mkdir(parents=True, exist_ok=True)
+        row = pd.DataFrame([{
+            "Active Sold Side": side,
+            "Active Strike": int(strike or 0),
+            "Entry Premium ₹": float(entry_price or 0),
+            "Current Premium ₹": float(current_price or 0),
+            "Active Lots": int(lots or 0),
+            "Trades Taken Today": int(trades_taken or 0),
+            "Daily Loss Hit / Stop Trading": bool(daily_loss_hit),
+            "Saved At": fmt_time(),
+        }])
+        row.to_csv(ACTIVE_POSITION_STORE, index=False)
+        return True
+    except Exception:
+        return False
+
+def v16_clear_active_position():
+    try:
+        if ACTIVE_POSITION_STORE.exists():
+            ACTIVE_POSITION_STORE.unlink()
+        return True
+    except Exception:
+        return False
+
+
+
 def v102_metric_card(label, value, delta=None):
     """Compact metric card for long labels like NEAR EXPIRY MODE."""
     safe_delta = f"<div class='metric-delta'>{delta}</div>" if delta not in (None, "") else ""
@@ -1955,7 +2078,7 @@ def v15_safe_expiry_watchlist(option_rows, spot, vix, minutes_left, gamma_score,
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V15.1 Final AI")
+st.sidebar.title("⚙️ V16 Live Stable AI")
 if st.sidebar.button("🔄 Refresh Live Data", use_container_width=True):
     st.cache_data.clear()
 
@@ -1977,16 +2100,31 @@ with st.sidebar.expander("2️⃣ Manual Market Fallback", expanded=False):
     manual_vix_change_pct = st.number_input("Manual VIX Change %", value=0.0, step=0.1)
 
 with st.sidebar.expander("3️⃣ Price Action", expanded=False):
-    ema20 = st.number_input("EMA 20", value=24950.0, step=1.0)
-    ema50 = st.number_input("EMA 50", value=24900.0, step=1.0)
-    vwap = st.number_input("VWAP", value=24940.0, step=1.0)
-    atr5 = st.number_input("ATR 5 Min", value=45.0, step=1.0)
-    previous_day_high = st.number_input("Previous Day High", value=25150.0, step=1.0)
-    previous_day_low = st.number_input("Previous Day Low", value=24850.0, step=1.0)
-    today_high = st.number_input("Today High", value=25080.0, step=1.0)
-    today_low = st.number_input("Today Low", value=24920.0, step=1.0)
-    opening_range_high = st.number_input("Opening Range High", value=25060.0, step=1.0)
-    opening_range_low = st.number_input("Opening Range Low", value=24940.0, step=1.0)
+    auto_price_action = st.checkbox("Auto Price Action (EMA/VWAP/ATR/High-Low)", value=True)
+    st.caption("Auto ON: app candles se values update karegi. Manual values fallback rahengi.")
+    manual_ema20 = st.number_input("Manual EMA 20", value=24950.0, step=1.0)
+    manual_ema50 = st.number_input("Manual EMA 50", value=24900.0, step=1.0)
+    manual_vwap = st.number_input("Manual VWAP", value=24940.0, step=1.0)
+    manual_atr5 = st.number_input("Manual ATR 5 Min", value=45.0, step=1.0)
+    manual_previous_day_high = st.number_input("Manual Previous Day High", value=25150.0, step=1.0)
+    manual_previous_day_low = st.number_input("Manual Previous Day Low", value=24850.0, step=1.0)
+    manual_today_high = st.number_input("Manual Today High", value=25080.0, step=1.0)
+    manual_today_low = st.number_input("Manual Today Low", value=24920.0, step=1.0)
+    manual_opening_range_high = st.number_input("Manual Opening Range High", value=25060.0, step=1.0)
+    manual_opening_range_low = st.number_input("Manual Opening Range Low", value=24940.0, step=1.0)
+    # Start with manual fallback. After live fetch, V16 overrides these when auto_price_action is ON.
+    ema20 = manual_ema20
+    ema50 = manual_ema50
+    vwap = manual_vwap
+    atr5 = manual_atr5
+    previous_day_high = manual_previous_day_high
+    previous_day_low = manual_previous_day_low
+    today_high = manual_today_high
+    today_low = manual_today_low
+    opening_range_high = manual_opening_range_high
+    opening_range_low = manual_opening_range_low
+    price_action_source = "Manual fallback"
+    price_action_result = {"success": False, "message": "Manual fallback active", "source": "Manual fallback"}
 
 with st.sidebar.expander("3B 🕯️ 15m Candle Confirmation", expanded=False):
     st.caption("Optional: 15-min candle values chart se daalo. Empty/default rahe to app price-action proxy use karegi.")
@@ -2128,14 +2266,30 @@ with st.sidebar.expander("8️⃣ Risk / Position", expanded=True):
     lot_size = int(st.number_input("Lot Size", value=65, step=5))
 
 
-with st.sidebar.expander("9️⃣ V8 Active Trade / Discipline", expanded=True):
-    active_side = st.selectbox("Active Sold Side", ["None", "CE", "PE"])
-    active_strike = int(st.number_input("Active Strike", value=0, step=50))
-    active_entry_price = st.number_input("Entry Premium ₹", value=0.0, step=0.05)
-    active_current_price = st.number_input("Current Premium ₹", value=0.0, step=0.05)
-    active_lots = int(st.number_input("Active Lots", value=0, step=1))
-    trades_taken_today = int(st.number_input("Trades Taken Today", value=0, step=1))
-    daily_loss_hit = st.checkbox("Daily Loss Hit / Stop Trading", value=False)
+with st.sidebar.expander("9️⃣ V16 Active Trade / Discipline", expanded=True):
+    _pos_saved = v16_load_active_position()
+    _side_options = ["None", "CE", "PE"]
+    _saved_side = str(_pos_saved.get("Active Sold Side", "None"))
+    _side_index = _side_options.index(_saved_side) if _saved_side in _side_options else 0
+    active_side = st.selectbox("Active Sold Side", _side_options, index=_side_index, key="v16_active_side")
+    active_strike = int(st.number_input("Active Strike", value=int(_pos_saved.get("Active Strike", 0) or 0), step=50, key="v16_active_strike"))
+    active_entry_price = st.number_input("Entry Premium ₹", value=float(_pos_saved.get("Entry Premium ₹", 0.0) or 0.0), step=0.05, key="v16_entry_premium")
+    active_current_price = st.number_input("Current Premium ₹", value=float(_pos_saved.get("Current Premium ₹", 0.0) or 0.0), step=0.05, key="v16_current_premium")
+    active_lots = int(st.number_input("Active Lots", value=int(_pos_saved.get("Active Lots", 0) or 0), step=1, key="v16_active_lots"))
+    trades_taken_today = int(st.number_input("Trades Taken Today", value=int(_pos_saved.get("Trades Taken Today", 0) or 0), step=1, key="v16_trades_taken"))
+    daily_loss_hit = st.checkbox("Daily Loss Hit / Stop Trading", value=bool(_pos_saved.get("Daily Loss Hit / Stop Trading", False)), key="v16_daily_loss_hit")
+    pcol1, pcol2 = st.columns(2)
+    if pcol1.button("💾 Save Position", use_container_width=True):
+        if v16_save_active_position(active_side, active_strike, active_entry_price, active_current_price, active_lots, trades_taken_today, daily_loss_hit):
+            st.success("Position saved. Refresh/restart ke baad bhi load hogi.")
+        else:
+            st.error("Position save failed.")
+    if pcol2.button("🧹 Clear Position", use_container_width=True):
+        if v16_clear_active_position():
+            st.success("Saved position cleared.")
+            st.rerun()
+    if _pos_saved.get("Saved At"):
+        st.caption(f"Last saved: {_pos_saved.get('Saved At')}")
 
 
 # =========================================================
@@ -2180,6 +2334,27 @@ else:
     vix = manual_vix
     vix_change_pct = manual_vix_change_pct
     vix_source = "Manual"
+
+
+# V16 Automatic Price Action - overrides stale manual values when enabled.
+if auto_price_action:
+    price_action_result = get_yahoo_price_action()
+    if price_action_result.get("success"):
+        ema20 = float(price_action_result.get("ema20", ema20))
+        ema50 = float(price_action_result.get("ema50", ema50))
+        vwap = float(price_action_result.get("vwap", vwap))
+        atr5 = float(price_action_result.get("atr5", atr5))
+        previous_day_high = float(price_action_result.get("previous_day_high", previous_day_high))
+        previous_day_low = float(price_action_result.get("previous_day_low", previous_day_low))
+        today_high = float(price_action_result.get("today_high", today_high))
+        today_low = float(price_action_result.get("today_low", today_low))
+        opening_range_high = float(price_action_result.get("opening_range_high", opening_range_high))
+        opening_range_low = float(price_action_result.get("opening_range_low", opening_range_low))
+        price_action_source = price_action_result.get("source", "Auto candles")
+    else:
+        price_action_source = "Manual fallback (auto failed)"
+else:
+    price_action_source = "Manual fallback"
 
 # Heavyweights
 if dhan_bundle.get("success") and top5_ids:
@@ -3145,12 +3320,12 @@ top_refresh_col, top_auto_col, top_time_col = st.columns([1, 1, 2])
 if top_refresh_col.button("🔄 Refresh Now", use_container_width=True):
     st.cache_data.clear()
     st.rerun()
-_auto_refresh_on = top_auto_col.toggle("Auto 60s", value=False)
+_auto_refresh_on = top_auto_col.toggle("Auto 10s", value=False)
 if _auto_refresh_on and market_text == "Market Open":
-    st.markdown("<meta http-equiv='refresh' content='60'>", unsafe_allow_html=True)
-top_time_col.caption(f"Last update: {fmt_time()}")
+    st.markdown("<meta http-equiv='refresh' content='10'>", unsafe_allow_html=True)
+top_time_col.caption(f"Last full refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V15.1</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V16</div>", unsafe_allow_html=True)
 st.markdown(
     "<div class='sub-title'>Seller Intelligence: DhanHQ Option Chain + OI/Price + Top-5 Drivers + News Risk + FII/DII</div>",
     unsafe_allow_html=True,
@@ -3169,6 +3344,26 @@ r6, r7, r8 = st.columns(3)
 r6.markdown(f"<div class='ribbon'>Mode: {market_mode}</div>", unsafe_allow_html=True)
 r7.markdown(f"<div class='ribbon'>Shock: {shock_score_v7}/100</div>", unsafe_allow_html=True)
 r8.markdown(f"<div class='ribbon'>Discipline: {discipline_score}/100</div>", unsafe_allow_html=True)
+
+# V16 Health Monitor: one look status for live trading.
+_oc_age_note = "Live" if option_chain.get("success") else "Not Live"
+_pa_status = "Live" if price_action_result.get("success") else "Manual"
+_pos_status = "Saved" if ACTIVE_POSITION_STORE.exists() else "Not saved"
+with st.expander("🩺 V16 Live Health Monitor", expanded=True):
+    h1, h2, h3, h4, h5, h6 = st.columns(6)
+    h1.metric("Dhan API", "🟢 Ready" if dhan_ready else "🔴 Missing")
+    h2.metric("Option Chain", "🟢 " + _oc_age_note if option_chain.get("success") else "🔴 " + _oc_age_note)
+    h3.metric("Price Action", "🟢 " + _pa_status if price_action_result.get("success") else "🟡 " + _pa_status)
+    h4.metric("Nifty Source", nifty_source)
+    h5.metric("Position Save", _pos_status)
+    h6.metric("Last Refresh", fmt_time())
+    if option_chain.get("success"):
+        st.caption(f"OC fetched: {option_chain.get('fetched_at', 'NA')} | Expiry: {option_chain.get('expiry', selected_expiry)} | ATM: {option_chain.get('atm_strike', 'NA')}")
+    if price_action_result.get("success"):
+        st.caption(f"Price Action fetched: {price_action_result.get('fetched_at', 'NA')} | Source: {price_action_source}")
+    else:
+        st.caption(f"Price Action auto not live: {price_action_result.get('message', 'Manual fallback')}")
+
 if "INVALID/EXPIRED" in source_text:
     st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
 elif "Fallback" in source_text:
@@ -3345,14 +3540,49 @@ else:
             st.info("No high-quality OTM candidates found in current option-chain range.")
 
 # V13: put the most actionable parts near the top for mobile trading.
-with st.expander("🎯 Best Strategy Ranking — Final Reference", expanded=True):
+with st.expander("🎯 Final Strategy Setup — Exact Strikes + SL + Target", expanded=True):
     _rank_df_top = pd.DataFrame(v11_ranked_strategies)
     st.dataframe(_rank_df_top, use_container_width=True, hide_index=True)
     _top_top = v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0}
     if final_trade == "WAIT":
         st.warning("Final AI WAIT hai. Ranking sirf reference ke liye hai; entry tabhi jab final AI agree kare.")
-    st.subheader(f"⭐ Best Strategy: {_top_top['strategy']} ({_top_top['confidence']}%)")
-    st.write(v11_strategy_text(_top_top["strategy"], _top_top["confidence"]))
+
+    def _leg_setup(side, row):
+        if not row:
+            return {"Side": side, "Sell Strike": 0, "Entry": 0.0, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Hedge": 0}
+        prefix = side.lower()
+        premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+        st_data = v12_sl_target_for_seller(premium, confidence, gamma_score_v7, shock_score_v7)
+        sell_strike = int(row.get("strike", 0) or 0)
+        return {
+            "Side": side,
+            "Sell Strike": sell_strike,
+            "Entry": round(premium, 2),
+            "SL": st_data.get("sl", 0.0),
+            "Target 1": st_data.get("target1", 0.0),
+            "Target 2": st_data.get("target2", 0.0),
+            "Hedge": v12_select_hedge_strike(sell_strike, side, hedge_gap),
+        }
+
+    setup_rows = []
+    top_strategy = str(_top_top.get("strategy", "WAIT"))
+    if top_strategy == "IRON CONDOR":
+        setup_rows = [_leg_setup("CE", best_ce), _leg_setup("PE", best_pe)]
+        st.success(f"⭐ Best Strategy: IRON CONDOR ({_top_top.get('confidence', 0)}%). Dono side hedge/SL mandatory.")
+    elif top_strategy == "SELL CE":
+        setup_rows = [_leg_setup("CE", best_ce)]
+        st.error(f"⭐ Best Strategy: SELL CE ({_top_top.get('confidence', 0)}%).")
+    elif top_strategy == "SELL PE":
+        setup_rows = [_leg_setup("PE", best_pe)]
+        st.success(f"⭐ Best Strategy: SELL PE ({_top_top.get('confidence', 0)}%).")
+    else:
+        st.info(f"⭐ Best Strategy: {top_strategy} ({_top_top.get('confidence', 0)}%).")
+
+    if setup_rows:
+        st.dataframe(pd.DataFrame(setup_rows), use_container_width=True, hide_index=True)
+        st.caption("Entry tabhi lena jab Final AI, Data Quality aur Health Monitor green ho. Ye execution reference hai, guarantee nahi.")
+    else:
+        st.write(v11_strategy_text(top_strategy, _top_top.get("confidence", 0)))
 
 with st.expander("⚡ Live Candidate Cards — Price + SL + Target", expanded=True):
     if option_analysis.get("success"):
