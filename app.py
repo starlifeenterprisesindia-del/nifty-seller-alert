@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V17 - SMART LITE EDITION
+# NIFTY SELLER AI DASHBOARD V18.2 - AI BRAIN FOUNDATION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V17 Smart Lite",
+    page_title="Nifty Seller AI Dashboard V18.2 AI Brain Foundation",
     page_icon="🧠",
     layout="wide",
 )
@@ -2342,7 +2342,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V17 Smart Lite AI")
+st.sidebar.title("⚙️ V18.2 AI Brain")
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -3833,15 +3833,15 @@ except NameError:
 
 
 # =========================================================
-# V18.0 SAFE ADAPTER: ONE FINAL DECISION OBJECT
+# V18.2 AI BRAIN FOUNDATION: ONE FINAL DECISION OBJECT
 # =========================================================
-# Purpose:
-# - Do NOT delete old working code yet.
-# - Collect the current final outputs into one safe decision object.
-# - UI and trade ticket should read one final decision only.
-# - All access is defensive to avoid KeyError / NameError during refactor.
+# Goal:
+# - Stable V17.1 base remains intact.
+# - Old layers are treated as signal providers.
+# - UI gets one final decision object.
+# - No DhanHQ / refresh / option-chain / portfolio change in this version.
 
-def v18_safe_num(value, default=0.0):
+def v182_num(value, default=0.0):
     try:
         if value is None:
             return default
@@ -3850,7 +3850,14 @@ def v18_safe_num(value, default=0.0):
         return default
 
 
-def v18_safe_text(value, default=""):
+def v182_int(value, default=0):
+    try:
+        return int(round(v182_num(value, default)))
+    except Exception:
+        return default
+
+
+def v182_text(value, default=""):
     try:
         if value is None:
             return default
@@ -3860,175 +3867,220 @@ def v18_safe_text(value, default=""):
         return default
 
 
-def v18_final_decision_adapter(ctx):
+def v182_clip(value, low=0, high=100):
+    return max(low, min(high, v182_num(value, low)))
+
+
+def v182_build_scores(ctx):
+    """Collect existing V17 signals into one score dictionary."""
+    option_analysis = ctx.get("option_analysis", {}) if isinstance(ctx.get("option_analysis", {}), dict) else {}
+    heavyweight_analysis = ctx.get("heavyweight_analysis", {}) if isinstance(ctx.get("heavyweight_analysis", {}), dict) else {}
+    news = ctx.get("news", {}) if isinstance(ctx.get("news", {}), dict) else {}
+    data_quality = v182_clip(ctx.get("data_quality", 0), 0, 100)
+
+    scores = {
+        "data_quality": int(data_quality),
+        "market_bias": int(v182_clip(ctx.get("market_bias", 0), -100, 100)),
+        "option_bias": int(v182_clip(option_analysis.get("bias", ctx.get("option_bias", 0)), -100, 100)),
+        "price_action_bias": int(v182_clip(ctx.get("price_action_bias", 0), -100, 100)),
+        "heavyweight_bias": int(v182_clip(heavyweight_analysis.get("pressure", ctx.get("heavy_bias", 0)), -100, 100)),
+        "news_risk": int(v182_clip(news.get("score", ctx.get("news_score", 0)), 0, 100)),
+        "seller_risk": int(v182_clip(ctx.get("seller_risk", 100), 0, 100)),
+        "gamma_risk": int(v182_clip(ctx.get("gamma_score_v7", 100), 0, 100)),
+        "shock_risk": int(v182_clip(ctx.get("shock_score_v7", 100), 0, 100)),
+        "confidence_raw": int(v182_clip(ctx.get("confidence", 0), 0, 98)),
+    }
+    return scores
+
+
+def v182_material_change_score(ctx, proposed_action):
     """
-    V18 Phase-1 Adapter.
-    This is not a new strategy engine. It is a safety layer over the current V17 engine.
-    It prevents multiple final outputs from contradicting each other.
+    Lightweight stability gate.
+    It does not block first decision. It only records whether action changed without enough market movement.
     """
-    current_action = v18_safe_text(ctx.get("final_trade"), "WAIT").upper()
-    current_conf = int(max(0, min(98, v18_safe_num(ctx.get("confidence"), 0))))
-    current_strike = v18_safe_text(ctx.get("selected_strike"), "No Strike")
-    current_hedge = v18_safe_text(ctx.get("hedge"), "No Hedge")
-    current_lots = int(max(0, v18_safe_num(ctx.get("suggested_lots"), 0)))
-    current_sl = ctx.get("sl_display", "No Trade")
-    current_target = ctx.get("target_display", "No Trade")
+    try:
+        previous = st.session_state.get("v182_last_final_decision", {})
+        if not previous:
+            return {"decision_changed": False, "previous_action": "", "material_change_score": 100, "change_reason": "First V18.2 decision."}
 
-    seller_risk_v = v18_safe_num(ctx.get("seller_risk"), 100)
-    data_quality_v = int(max(0, min(100, v18_safe_num(ctx.get("data_quality"), 0))))
-    shock_v = int(max(0, min(100, v18_safe_num(ctx.get("shock_score_v7"), 100))))
-    gamma_v = int(max(0, min(100, v18_safe_num(ctx.get("gamma_score_v7"), 100))))
-    news_obj = ctx.get("news", {}) if isinstance(ctx.get("news", {}), dict) else {}
-    news_score_v = int(max(0, min(100, v18_safe_num(news_obj.get("score"), 100))))
-    conflict_v = bool(ctx.get("conflict_mode", False))
+        prev_action = previous.get("action", "")
+        if prev_action == proposed_action:
+            return {"decision_changed": False, "previous_action": prev_action, "material_change_score": 100, "change_reason": "Action unchanged."}
 
-    blockers = []
-    reasons = []
+        current_price = v182_num(ctx.get("price", 0), 0)
+        previous_price = v182_num(previous.get("nifty_price", current_price), current_price)
+        price_move_points = abs(current_price - previous_price)
 
-    v164 = ctx.get("v164_unified", {}) if isinstance(ctx.get("v164_unified", {}), dict) else {}
-    for b in v164.get("blockers", []) or []:
-        if b and str(b) not in blockers:
-            blockers.append(str(b))
-    for r in v164.get("reasons", []) or []:
-        if r and str(r) not in reasons:
-            reasons.append(str(r))
+        scores = v182_build_scores(ctx)
+        prev_scores = previous.get("scores", {}) if isinstance(previous.get("scores", {}), dict) else {}
+        option_move = abs(scores.get("option_bias", 0) - v182_num(prev_scores.get("option_bias", scores.get("option_bias", 0))))
+        heavy_move = abs(scores.get("heavyweight_bias", 0) - v182_num(prev_scores.get("heavyweight_bias", scores.get("heavyweight_bias", 0))))
+        news_move = abs(scores.get("news_risk", 0) - v182_num(prev_scores.get("news_risk", scores.get("news_risk", 0))))
+        risk_move = abs(scores.get("seller_risk", 0) - v182_num(prev_scores.get("seller_risk", scores.get("seller_risk", 0))))
 
-    if data_quality_v < 60:
-        blockers.append(f"Data quality low {data_quality_v}/100.")
-    if seller_risk_v >= 78:
-        blockers.append(f"Seller risk high {seller_risk_v:.0f}/100.")
-    if news_score_v >= 80:
-        blockers.append(f"News/Event risk high {news_score_v}/100.")
-    if gamma_v >= 82:
-        blockers.append(f"Gamma risk high {gamma_v}/100.")
-    if conflict_v and current_conf < 82:
-        blockers.append("Conflict mode active; confidence not strong enough.")
+        material = min(100, price_move_points * 0.8 + option_move * 0.7 + heavy_move * 0.5 + news_move * 0.6 + risk_move * 0.4)
+        reason = f"Action changed {prev_action} → {proposed_action}. Material score {material:.0f}/100."
+        return {"decision_changed": True, "previous_action": prev_action, "material_change_score": int(round(material)), "change_reason": reason}
+    except Exception as exc:
+        return {"decision_changed": False, "previous_action": "", "material_change_score": 0, "change_reason": f"Stability check error: {exc}"}
 
-    allowed_actions = {"WAIT", "SELL CE", "SELL PE", "IRON CONDOR", "BUY CALL", "BUY PUT", "BUY CALL (HEDGED)", "BUY PUT (HEDGED)"}
+
+def build_v18_final_decision(ctx):
+    """
+    V18.2 One Final Decision Object.
+    This function does not invent new data. It consolidates current V17 calculations safely.
+    """
+    scores = v182_build_scores(ctx)
+
+    current_action = v182_text(ctx.get("final_trade"), "WAIT").upper()
+    allowed_actions = {"WAIT", "SELL CE", "SELL PE", "IRON CONDOR", "BUY CALL", "BUY PUT", "BUY CALL (HEDGED)", "BUY PUT (HEDGED)", "BUY CALL HEDGED", "BUY PUT HEDGED"}
     if current_action not in allowed_actions:
-        blockers.append(f"Unknown action '{current_action}' converted to WAIT.")
         current_action = "WAIT"
 
+    selected_strike = ctx.get("selected_strike", "No Strike")
+    hedge = ctx.get("hedge", "No Hedge")
+    confidence = int(v182_clip(ctx.get("confidence", scores.get("confidence_raw", 0)), 0, 98))
+    lots = max(0, v182_int(ctx.get("suggested_lots", 0), 0))
+    sl = ctx.get("sl_display", "No Trade")
+    target = ctx.get("target_display", "No Trade")
+
+    reasons = []
+    warnings = []
+    blockers = []
+
+    v164 = ctx.get("v164_unified", {}) if isinstance(ctx.get("v164_unified", {}), dict) else {}
+    for item in (v164.get("reasons", []) or []):
+        if item and str(item) not in reasons:
+            reasons.append(str(item))
+    for item in (v164.get("blockers", []) or []):
+        if item and str(item) not in blockers:
+            blockers.append(str(item))
+
+    conflict_mode = bool(ctx.get("conflict_mode", False))
+    if conflict_mode:
+        warnings.append("Conflict mode active: major signals not fully aligned.")
+
+    # Hard blockers from Project Bible reliability-first rule.
+    if scores["data_quality"] < 60:
+        blockers.append(f"Data quality weak: {scores['data_quality']}/100.")
+    if scores["seller_risk"] >= 80:
+        blockers.append(f"Seller risk high: {scores['seller_risk']}/100.")
+    if scores["news_risk"] >= 85:
+        blockers.append(f"News/Event risk high: {scores['news_risk']}/100.")
+    if scores["gamma_risk"] >= 85:
+        blockers.append(f"Gamma risk high: {scores['gamma_risk']}/100.")
+    if scores["shock_risk"] >= 90:
+        blockers.append(f"Shock risk extreme: {scores['shock_risk']}/100.")
+    if conflict_mode and confidence < 82:
+        blockers.append("Signal conflict active and confidence below 82%.")
+
     if current_action != "WAIT":
-        if current_strike in ("", "No Strike", "None"):
-            blockers.append("Valid strike missing.")
-        if current_hedge in ("", "No Hedge", "None") and current_action in ("SELL CE", "SELL PE", "IRON CONDOR"):
-            blockers.append("Hedge missing for seller strategy.")
-        if current_conf < 65:
-            blockers.append(f"Final confidence {current_conf}% below minimum 65%.")
-        if current_lots <= 0:
-            blockers.append("Suggested lots are zero.")
+        if str(selected_strike).strip() in ("", "None", "No Strike", "0"):
+            blockers.append("Trade blocked: valid strike missing.")
+        if current_action in ("SELL CE", "SELL PE", "IRON CONDOR") and str(hedge).strip() in ("", "None", "No Hedge", "0"):
+            blockers.append("Trade blocked: hedge missing for seller strategy.")
+        if confidence < 65:
+            blockers.append(f"Trade blocked: confidence {confidence}% below 65%.")
+        if lots <= 0:
+            blockers.append("Trade blocked: suggested lots are zero.")
+
+    # Stability check: if action flips without enough material change, block aggressive flip.
+    stability = v182_material_change_score(ctx, current_action)
+    if stability.get("decision_changed") and stability.get("material_change_score", 0) < 35 and current_action != "WAIT":
+        blockers.append("Decision flip blocked: market change not material enough.")
 
     if blockers:
         final_action = "WAIT"
-        final_conf = min(current_conf, 64)
-        final_strike = "No Strike"
-        final_hedge = "No Hedge"
-        final_lots = 0
-        final_sl = "No Trade"
-        final_target = "No Trade"
-        stability = "BLOCKED"
+        quality = "BLOCKED"
+        confidence = min(confidence, 64)
+        strategy_type = "WAIT"
+        selected_strike = "No Strike"
+        hedge = "No Hedge"
+        lots = 0
+        sl = "No Trade"
+        target = "No Trade"
     else:
         final_action = current_action
-        final_conf = current_conf
-        final_strike = current_strike
-        final_hedge = current_hedge
-        final_lots = current_lots
-        final_sl = current_sl
-        final_target = current_target
-        stability = "OK"
+        quality = "OK" if confidence >= 70 else "CAUTION"
+        strategy_type = current_action
 
     if not reasons:
         if final_action == "WAIT":
-            reasons.append("Capital protection priority. Fresh trade only after clean alignment.")
+            reasons.append("No fresh trade: capital protection and signal clarity priority.")
         else:
-            reasons.append("Final action passed V18 safety adapter checks.")
+            reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
-    return {
-        "version": "V18.0 Safe Adapter",
-        "final_action": final_action,
-        "confidence": int(final_conf),
-        "selected_strike": final_strike,
-        "hedge": final_hedge,
-        "suggested_lots": int(final_lots),
-        "sl": final_sl,
-        "target": final_target,
-        "seller_risk": int(max(0, min(100, seller_risk_v))),
-        "data_quality": data_quality_v,
-        "shock_score": shock_v,
-        "gamma_score": gamma_v,
-        "news_score": news_score_v,
-        "stability_status": stability,
-        "blockers": blockers[:8],
+    decision = {
+        "version": "V18.2 AI Brain Foundation",
+        "timestamp": fmt_time() if "fmt_time" in globals() else "",
+        "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
+        "action": final_action,
+        "confidence": int(confidence),
+        "quality": quality,
+        "strategy": {
+            "type": strategy_type,
+            "sell_side": "CE" if final_action == "SELL CE" else ("PE" if final_action == "SELL PE" else None),
+            "sell_strike": selected_strike,
+            "hedge_strike": hedge,
+            "entry": ctx.get("entry_display", "As per live premium"),
+            "sl": sl,
+            "target": target,
+            "lots": int(lots),
+        },
+        "scores": scores,
         "reasons": reasons[:8],
+        "blockers": blockers[:10],
+        "warnings": warnings[:8],
+        "stability": stability,
+        "nifty_price": v182_num(ctx.get("price", 0), 0),
     }
+
+    # Store for next refresh stability check.
+    try:
+        st.session_state["v182_last_final_decision"] = decision
+    except Exception:
+        pass
+
+    return decision
 
 
 try:
-    v18_decision = v18_final_decision_adapter(locals())
-except Exception as _v18_error:
-    v18_decision = {
-        "version": "V18.0 Safe Adapter",
-        "final_action": "WAIT",
+    final_decision = build_v18_final_decision(locals())
+except Exception as _v182_error:
+    final_decision = {
+        "version": "V18.2 AI Brain Foundation",
+        "timestamp": fmt_time() if "fmt_time" in globals() else "",
+        "snapshot_id": "",
+        "action": "WAIT",
         "confidence": 0,
-        "selected_strike": "No Strike",
-        "hedge": "No Hedge",
-        "suggested_lots": 0,
-        "sl": "No Trade",
-        "target": "No Trade",
-        "seller_risk": int(v18_safe_num(locals().get("seller_risk"), 100)),
-        "data_quality": int(v18_safe_num(locals().get("data_quality"), 0)),
-        "shock_score": int(v18_safe_num(locals().get("shock_score_v7"), 100)),
-        "gamma_score": int(v18_safe_num(locals().get("gamma_score_v7"), 100)),
-        "news_score": 100,
-        "stability_status": "ADAPTER ERROR",
-        "blockers": [str(_v18_error)],
-        "reasons": ["V18 adapter error. WAIT selected for safety."],
+        "quality": "ERROR",
+        "strategy": {"type": "WAIT", "sell_side": None, "sell_strike": "No Strike", "hedge_strike": "No Hedge", "entry": "No Trade", "sl": "No Trade", "target": "No Trade", "lots": 0},
+        "scores": {},
+        "reasons": ["V18.2 AI Brain error. WAIT selected for safety."],
+        "blockers": [str(_v182_error)],
+        "warnings": [],
+        "stability": {"decision_changed": False, "change_reason": "AI Brain error.", "previous_action": "", "material_change_score": 0},
+        "nifty_price": v182_num(locals().get("price", 0), 0),
     }
 
-final_trade = v18_decision.get("final_action", "WAIT")
-confidence = float(v18_decision.get("confidence", 0))
-selected_strike = v18_decision.get("selected_strike", "No Strike")
-hedge = v18_decision.get("hedge", "No Hedge")
-suggested_lots = int(v18_decision.get("suggested_lots", 0) or 0)
-sl_display = v18_decision.get("sl", "No Trade")
-target_display = v18_decision.get("target", "No Trade")
+# Lock legacy variables after final decision object.
+# This prevents lower UI sections from contradicting V18.2.
+final_trade = final_decision.get("action", "WAIT")
+confidence = float(final_decision.get("confidence", 0))
+selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
+hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
+suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
+sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
+target_display = final_decision.get("strategy", {}).get("target", "No Trade")
 
 try:
-    source_text = v13_source_text(locals().get("dhan_ready", False), locals().get("option_chain", {}), locals().get("nifty_source", "Fallback"), locals().get("dhan_bundle", {}), locals().get("expiry_result", {}))
-    action_plan = v91_action_plan(
-        final_trade,
-        selected_strike,
-        hedge,
-        confidence,
-        locals().get("seller_risk", 0),
-        locals().get("shock_score_v7", 0),
-        locals().get("gamma_score_v7", 0),
-        locals().get("conflict_reasons", []),
-        source_text,
-        locals().get("data_quality", 0),
-    )
-except Exception:
-    action_plan = ["V18 adapter locked final decision. Action plan unavailable."]
-
-try:
-    v12_top_strategy = {"strategy": final_trade, "confidence": int(confidence), "type": "V18 Final"}
-    v12_trade_ticket = v12_build_trade_ticket(
-        top_strategy=v12_top_strategy,
-        final_trade=final_trade,
-        best_ce=locals().get("best_ce", None),
-        best_pe=locals().get("best_pe", None),
-        option_analysis=locals().get("option_analysis", {}),
-        price=locals().get("price", 0),
-        confidence=confidence,
-        seller_risk=locals().get("seller_risk", 100),
-        shock_score=locals().get("shock_score_v7", 100),
-        gamma_score=locals().get("gamma_score_v7", 100),
-        hedge_gap=locals().get("hedge_gap", 100),
-        max_lots=locals().get("max_lots", 1),
-        conflict_mode=(final_trade == "WAIT"),
-        data_quality=locals().get("data_quality", 0),
-    )
+    action_plan = []
+    if final_decision.get("blockers"):
+        action_plan.append("Final action: WAIT. Blockers active.")
+        action_plan.extend(final_decision.get("blockers", [])[:4])
+    else:
+        action_plan.append(f"Final action: {final_trade}.")
+        action_plan.extend(final_decision.get("reasons", [])[:4])
 except Exception:
     pass
 
@@ -4112,9 +4164,45 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V17 Smart Lite</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.2 AI Brain Foundation</div>", unsafe_allow_html=True)
+
+# V18.2 Main Decision Object Card
+try:
+    _fd = final_decision if isinstance(final_decision, dict) else {}
+    _quality = _fd.get("quality", "NA")
+    _class = "green" if _quality == "OK" else ("red" if _quality in ("BLOCKED", "ERROR", "DATA_WEAK", "RISK_HIGH") else "")
+    _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
+    st.markdown(f"""
+<div class='v17-final {_class}'>
+<h3>🧠 V18.2 One AI Brain — {_quality}</h3>
+<b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
+<b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
+<b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
+<b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
+<b>SL:</b> {_strategy.get('sl','No Trade')} &nbsp; | &nbsp;
+<b>Target:</b> {_strategy.get('target','No Trade')} &nbsp; | &nbsp;
+<b>Lots:</b> {_strategy.get('lots',0)}
+</div>
+""", unsafe_allow_html=True)
+
+    if _fd.get("blockers"):
+        with st.expander("🛑 Why WAIT / Blockers", expanded=False):
+            for _b in _fd.get("blockers", [])[:8]:
+                st.write("•", _b)
+    else:
+        with st.expander("✅ V18.2 Reasons", expanded=False):
+            for _r in _fd.get("reasons", [])[:6]:
+                st.write("•", _r)
+
+    if developer_mode:
+        with st.expander("🧪 Developer: final_decision object", expanded=False):
+            st.json(_fd)
+except Exception as _fd_ui_error:
+    st.warning(f"V18.2 decision card unavailable: {_fd_ui_error}")
+
+
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Clean UI + Single AI Brain + Portfolio Intelligence</div>",
+    "<div class='sub-title'>Smart Seller Terminal: One Final Decision Object + AI Brain Foundation + Portfolio Intelligence</div>",
     unsafe_allow_html=True,
 )
 
