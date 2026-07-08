@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V18.3 - SMART AI CONFIDENCE
+# NIFTY SELLER AI DASHBOARD V18.4 - SAFE CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V18.3 Smart AI Confidence",
+    page_title="Nifty Seller AI Dashboard V18.4 Safe Cleanup",
     page_icon="🧠",
     layout="wide",
 )
@@ -1205,44 +1205,10 @@ def v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_
     return bool(reasons), reasons
 
 
-def v9_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk, shock_score, gamma_score, conflict_reasons, source_text):
-    """
-    Creates a simple human-readable action plan.
-    """
-    plan = []
-    if "Fallback" in source_text:
-        plan.append("Live data incomplete/fallback active: real trade avoid karo.")
-    if conflict_reasons:
-        plan.append("Market conflict mode: fresh trade avoid karo jab tak 2-3 signals same direction mein na aayen.")
-        plan.extend(conflict_reasons[:3])
-    if final_trade == "WAIT":
-        plan.append("Final action: WAIT. No trade bhi valid trade hai.")
-    else:
-        plan.append(f"Final action: {final_trade} at {selected_strike} with hedge {hedge}.")
-        plan.append(f"Confidence {confidence:.0f}% | Seller Risk {seller_risk:.0f}% | Shock {shock_score}/100 | Gamma {gamma_score}/100")
-        if confidence < 70:
-            plan.append("Confidence medium/low: sirf 1 lot test ya avoid.")
-        if seller_risk > 55 or shock_score > 55:
-            plan.append("Risk elevated: SL tight rakho aur profit fast protect karo.")
-    return plan
+# V18.4 cleanup: removed unused old helper v9_action_plan
 
 
-def v9_data_quality_score(dhan_ready, option_ok, nifty_source, heavy_source, vix_source):
-    score = 0
-    reasons = []
-    if dhan_ready:
-        score += 20; reasons.append("Dhan credentials detected")
-    if option_ok:
-        score += 35; reasons.append("Dhan live option-chain active")
-    if str(nifty_source).lower().startswith("dhan"):
-        score += 20; reasons.append("Nifty from DhanHQ")
-    else:
-        reasons.append(f"Nifty source: {nifty_source}")
-    if str(heavy_source).lower().startswith("dhan") or str(heavy_source).lower().startswith("yahoo"):
-        score += 15; reasons.append(f"Heavyweights source: {heavy_source}")
-    if str(vix_source):
-        score += 10; reasons.append(f"VIX source: {vix_source}")
-    return int(clamp(score)), reasons
+# V18.4 cleanup: removed unused old helper v9_data_quality_score
 
 
 
@@ -2342,7 +2308,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18.3 Smart AI")
+st.sidebar.title("⚙️ V18.4 Clean AI")
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -4011,7 +3977,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V18.3 Smart AI Confidence",
+        "version": "V18.4 Safe Cleanup",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4048,7 +4014,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V18.3 Smart AI Confidence",
+        "version": "V18.4 Safe Cleanup",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4267,7 +4233,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V18.3 Smart AI Confidence"
+    fd["version"] = "V18.4 Safe Cleanup"
 
     return fd
 
@@ -4371,7 +4337,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.3 Smart AI Confidence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.4 Safe Cleanup</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4381,7 +4347,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V18.3 Smart AI Brain — {_quality}</h3>
+<h3>🧠 V18.4 Clean Smart AI — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4401,6 +4367,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
+            st.caption("V18.4: Safe cleanup active — core engines untouched.")
     except Exception:
         pass
 
@@ -4415,6 +4382,12 @@ try:
                 st.write("•", _r)
 
     if developer_mode:
+        with st.expander("🧹 Developer: V18.4 Cleanup Summary", expanded=False):
+            st.write("V18.4 safe cleanup active.")
+            st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
+            st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
+            st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
+
         with st.expander("🧪 Developer: final_decision object", expanded=False):
             st.json(_fd)
 except Exception as _fd_ui_error:
@@ -4422,7 +4395,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Smart Confidence + Market Regime + Trade Quality</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Clean AI Output + Smart Confidence + Trade Quality</div>",
     unsafe_allow_html=True,
 )
 
