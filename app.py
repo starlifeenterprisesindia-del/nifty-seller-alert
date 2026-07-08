@@ -1181,88 +1181,590 @@ def trade_quality_score(confidence, seller_risk, shock_score):
 
 
 # =========================================================
+# V9 DECISION QUALITY LAYER
+# =========================================================
+def v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_score=0):
+    """
+    Detects when market parts disagree. In conflict mode, WAIT is preferred.
+    """
+    reasons = []
+    if option_bias >= 55 and price_action_bias <= -45:
+        reasons.append("Option Chain bullish hai, lekin Price Action strong bearish hai.")
+    if option_bias <= -55 and price_action_bias >= 45:
+        reasons.append("Option Chain bearish hai, lekin Price Action strong bullish hai.")
+    if heavy_bias >= 35 and price_action_bias <= -45:
+        reasons.append("Heavyweights bullish hain, lekin chart bearish hai.")
+    if heavy_bias <= -35 and price_action_bias >= 45:
+        reasons.append("Heavyweights bearish hain, lekin chart bullish hai.")
+    if pcr < 0.80 and option_bias >= 45:
+        reasons.append("PCR bearish zone mein hai, par Option Chain bullish signal de rahi hai.")
+    if pcr > 1.55 and option_bias <= -45:
+        reasons.append("PCR overheated bullish zone mein hai, par Option Chain bearish signal de rahi hai.")
+    if gamma_score >= 70:
+        reasons.append("Gamma risk high hai; option seller ko aggressive trade avoid karna chahiye.")
+    return bool(reasons), reasons
+
+
+def v9_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk, shock_score, gamma_score, conflict_reasons, source_text):
+    """
+    Creates a simple human-readable action plan.
+    """
+    plan = []
+    if "Fallback" in source_text:
+        plan.append("Live data incomplete/fallback active: real trade avoid karo.")
+    if conflict_reasons:
+        plan.append("Market conflict mode: fresh trade avoid karo jab tak 2-3 signals same direction mein na aayen.")
+        plan.extend(conflict_reasons[:3])
+    if final_trade == "WAIT":
+        plan.append("Final action: WAIT. No trade bhi valid trade hai.")
+    else:
+        plan.append(f"Final action: {final_trade} at {selected_strike} with hedge {hedge}.")
+        plan.append(f"Confidence {confidence:.0f}% | Seller Risk {seller_risk:.0f}% | Shock {shock_score}/100 | Gamma {gamma_score}/100")
+        if confidence < 70:
+            plan.append("Confidence medium/low: sirf 1 lot test ya avoid.")
+        if seller_risk > 55 or shock_score > 55:
+            plan.append("Risk elevated: SL tight rakho aur profit fast protect karo.")
+    return plan
+
+
+def v9_data_quality_score(dhan_ready, option_ok, nifty_source, heavy_source, vix_source):
+    score = 0
+    reasons = []
+    if dhan_ready:
+        score += 20; reasons.append("Dhan credentials detected")
+    if option_ok:
+        score += 35; reasons.append("Dhan live option-chain active")
+    if str(nifty_source).lower().startswith("dhan"):
+        score += 20; reasons.append("Nifty from DhanHQ")
+    else:
+        reasons.append(f"Nifty source: {nifty_source}")
+    if str(heavy_source).lower().startswith("dhan") or str(heavy_source).lower().startswith("yahoo"):
+        score += 15; reasons.append(f"Heavyweights source: {heavy_source}")
+    if str(vix_source):
+        score += 10; reasons.append(f"VIX source: {vix_source}")
+    return int(clamp(score)), reasons
+
+
 
 # =========================================================
-# V18 CLEAN BASE ADDITIONS - ONE SNAPSHOT / ONE AI BRAIN
-# Removed old duplicate decision layers (V9/V10/V11/V14/V16.4 UI overwrite chain).
-# Kept: data layer, option intelligence, heavyweight engine, news risk, position manager.
+# V9.1 DECISION QUALITY LAYER - STABLE
+# =========================================================
+def v91_safe_num(x, default=0.0):
+    try:
+        return float(x)
+    except Exception:
+        return default
+
+def v91_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_score=0):
+    """
+    Market ke major signals opposite hon to fresh trade avoid.
+    """
+    reasons = []
+    price_action_bias = v91_safe_num(price_action_bias)
+    option_bias = v91_safe_num(option_bias)
+    heavy_bias = v91_safe_num(heavy_bias)
+    pcr = v91_safe_num(pcr)
+    gamma_score = v91_safe_num(gamma_score)
+
+    if option_bias >= 55 and price_action_bias <= -45:
+        reasons.append("Option Chain bullish hai, lekin Price Action strong bearish hai.")
+    if option_bias <= -55 and price_action_bias >= 45:
+        reasons.append("Option Chain bearish hai, lekin Price Action strong bullish hai.")
+    if heavy_bias >= 35 and price_action_bias <= -45:
+        reasons.append("Heavyweights bullish hain, lekin chart bearish hai.")
+    if heavy_bias <= -35 and price_action_bias >= 45:
+        reasons.append("Heavyweights bearish hain, lekin chart bullish hai.")
+    if pcr < 0.80 and option_bias >= 45:
+        reasons.append("PCR bearish zone mein hai, par Option Chain bullish signal de rahi hai.")
+    if pcr > 1.55 and option_bias <= -45:
+        reasons.append("PCR overheated bullish zone mein hai, par Option Chain bearish signal de rahi hai.")
+    if gamma_score >= 70:
+        reasons.append("Gamma risk high hai; option seller ko aggressive trade avoid karna chahiye.")
+    return bool(reasons), reasons
+
+def v91_data_quality_score(dhan_ready=False, option_ok=False, nifty_source="Fallback", heavy_source="Fallback", vix_source="Fallback"):
+    score = 0
+    reasons = []
+    if dhan_ready:
+        score += 20
+        reasons.append("Dhan credentials detected")
+    else:
+        reasons.append("Dhan credentials missing")
+
+    if option_ok:
+        score += 35
+        reasons.append("Dhan live option-chain active")
+    else:
+        reasons.append("Option-chain fallback/not live")
+
+    if str(nifty_source).lower().startswith("dhan"):
+        score += 20
+        reasons.append("Nifty from DhanHQ")
+    else:
+        score += 8
+        reasons.append(f"Nifty source: {nifty_source}")
+
+    if str(heavy_source).lower().startswith("dhan"):
+        score += 15
+        reasons.append("Heavyweights from DhanHQ")
+    elif str(heavy_source).lower().startswith("yahoo"):
+        score += 10
+        reasons.append("Heavyweights from Yahoo fallback")
+    else:
+        reasons.append(f"Heavyweights source: {heavy_source}")
+
+    if str(vix_source).lower().startswith("dhan"):
+        score += 10
+        reasons.append("VIX from DhanHQ")
+    elif str(vix_source):
+        score += 6
+        reasons.append(f"VIX source: {vix_source}")
+    else:
+        reasons.append("VIX source unavailable")
+
+    return int(max(0, min(100, score))), reasons
+
+def v91_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk, shock_score, gamma_score, conflict_reasons, source_text, data_quality=0):
+    plan = []
+    if data_quality < 70:
+        plan.append("Data quality 70 se kam hai: real trade avoid karo, pehle data source verify karo.")
+    if "Fallback" in str(source_text):
+        plan.append("Fallback data active hai: real trade avoid karo ya sirf observation mode rakho.")
+    if conflict_reasons:
+        plan.append("Market conflict mode: fresh trade avoid karo jab tak 2-3 signals same direction mein na aayen.")
+        for r in conflict_reasons[:3]:
+            plan.append(r)
+    if final_trade == "WAIT":
+        plan.append("Final action: WAIT. No trade bhi valid seller decision hai.")
+    else:
+        plan.append(f"Final action: {final_trade} at {selected_strike} with hedge {hedge}.")
+        plan.append(f"Confidence {v91_safe_num(confidence):.0f}% | Seller Risk {v91_safe_num(seller_risk):.0f}% | Shock {v91_safe_num(shock_score):.0f}/100 | Gamma {v91_safe_num(gamma_score):.0f}/100")
+        if v91_safe_num(confidence) < 70:
+            plan.append("Confidence medium/low hai: sirf 1 lot test ya avoid.")
+        if v91_safe_num(seller_risk) > 55 or v91_safe_num(shock_score) > 55:
+            plan.append("Risk elevated hai: SL tight rakho aur profit fast protect karo.")
+    return plan
+
+
+
+# =========================================================
+# V10.2 UI + FII/DII JOURNAL HELPERS
 # =========================================================
 from pathlib import Path as _Path
-import time
 
 FII_DII_STORE = _Path("data/fii_dii_journal.csv")
 
+ACTIVE_POSITION_STORE = _Path("data/active_position.csv")
 
-def load_fii_dii_journal():
-    cols = ["Date", "FII Cash Cr", "DII Cash Cr", "FII Index Futures Contracts", "FII Long %", "FII Short %", "FII Index Futures Bias", "Notes"]
+def v16_load_active_position():
+    defaults = {
+        "Active Sold Side": "None", "Active Strike": 0, "Entry Premium ₹": 0.0,
+        "Current Premium ₹": 0.0, "Active Lots": 0, "Trades Taken Today": 0,
+        "Daily Loss Hit / Stop Trading": False, "Saved At": ""
+    }
     try:
-        if FII_DII_STORE.exists():
-            df = pd.read_csv(FII_DII_STORE)
-            for col in cols:
-                if col not in df.columns:
-                    df[col] = "" if col in ["FII Index Futures Bias", "Notes"] else 0.0
-            df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
-            return df[cols].dropna(subset=["Date"])
+        if ACTIVE_POSITION_STORE.exists():
+            df = pd.read_csv(ACTIVE_POSITION_STORE)
+            if not df.empty:
+                row = df.iloc[-1].to_dict()
+                defaults.update(row)
+                defaults["Active Strike"] = int(float(defaults.get("Active Strike", 0) or 0))
+                defaults["Active Lots"] = int(float(defaults.get("Active Lots", 0) or 0))
+                defaults["Trades Taken Today"] = int(float(defaults.get("Trades Taken Today", 0) or 0))
+                defaults["Entry Premium ₹"] = float(defaults.get("Entry Premium ₹", 0) or 0)
+                defaults["Current Premium ₹"] = float(defaults.get("Current Premium ₹", 0) or 0)
+                defaults["Daily Loss Hit / Stop Trading"] = str(defaults.get("Daily Loss Hit / Stop Trading", False)).lower() in ("true", "1", "yes")
     except Exception:
         pass
-    return pd.DataFrame(columns=cols)
+    return defaults
 
-
-def save_fii_dii_journal(df):
+def v16_save_active_position(side, strike, entry_price, current_price, lots, trades_taken, daily_loss_hit):
     try:
-        FII_DII_STORE.parent.mkdir(parents=True, exist_ok=True)
-        out = df.copy()
-        out["Date"] = pd.to_datetime(out["Date"], errors="coerce").dt.date.astype(str)
-        out.to_csv(FII_DII_STORE, index=False)
+        ACTIVE_POSITION_STORE.parent.mkdir(parents=True, exist_ok=True)
+        row = pd.DataFrame([{
+            "Active Sold Side": side,
+            "Active Strike": int(strike or 0),
+            "Entry Premium ₹": float(entry_price or 0),
+            "Current Premium ₹": float(current_price or 0),
+            "Active Lots": int(lots or 0),
+            "Trades Taken Today": int(trades_taken or 0),
+            "Daily Loss Hit / Stop Trading": bool(daily_loss_hit),
+            "Saved At": fmt_time(),
+        }])
+        row.to_csv(ACTIVE_POSITION_STORE, index=False)
+        return True
+    except Exception:
+        return False
+
+def v16_clear_active_position():
+    try:
+        if ACTIVE_POSITION_STORE.exists():
+            ACTIVE_POSITION_STORE.unlink()
         return True
     except Exception:
         return False
 
 
-def journal_row_by_date(df, target_date):
+
+# =========================================================
+# V16.2 SUPER APP: MULTI-POSITION PORTFOLIO MANAGER
+# =========================================================
+PORTFOLIO_POSITION_STORE = _Path("data/portfolio_positions.csv")
+
+PORTFOLIO_COLUMNS = [
+    "Position ID", "Status", "Strategy", "Lots", "Lot Size",
+    "Sell1 Side", "Sell1 Strike", "Sell1 Entry", "Hedge1 Strike", "Hedge1 Entry",
+    "Sell2 Side", "Sell2 Strike", "Sell2 Entry", "Hedge2 Strike", "Hedge2 Entry",
+    "SL %", "Target %", "Created At", "Updated At", "Notes",
+]
+
+def v162_portfolio_load():
     try:
-        if df is None or df.empty:
-            return None
-        d = df.copy()
-        d["Date"] = pd.to_datetime(d["Date"], errors="coerce").dt.date
-        rows = d[d["Date"] == pd.to_datetime(target_date).date()]
-        return rows.iloc[-1].to_dict() if not rows.empty else None
+        if PORTFOLIO_POSITION_STORE.exists():
+            df = pd.read_csv(PORTFOLIO_POSITION_STORE)
+            for col in PORTFOLIO_COLUMNS:
+                if col not in df.columns:
+                    df[col] = "" if col in ["Position ID", "Status", "Strategy", "Created At", "Updated At", "Notes", "Sell1 Side", "Sell2 Side"] else 0
+            return df[PORTFOLIO_COLUMNS]
     except Exception:
-        return None
+        pass
+    return pd.DataFrame(columns=PORTFOLIO_COLUMNS)
 
-
-def latest_journal_date(df):
+def v162_portfolio_save(df):
     try:
-        if df is None or df.empty:
-            return now_ist().date()
-        d = df.copy()
-        d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
-        d = d.dropna(subset=["Date"]).sort_values("Date")
-        return d["Date"].iloc[-1].date() if not d.empty else now_ist().date()
+        PORTFOLIO_POSITION_STORE.parent.mkdir(parents=True, exist_ok=True)
+        df.to_csv(PORTFOLIO_POSITION_STORE, index=False)
+        return True
     except Exception:
-        return now_ist().date()
+        return False
+
+def v162_new_position_id():
+    return "P" + now_ist().strftime("%H%M%S")
+
+def v162_add_position(strategy, lots, lot_size, sell1_side, sell1_strike, sell1_entry, hedge1_strike, hedge1_entry,
+                      sell2_side="", sell2_strike=0, sell2_entry=0.0, hedge2_strike=0, hedge2_entry=0.0,
+                      sl_pct=25.0, target_pct=35.0, notes=""):
+    df = v162_portfolio_load()
+    row = {
+        "Position ID": v162_new_position_id(),
+        "Status": "ACTIVE",
+        "Strategy": strategy,
+        "Lots": int(lots or 0),
+        "Lot Size": int(lot_size or 65),
+        "Sell1 Side": sell1_side,
+        "Sell1 Strike": int(sell1_strike or 0),
+        "Sell1 Entry": float(sell1_entry or 0),
+        "Hedge1 Strike": int(hedge1_strike or 0),
+        "Hedge1 Entry": float(hedge1_entry or 0),
+        "Sell2 Side": sell2_side,
+        "Sell2 Strike": int(sell2_strike or 0),
+        "Sell2 Entry": float(sell2_entry or 0),
+        "Hedge2 Strike": int(hedge2_strike or 0),
+        "Hedge2 Entry": float(hedge2_entry or 0),
+        "SL %": float(sl_pct or 25),
+        "Target %": float(target_pct or 35),
+        "Created At": fmt_time(),
+        "Updated At": fmt_time(),
+        "Notes": notes,
+    }
+    df = pd.concat([df, pd.DataFrame([row])], ignore_index=True)
+    return v162_portfolio_save(df)
+
+def v162_update_position_status(position_id, status):
+    df = v162_portfolio_load()
+    if df.empty:
+        return False
+    mask = df["Position ID"].astype(str) == str(position_id)
+    if not mask.any():
+        return False
+    df.loc[mask, "Status"] = status
+    df.loc[mask, "Updated At"] = fmt_time()
+    return v162_portfolio_save(df)
+
+def v162_find_leg(row_dict, side, strike):
+    """Find live premium for CE/PE strike from analyzed option rows."""
+    try:
+        rows = (option_analysis or {}).get("rows", []) if isinstance(option_analysis, dict) else []
+        strike = int(float(strike or 0))
+        side = str(side or "").lower()
+        if not side or strike <= 0:
+            return 0.0
+        for r in rows:
+            if int(r.get("strike", 0) or 0) == strike:
+                return float(r.get(f"{side}_ltp", 0) or 0)
+    except Exception:
+        pass
+    return 0.0
+
+def v162_leg_pnl(side, sell_strike, sell_entry, hedge_strike, hedge_entry, lots, lot_sz):
+    sell_cur = v162_find_leg({}, side, sell_strike)
+    hedge_cur = v162_find_leg({}, side, hedge_strike)
+    sell_entry = float(sell_entry or 0)
+    hedge_entry = float(hedge_entry or 0)
+    lots = int(lots or 0)
+    lot_sz = int(lot_sz or 65)
+    sell_pts = sell_entry - sell_cur if sell_entry > 0 and sell_cur > 0 else 0.0
+    hedge_pts = hedge_cur - hedge_entry if hedge_entry > 0 and hedge_cur > 0 else 0.0
+    net_pts = sell_pts + hedge_pts
+    return {
+        "sell_current": sell_cur,
+        "hedge_current": hedge_cur,
+        "net_points": net_pts,
+        "pnl": net_pts * lots * lot_sz,
+        "profit_pct": safe_divide(sell_entry - sell_cur, sell_entry, 0.0) * 100 if sell_entry else 0.0,
+    }
+
+def v162_analyze_position(pos):
+    lots = int(float(pos.get("Lots", 0) or 0))
+    lot_sz = int(float(pos.get("Lot Size", 65) or 65))
+    leg1 = v162_leg_pnl(pos.get("Sell1 Side", ""), pos.get("Sell1 Strike", 0), pos.get("Sell1 Entry", 0), pos.get("Hedge1 Strike", 0), pos.get("Hedge1 Entry", 0), lots, lot_sz)
+    leg2 = {"sell_current":0.0,"hedge_current":0.0,"net_points":0.0,"pnl":0.0,"profit_pct":0.0}
+    if str(pos.get("Strategy", "")).upper() == "IRON CONDOR" or str(pos.get("Sell2 Side", "")):
+        leg2 = v162_leg_pnl(pos.get("Sell2 Side", ""), pos.get("Sell2 Strike", 0), pos.get("Sell2 Entry", 0), pos.get("Hedge2 Strike", 0), pos.get("Hedge2 Entry", 0), lots, lot_sz)
+    total_pnl = leg1["pnl"] + leg2["pnl"]
+    avg_profit_pct = (leg1["profit_pct"] + (leg2["profit_pct"] if str(pos.get("Sell2 Side", "")) else leg1["profit_pct"])) / (2 if str(pos.get("Sell2 Side", "")) else 1)
+    risk = max(int(locals().get("gamma_score_v7", 0) or 0), int(locals().get("shock_score_v7", 0) or 0))
+    action = "HOLD"
+    reason = "Premium decay normal hai. SL discipline rakho."
+    if risk >= 75:
+        action, reason = "EXIT / REDUCE", "Gamma/Shock risk high hai. Capital protection priority."
+    elif avg_profit_pct >= 35:
+        action, reason = "BOOK 50% / TRAIL", "Achha decay mil gaya. Partial profit secure karo."
+    elif avg_profit_pct >= 20:
+        action, reason = "HOLD + TRAIL SL", "Profit in favour hai. Trail SL use karo."
+    elif avg_profit_pct <= -25:
+        action, reason = "EXIT IF SL HIT", "Premium seller ke against gaya. SL check karo."
+    elif str(locals().get("final_trade", "WAIT")) == "WAIT":
+        action, reason = "MANAGE ONLY", "Fresh trade WAIT hai; existing position ko tight manage karo."
+    return {
+        "Action": action,
+        "Reason": reason,
+        "P/L ₹": round(total_pnl, 0),
+        "Net Points": round(leg1["net_points"] + leg2["net_points"], 2),
+        "Profit %": round(avg_profit_pct, 1),
+        "Sell1 Cur": round(leg1["sell_current"], 2),
+        "Hedge1 Cur": round(leg1["hedge_current"], 2),
+        "Sell2 Cur": round(leg2["sell_current"], 2),
+        "Hedge2 Cur": round(leg2["hedge_current"], 2),
+    }
+
+def v162_signal_gate(final_trade_value, top_strategy_value, confidence_value, selected_strike_value):
+    """Smart entry gate.
+    90%+ high-confidence directional signals can pass on first refresh.
+    70-89% signals need 2 stable refresh confirmations.
+    This prevents random strike flips without blocking a very strong move.
+    """
+    sig = f"{final_trade_value}|{top_strategy_value}|{selected_strike_value}"
+    prev = st.session_state.get("v162_prev_signal")
+    count = int(st.session_state.get("v162_signal_count", 0) or 0)
+    if sig == prev:
+        count += 1
+    else:
+        count = 1
+    st.session_state["v162_prev_signal"] = sig
+    st.session_state["v162_signal_count"] = count
+    conf = float(confidence_value or 0)
+    reasons = []
+    allowed = True
+    required = 1 if conf >= 90 else 2
+    if final_trade_value == "WAIT":
+        allowed = False; reasons.append("Final AI WAIT hai.")
+    if conf < 70:
+        allowed = False; reasons.append(f"Final confidence {conf:.0f}% hai; minimum 70% chahiye.")
+    if not selected_strike_value or int(float(selected_strike_value or 0)) <= 0:
+        allowed = False; reasons.append("Valid strike select nahi hui.")
+    if count < required:
+        allowed = False; reasons.append(f"Signal {required} refresh tak stable nahi hua.")
+    if conf >= 90 and count >= 1 and final_trade_value != "WAIT" and selected_strike_value:
+        reasons = [r for r in reasons if "stable" not in r.lower()]
+        allowed = not any(("WAIT" in r or "confidence" in r or "Valid strike" in r) for r in reasons)
+    return {"allowed": allowed, "count": count, "required": required, "signature": sig, "reasons": reasons or ["Entry checklist green."]}
 
 
-def journal_stats(df, lookback=30):
+def v102_metric_card(label, value, delta=None):
+    """Compact metric card for long labels like NEAR EXPIRY MODE."""
+    safe_delta = f"<div class='metric-delta'>{delta}</div>" if delta not in (None, "") else ""
+    st.markdown(
+        f"""
+        <div class="mini-metric-card">
+            <div class="metric-label">{label}</div>
+            <div class="metric-value-small">{value}</div>
+            {safe_delta}
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+def v102_load_fii_dii_journal():
+    """Load FII/DII journal and keep schema backward-compatible."""
+    cols = [
+        "Date", "FII Cash Cr", "DII Cash Cr",
+        "FII Index Futures Contracts", "FII Long %", "FII Short %",
+        "FII Index Futures Bias", "FII Options Bias", "Notes"
+    ]
+    try:
+        if FII_DII_STORE.exists():
+            df = pd.read_csv(FII_DII_STORE)
+            for col in cols:
+                if col not in df.columns:
+                    df[col] = 0.0 if col in ["FII Index Futures Contracts", "FII Long %", "FII Short %"] else ""
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+            return df[cols]
+    except Exception:
+        pass
+    return pd.DataFrame(columns=cols)
+
+def v102_save_fii_dii_journal(df):
+    try:
+        FII_DII_STORE.parent.mkdir(parents=True, exist_ok=True)
+        df2 = df.copy()
+        if "Date" in df2.columns:
+            df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce").dt.date.astype(str)
+        df2.to_csv(FII_DII_STORE, index=False)
+        return True
+    except Exception:
+        return False
+
+def v102_journal_stats(df, lookback=30):
     if df is None or df.empty:
-        return {"rows": 0, "fii_5": 0.0, "dii_5": 0.0, "bias": 0.0, "label": "No data"}
+        return {"rows": 0, "fii_5": 0.0, "dii_5": 0.0, "fii_10": 0.0, "dii_10": 0.0, "bias": 0.0, "label": "No data"}
     d = df.copy()
     d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
     d = d.dropna(subset=["Date"]).sort_values("Date").tail(int(lookback))
     for col in ["FII Cash Cr", "DII Cash Cr"]:
         d[col] = pd.to_numeric(d[col], errors="coerce").fillna(0.0)
     last5 = d.tail(5)
+    last10 = d.tail(10)
     fii5 = float(last5["FII Cash Cr"].sum()) if not last5.empty else 0.0
     dii5 = float(last5["DII Cash Cr"].sum()) if not last5.empty else 0.0
+    fii10 = float(last10["FII Cash Cr"].sum()) if not last10.empty else 0.0
+    dii10 = float(last10["DII Cash Cr"].sum()) if not last10.empty else 0.0
     bias = 0.0
     bias += 35 if fii5 > 1000 else -35 if fii5 < -1000 else fii5 / 30.0
     bias += 15 if dii5 > 1000 else -15 if dii5 < -1000 else dii5 / 70.0
-    return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "bias": signed_clamp(bias), "label": bias_label(bias)}
+    bias += 20 if fii10 > 2000 else -20 if fii10 < -2000 else fii10 / 100.0
+    bias = signed_clamp(bias)
+    label = bias_label(bias)
+    return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "fii_10": fii10, "dii_10": dii10, "bias": bias, "label": label}
 
 
-def auto_fut_bias(long_pct, short_pct):
+
+
+# =========================================================
+# V13 STABILITY + LIVE UX HELPERS
+# =========================================================
+def v13_is_auth_error(*messages):
+    text = " ".join(str(m) for m in messages).lower()
+    return any(x in text for x in ["401", "authentication failed", "token invalid", "client id or token invalid"])
+
+
+def v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result):
+    messages = [
+        (dhan_bundle or {}).get("message", ""),
+        (expiry_result or {}).get("message", ""),
+        (option_chain or {}).get("message", ""),
+    ]
+    if not dhan_ready:
+        return "Fallback (Dhan token missing)"
+    if v13_is_auth_error(*messages):
+        return "Fallback (Dhan token INVALID/EXPIRED)"
+    if (option_chain or {}).get("success"):
+        return "DhanHQ Live OC"
+    if str(nifty_source).lower().startswith("dhan"):
+        return "DhanHQ Quote (OC unavailable)"
+    return "Fallback (Dhan connected, live OC not active)"
+
+
+def v13_trend(key, value, decimals=2):
+    """Compare value against previous refresh and return arrow, css class, delta text."""
     try:
-        long_pct, short_pct = float(long_pct or 0), float(short_pct or 0)
+        val = float(value)
+    except Exception:
+        return "→", "v13-flat", "flat"
+    prev_key = f"v13_prev_{key}"
+    prev = st.session_state.get(prev_key)
+    st.session_state[prev_key] = val
+    if prev is None:
+        return "→", "v13-flat", "first refresh"
+    diff = val - float(prev)
+    if abs(diff) < (10 ** (-decimals)):
+        return "→", "v13-flat", "flat"
+    if diff > 0:
+        return "↑", "v13-green", f"+{diff:.{decimals}f} from last refresh"
+    return "↓", "v13-red", f"{diff:.{decimals}f} from last refresh"
+
+
+def v13_candidate_card(title, side, row, final_trade, hedge_gap, confidence, gamma_score, shock_score):
+    if not row:
+        st.info(f"{title}: live option-chain unavailable.")
+        return
+    prefix = side.lower()
+    strike = int(row.get("strike", 0))
+    premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+    st_data = v12_sl_target_for_seller(premium, confidence, gamma_score, shock_score) if "v12_sl_target_for_seller" in globals() else {"sl":0,"target1":0,"target2":0,"trail_after":0}
+    hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap) if "v12_select_hedge_strike" in globals() else 0
+    arrow, cls, delta = v13_trend(f"cand_{side}_{strike}_premium", premium, 2)
+    agree = (final_trade == f"SELL {side}")
+    badge = "✅ Final AI agrees" if agree else "⚠️ Candidate only — final AI does not agree"
+    st.markdown(f"""
+<div class='v13-card'>
+<h3>{title}: {strike} {side}</h3>
+<div class='v13-badge'>{badge}</div>
+<p><b>Live Premium:</b> ₹{premium:.2f} <span class='{cls}'>{arrow} {delta}</span></p>
+<p><b>Suggested Entry:</b> ₹{premium:.2f} &nbsp; | &nbsp; <b>SL:</b> ₹{st_data.get('sl',0):.2f} &nbsp; | &nbsp; <b>Target 1:</b> ₹{st_data.get('target1',0):.2f} &nbsp; | &nbsp; <b>Target 2:</b> ₹{st_data.get('target2',0):.2f}</p>
+<p><b>Hedge:</b> {hedge_strike} {side} &nbsp; | &nbsp; <b>OI:</b> {int(row.get(f'{prefix}_oi',0) or 0):,} &nbsp; | &nbsp; <b>OI Δ:</b> {int(row.get(f'{prefix}_oi_change',0) or 0):,} &nbsp; | &nbsp; <b>Volume:</b> {int(row.get(f'{prefix}_volume',0) or 0):,}</p>
+<p><b>Delta:</b> {float(row.get(f'{prefix}_delta',0) or 0):.3f} &nbsp; | &nbsp; <b>IV:</b> {float(row.get(f'{prefix}_iv',0) or 0):.2f} &nbsp; | &nbsp; <b>Sell Score:</b> {int(row.get(f'{prefix}_sell_score',0) or 0)}/98</p>
+<p><b>Last Updated:</b> {fmt_time()}</p>
+</div>
+""", unsafe_allow_html=True)
+
+
+def v13_today_journal_row(df):
+    try:
+        if df is None or df.empty:
+            return None
+        d = df.copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce").dt.date
+        rows = d[d["Date"] == now_ist().date()]
+        if rows.empty:
+            return None
+        return rows.iloc[-1].to_dict()
+    except Exception:
+        return None
+
+
+def v134_journal_row_by_date(df, target_date):
+    try:
+        if df is None or df.empty or target_date is None:
+            return None
+        d = df.copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce").dt.date
+        rows = d[d["Date"] == pd.to_datetime(target_date).date()]
+        if rows.empty:
+            return None
+        return rows.iloc[-1].to_dict()
+    except Exception:
+        return None
+
+def v134_latest_journal_date(df):
+    try:
+        if df is None or df.empty:
+            return now_ist().date()
+        d = df.copy()
+        d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
+        d = d.dropna(subset=["Date"]).sort_values("Date")
+        if d.empty:
+            return now_ist().date()
+        return d["Date"].iloc[-1].date()
+    except Exception:
+        return now_ist().date()
+
+def v135_auto_fut_bias(long_pct, short_pct):
+    """Auto-bias from FII Index Futures long/short percentage."""
+    try:
+        long_pct = float(long_pct or 0)
+        short_pct = float(short_pct or 0)
     except Exception:
         return "Neutral"
     if short_pct >= 65 and short_pct - long_pct >= 25:
@@ -1271,35 +1773,513 @@ def auto_fut_bias(long_pct, short_pct):
         return "Bullish"
     return "Neutral"
 
-
-def fut_bias_score(long_pct, short_pct, manual_bias="Neutral"):
+def v135_fut_bias_score(long_pct, short_pct, manual_bias="Neutral"):
     try:
-        spread = float(long_pct or 0) - float(short_pct or 0)
+        long_pct = float(long_pct or 0)
+        short_pct = float(short_pct or 0)
     except Exception:
-        spread = 0.0
+        long_pct, short_pct = 0.0, 0.0
+    spread = long_pct - short_pct
+    # Convert long-short spread into -30 to +30 score.
     score = signed_clamp(spread * 0.45, -30, 30)
     if abs(score) < 3:
         score = 22 if manual_bias == "Bullish" else -22 if manual_bias == "Bearish" else 0
     return score
 
-
-def safe_float_from_row(row, key, default=0.0):
+def v135_safe_float_from_row(row, key, default=0.0):
     try:
         return float((row or {}).get(key, default) or default)
     except Exception:
         return default
 
 
-# ------------------------- Refresh Engine -------------------------
-def qp_get(name, default=""):
+def v132_vix_range_engine(nifty_price, india_vix):
+    """India VIX expected daily range for option sellers.
+    Shortcut used by traders: VIX / 16 ≈ expected 1-day move percentage.
+    This is an estimate, not a guarantee.
+    """
+    try:
+        spot = float(nifty_price)
+        vixv = float(india_vix)
+    except Exception:
+        spot, vixv = 0.0, 0.0
+    if spot <= 0 or vixv <= 0:
+        return {
+            "ok": False, "move_pct": 0.0, "move_points": 0.0, "upper": 0.0, "lower": 0.0,
+            "position": "Unavailable", "risk": "UNKNOWN", "message": "VIX range unavailable."
+        }
+    move_pct = vixv / 16.0
+    move_points = spot * move_pct / 100.0
+    upper = spot + move_points
+    lower = spot - move_points
+    # Position inside the estimated band using current spot as centre. Kept for UI symmetry.
+    width = max(upper - lower, 1.0)
+    pct_from_lower = clamp(((spot - lower) / width) * 100.0)
+    if move_pct >= 1.35:
+        risk = "HIGH RANGE"
+    elif move_pct >= 0.90:
+        risk = "MEDIUM RANGE"
+    else:
+        risk = "LOW RANGE"
+    return {
+        "ok": True,
+        "move_pct": move_pct,
+        "move_points": move_points,
+        "upper": upper,
+        "lower": lower,
+        "pct_from_lower": pct_from_lower,
+        "position": "Middle of expected range",
+        "risk": risk,
+        "message": f"Expected 1-day move approx ±{move_points:.0f} pts ({move_pct:.2f}%)."
+    }
+
+
+def v132_vix_trade_note(final_trade, price, vix_range):
+    if not vix_range.get("ok"):
+        return "VIX range unavailable."
+    move_points = vix_range.get("move_points", 0)
+    if final_trade == "WAIT":
+        return "Final AI WAIT hai; VIX range sirf observation ke liye use karo."
+    if move_points <= 120:
+        return "Expected range tight hai; premium selling ke liye theta support ho sakta hai, par breakout SL zaroor rakho."
+    if move_points >= 250:
+        return "Expected range wide hai; seller risk high ho sakta hai. Lot size reduce/tight SL better."
+    return "Expected range normal hai; entry tabhi jab OI + price action + heavyweight agree kare."
+
+
+def v133_fake_move_engine(price_action_bias, option_bias, heavy_bias, pcr, vix, gamma_score, shock_score, news_score, conflict_mode, final_trade, vix_range=None):
+    """Fake move probability meter for the WAIT / no-trade zone.
+    This is a decision-support filter, not a guarantee.
+    Higher score means confirmation is weak or signals are fighting each other.
+    """
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    news = v91_safe_num(news_score)
+
+    score = 15.0
+    reasons = []
+    confirmations = []
+
+    if conflict_mode:
+        score += 20
+        reasons.append('Major signal conflict active hai.')
+
+    if pa >= 45 and ob <= 15:
+        score += 18
+        reasons.append('Price upar hai, par option-chain support weak/negative hai.')
+    elif pa <= -45 and ob >= -15:
+        score += 18
+        reasons.append('Price neeche hai, par option-chain breakdown support weak/positive hai.')
+    else:
+        confirmations.append('Price action aur option-chain me severe mismatch nahi hai.')
+
+    if abs(pa - ob) >= 85:
+        score += 18
+        reasons.append('Price action aur OI/option bias me strong mismatch hai.')
+    elif abs(pa - ob) >= 55:
+        score += 10
+        reasons.append('Price action aur OI/option bias partially disagree kar rahe hain.')
+
+    if hw >= 35 and pa <= -25:
+        score += 12
+        reasons.append('Heavyweights support de rahe hain, lekin chart weak dikh raha hai.')
+    elif hw <= -35 and pa >= 25:
+        score += 12
+        reasons.append('Chart upar hai, lekin heavyweights pressure de rahe hain.')
+    else:
+        confirmations.append('Heavyweights me major opposite pressure nahi dikh raha.')
+
+    if pcrv < 0.80 and ob >= 35:
+        score += 10
+        reasons.append('PCR bearish zone me hai, par option bias bullish hai.')
+    elif pcrv > 1.55 and ob <= -35:
+        score += 10
+        reasons.append('PCR overheated bullish zone me hai, par option bias bearish hai.')
+
+    if gamma >= 70:
+        score += 14
+        reasons.append('Gamma risk high hai; spike/fake move ka chance badh sakta hai.')
+    if shock >= 65:
+        score += 12
+        reasons.append('Shock probability elevated hai.')
+    if news >= 70:
+        score += 12
+        reasons.append('News/event risk high hai.')
+
+    if vix_range and vix_range.get('ok') and vix_range.get('risk') == 'HIGH RANGE':
+        score += 8
+        reasons.append('VIX expected range wide hai; seller ko confirmation chahiye.')
+    elif vixv <= 14 and abs(pa - ob) < 45 and not conflict_mode:
+        confirmations.append('VIX low/normal hai aur conflict limited hai.')
+
+    if final_trade == 'WAIT':
+        score += 6
+        reasons.append('Final AI already WAIT mode me hai.')
+
+    score = int(round(clamp(score, 0, 100)))
+    if score >= 75:
+        label = 'HIGH FAKE MOVE RISK'
+        action = 'WAIT / no fresh entry. Confirmation candle + OI support ka wait karo.'
+        tone = 'error'
+    elif score >= 50:
+        label = 'MEDIUM FAKE MOVE RISK'
+        action = 'Small size ya avoid. Entry tabhi jab next refresh me same direction confirm ho.'
+        tone = 'warning'
+    else:
+        label = 'LOW FAKE MOVE RISK'
+        action = 'Fake move risk controlled, but hedge + SL mandatory.'
+        tone = 'success'
+
+    if not reasons:
+        reasons.append('Koi major fake-move warning active nahi hai.')
+    return {
+        'score': score,
+        'label': label,
+        'action': action,
+        'tone': tone,
+        'reasons': reasons[:5],
+        'confirmations': confirmations[:3],
+    }
+
+
+# =========================================================
+# V14 AI BRAIN UPGRADE: MEMORY + FREEZE + REGIME + CANDLE
+# =========================================================
+def v14_snapshot_engine(snapshot, max_len=20):
+    """Rolling memory: sirf last 20 snapshots session_state me rakhe. App slow nahi hogi."""
+    hist = st.session_state.get("v14_memory", [])
+    sid = str(snapshot.get("snapshot_id", ""))
+    if not hist or str(hist[-1].get("snapshot_id", "")) != sid:
+        hist.append(snapshot)
+        hist = hist[-int(max_len):]
+        st.session_state["v14_memory"] = hist
+    return hist
+
+
+def v14_decision_freeze(proposed_trade, confidence, history, required=3):
+    """Trade signal tabhi confirm jab same non-WAIT signal required refreshes tak rahe."""
+    proposed = str(proposed_trade or "WAIT")
+    recent = [str(x.get("proposed_trade", "WAIT")) for x in history[-int(required):]]
+    same_count = 0
+    for sig in reversed(recent):
+        if sig == proposed:
+            same_count += 1
+        else:
+            break
+    if proposed == "WAIT":
+        return {
+            "final_trade": "WAIT",
+            "confirmed": False,
+            "same_count": same_count,
+            "required": required,
+            "status": "WAIT MODE",
+            "reason": "AI currently WAIT mode me hai.",
+            "confidence": confidence,
+        }
+    if same_count >= required:
+        return {
+            "final_trade": proposed,
+            "confirmed": True,
+            "same_count": same_count,
+            "required": required,
+            "status": "SIGNAL CONFIRMED",
+            "reason": f"{proposed} signal {same_count} refresh se stable hai.",
+            "confidence": confidence,
+        }
+    return {
+        "final_trade": "WAIT",
+        "confirmed": False,
+        "same_count": same_count,
+        "required": required,
+        "status": "FREEZE ACTIVE",
+        "reason": f"{proposed} signal abhi {same_count}/{required} refresh confirm hua hai. Jaldbazi avoid.",
+        "confidence": min(float(confidence or 0), 60),
+    }
+
+
+def v14_confidence_stability(history, current_trade, confidence):
+    if not history:
+        return {"score": 0, "label": "NO MEMORY", "note": "First refresh."}
+    recent = history[-5:]
+    decisions = [str(x.get("proposed_trade", "WAIT")) for x in recent]
+    same = sum(1 for d in decisions if d == str(current_trade))
+    decision_score = same / max(len(decisions), 1) * 100
+    confs = [float(x.get("confidence", 0) or 0) for x in recent]
+    conf_range = max(confs) - min(confs) if confs else 0
+    penalty = min(conf_range * 1.2, 35)
+    score = int(round(clamp(decision_score - penalty, 0, 100)))
+    if score >= 80:
+        label = "STABLE"
+    elif score >= 55:
+        label = "MEDIUM"
+    else:
+        label = "UNSTABLE"
+    return {"score": score, "label": label, "note": f"Last {len(recent)} refresh decisions: " + " → ".join(decisions)}
+
+
+def v14_market_regime(price_action_bias, option_bias, heavy_bias, vix, shock_score, gamma_score, is_expiry=False, time_risk=0):
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    vixv = v91_safe_num(vix)
+    shock = v91_safe_num(shock_score)
+    gamma = v91_safe_num(gamma_score)
+    tr = v91_safe_num(time_risk)
+    aligned_bull = pa >= 25 and ob >= 25 and hw >= 10
+    aligned_bear = pa <= -25 and ob <= -25 and hw <= -10
+    if is_expiry and (gamma >= 65 or tr >= 70):
+        return {"label": "⚡ EXPIRY GAMMA DAY", "score": 90, "note": "Expiry + gamma/time risk high. Fresh entry only after confirmation."}
+    if shock >= 70 or vixv >= 18:
+        return {"label": "🔴 VOLATILE DAY", "score": 75, "note": "Shock/VIX elevated. Quantity reduce, SL strict."}
+    if aligned_bull or aligned_bear:
+        return {"label": "🟢 TRENDING DAY", "score": 82, "note": "Price action, option-chain aur heavyweights same direction me hain."}
+    if abs(pa) <= 30 and abs(ob) <= 35 and vixv <= 15:
+        return {"label": "🟡 RANGE DAY", "score": 68, "note": "Directional edge limited. Premium decay strategies better."}
+    return {"label": "⚪ MIXED DAY", "score": 50, "note": "Signals mixed hain. Decision Freeze follow karo."}
+
+
+def v14_candle_confirmation(open_, high_, low_, close_, final_direction):
+    o = v91_safe_num(open_)
+    h = v91_safe_num(high_)
+    l = v91_safe_num(low_)
+    c = v91_safe_num(close_)
+    rng = max(h - l, 0.01)
+    body = abs(c - o)
+    upper_wick = h - max(o, c)
+    lower_wick = min(o, c) - l
+    pattern = "Neutral Candle"
+    score = 0
+    note = "15m candle neutral hai."
+    if body <= rng * 0.18:
+        pattern, score, note = "Doji / Indecision", 0, "Decision weak: next 15m close ka wait better."
+    elif c > o and body >= rng * 0.55:
+        pattern, score, note = "Strong Bullish 15m", 12, "Bullish close PE-sell setup ko confirm kar sakta hai."
+    elif c < o and body >= rng * 0.55:
+        pattern, score, note = "Strong Bearish 15m", -12, "Bearish close CE-sell setup ko confirm kar sakta hai."
+    if upper_wick >= rng * 0.45 and c < h - rng * 0.30:
+        pattern, score, note = "Upper Wick Rejection", min(score, -8), "Upar rejection: bullish move fake ho sakta hai."
+    if lower_wick >= rng * 0.45 and c > l + rng * 0.30:
+        pattern, score, note = "Lower Wick Rejection", max(score, 8), "Neeche rejection: bearish move fake ho sakta hai."
+    fd = v91_safe_num(final_direction)
+    aligned = (score > 0 and fd > 0) or (score < 0 and fd < 0) or abs(score) < 3
+    return {"pattern": pattern, "score": int(score), "aligned": aligned, "note": note}
+
+
+def v14_seller_strength(best_ce, best_pe, option_bias):
+    ce = int(best_ce.get("ce_sell_score", 0)) if best_ce else 0
+    pe = int(best_pe.get("pe_sell_score", 0)) if best_pe else 0
+    ob = v91_safe_num(option_bias)
+    ce_strength = int(clamp(ce + max(-ob, 0) * 0.20, 0, 100))
+    pe_strength = int(clamp(pe + max(ob, 0) * 0.20, 0, 100))
+    if ce_strength > pe_strength + 10:
+        winner = "CE Sellers Strong"
+    elif pe_strength > ce_strength + 10:
+        winner = "PE Sellers Strong"
+    else:
+        winner = "Balanced"
+    return {"ce": ce_strength, "pe": pe_strength, "winner": winner}
+
+
+def v14_entry_window(market_mode, time_risk, confidence, stability_score, freeze_confirmed, seller_risk):
+    t = now_ist().time()
+    if "EXPIRY" in str(market_mode) and datetime.strptime("14:30", "%H:%M").time() <= t:
+        return {"label": "NO FRESH ENTRY", "note": "Expiry last hour: gamma spike risk. Sirf manage/exit focus."}
+    if seller_risk >= 70 or time_risk >= 75:
+        return {"label": "WAIT", "note": "Risk zone high hai. Confirmation ke bina entry avoid."}
+    if freeze_confirmed and confidence >= 70 and stability_score >= 70:
+        return {"label": "ENTRY WINDOW OPEN", "note": "Signal stable + confidence acceptable. Hedge/SL mandatory."}
+    if confidence >= 60:
+        return {"label": "WAIT FOR CONFIRMATION", "note": "Setup ban raha hai, par Freeze/Stability abhi complete nahi."}
+    return {"label": "NO EDGE", "note": "Confidence low hai. No trade bhi valid trade hai."}
+
+
+def v14_reason_breakdown(price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, fake_move_score, vix_risk, seller_risk):
+    items = [
+        ("Price Action", v91_safe_num(price_action_bias) * 0.12),
+        ("Option Chain / OI", v91_safe_num(option_bias) * 0.14),
+        ("Heavyweights", v91_safe_num(heavy_bias) * 0.10),
+        ("FII/DII", v91_safe_num(smart_money_bias) * 0.08),
+        ("PCR", v91_safe_num(pcr_bias) * 0.08),
+        ("Fake Move Risk", -v91_safe_num(fake_move_score) * 0.10),
+        ("VIX Risk", -v91_safe_num(vix_risk) * 0.06),
+        ("Seller Risk", -v91_safe_num(seller_risk) * 0.05),
+    ]
+    return [(name, int(round(val))) for name, val in items]
+
+
+# =========================================================
+# V15 SAFE EXPIRY SCORE: ZERO PREMIUM / PREMIUM EXPLOSION RISK
+# =========================================================
+def v15_minutes_to_expiry_close(expiry_text=None):
+    """Minutes left till 15:30 IST expiry close. Lightweight, no API call."""
+    try:
+        now = now_ist()
+        if expiry_text:
+            exp_date = pd.to_datetime(str(expiry_text)).date()
+        else:
+            exp_date = now.date()
+        close_dt = datetime.combine(exp_date, datetime.strptime("15:30", "%H:%M").time()).replace(tzinfo=IST)
+        return int(max((close_dt - now).total_seconds() / 60.0, 0))
+    except Exception:
+        return 999
+
+
+def v15_remaining_expected_move(price, vix, minutes_left):
+    """Expiry remaining expected move estimate using VIX/16 daily shortcut scaled by sqrt(time)."""
+    price = v91_safe_num(price)
+    vix = max(v91_safe_num(vix), 0.0)
+    minutes_left = max(v91_safe_num(minutes_left), 1.0)
+    full_day_minutes = 375.0
+    daily_pct = vix / 16.0 / 100.0
+    move = price * daily_pct * (minutes_left / full_day_minutes) ** 0.5
+    return max(move, 1.0)
+
+
+def v15_safe_expiry_for_leg(side, row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label):
+    """Return Safe Expiry score for one CE/PE leg. Higher = higher chance premium dies safely."""
+    if not row:
+        return None
+    side = str(side).upper()
+    prefix = side.lower()
+    strike = int(row.get("strike", 0) or 0)
+    spot = v91_safe_num(spot)
+    premium = v91_safe_num(row.get(f"{prefix}_ltp", 0))
+    delta_abs = abs(v91_safe_num(row.get(f"{prefix}_delta", 0)))
+    iv = v91_safe_num(row.get(f"{prefix}_iv", 0))
+    sell_score = v91_safe_num(row.get(f"{prefix}_sell_score", 0))
+    signal = str(row.get(f"{prefix}_signal", ""))
+    oi_chg = v91_safe_num(row.get(f"{prefix}_oi_change", 0))
+    vol = v91_safe_num(row.get(f"{prefix}_volume", 0))
+
+    distance = (strike - spot) if side == "CE" else (spot - strike)
+    otm = distance > 0
+    rem_move = v15_remaining_expected_move(spot, vix, minutes_left)
+    distance_ratio = distance / rem_move if rem_move else 0
+
+    score = 35.0
+    reasons = []
+    warnings = []
+
+    if not otm:
+        score -= 40
+        warnings.append("ITM/ATM risk high")
+    elif distance_ratio >= 1.8:
+        score += 32; reasons.append("Strike expected range se kaafi door")
+    elif distance_ratio >= 1.2:
+        score += 24; reasons.append("Strike expected range se bahar")
+    elif distance_ratio >= 0.8:
+        score += 12; warnings.append("Strike range ke edge par")
+    else:
+        score -= 18; warnings.append("Strike expected range ke andar/near")
+
+    if delta_abs <= 0.08:
+        score += 18; reasons.append("Delta very low")
+    elif delta_abs <= 0.16:
+        score += 12; reasons.append("Delta seller-friendly")
+    elif delta_abs >= 0.35:
+        score -= 18; warnings.append("Delta high")
+    elif delta_abs >= 0.25:
+        score -= 8; warnings.append("Delta moderate/high")
+
+    if "Writing" in signal:
+        score += 10; reasons.append("OI writing support")
+    elif "Buying" in signal or "Short Covering" in signal:
+        score -= 12; warnings.append("Premium buying/covering risk")
+
+    if sell_score >= 85:
+        score += 10
+    elif sell_score <= 55:
+        score -= 8
+
+    if minutes_left <= 45:
+        score += 18; reasons.append("Expiry close: theta strong")
+    elif minutes_left <= 120:
+        score += 10; reasons.append("Time decay supportive")
+    elif minutes_left >= 300:
+        score -= 6; warnings.append("Time left high")
+
+    # Risk penalties: premium explosion risk ka core.
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    fake = v91_safe_num(fake_move_score)
+    risk_penalty = gamma * 0.12 + shock * 0.12 + fake * 0.18
+    score -= risk_penalty
+    if gamma >= 70: warnings.append("Gamma risk high")
+    if shock >= 65: warnings.append("Shock risk elevated")
+    if fake >= 50: warnings.append("Fake move risk active")
+    if "VOLATILE" in str(regime_label) or "GAMMA" in str(regime_label):
+        score -= 8; warnings.append("Volatile/expiry gamma regime")
+
+    if iv >= 25:
+        score -= 6; warnings.append("IV high")
+    if premium <= 1.0 and otm:
+        score += 8; reasons.append("Premium already near zero")
+    elif premium >= 30 and minutes_left <= 90:
+        score -= 6; warnings.append("Premium still heavy")
+
+    safe_score = int(round(clamp(score, 0, 100)))
+    explosion_risk = int(round(clamp(100 - safe_score + gamma * 0.08 + fake * 0.10, 0, 100)))
+    worthless_prob = int(round(clamp(safe_score * 0.82 + max(distance_ratio, 0) * 8, 0, 98)))
+
+    if safe_score >= 85:
+        label = "🟢 STRONG"
+    elif safe_score >= 70:
+        label = "🟡 CAUTION"
+    else:
+        label = "🔴 AVOID"
+
+    return {
+        "side": side,
+        "strike": strike,
+        "premium": premium,
+        "safe_score": safe_score,
+        "worthless_probability": worthless_prob,
+        "premium_explosion_risk": explosion_risk,
+        "distance": distance,
+        "distance_ratio": distance_ratio,
+        "delta": delta_abs,
+        "iv": iv,
+        "label": label,
+        "reasons": reasons[:3] or ["Distance/delta/time based score"],
+        "warnings": warnings[:3],
+        "oi_change": oi_chg,
+        "volume": vol,
+    }
+
+
+def v15_safe_expiry_watchlist(option_rows, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label, top_n=3):
+    """Build top CE/PE Safe Expiry watchlist from already fetched option-chain rows. No extra API calls."""
+    results = []
+    for row in option_rows or []:
+        ce = v15_safe_expiry_for_leg("CE", row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label)
+        pe = v15_safe_expiry_for_leg("PE", row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label)
+        if ce: results.append(ce)
+        if pe: results.append(pe)
+    # Prefer liquid, OTM, high safe score. Keep list small.
+    results = [x for x in results if x.get("distance", -1) > 0]
+    results.sort(key=lambda x: (x["safe_score"], x["worthless_probability"], -x["premium_explosion_risk"]), reverse=True)
+    return results[:int(top_n)]
+
+
+# =========================================================
+# V16.1 PERSISTENT AUTO REFRESH ENGINE
+# =========================================================
+def v161_qp_get(name, default=""):
     try:
         val = st.query_params.get(name, default)
-        return val[0] if isinstance(val, list) and val else val
+        if isinstance(val, list):
+            return val[0] if val else default
+        return val
     except Exception:
         return default
 
 
-def qp_set(name, value):
+def v161_qp_set(name, value):
     try:
         if str(st.query_params.get(name, "")) != str(value):
             st.query_params[name] = str(value)
@@ -1307,534 +2287,2310 @@ def qp_set(name, value):
         pass
 
 
-def init_refresh_state():
-    if "auto_refresh" not in st.session_state:
-        st.session_state["auto_refresh"] = str(qp_get("auto_refresh", "0")).lower() in ("1", "true", "yes", "on")
-    if "refresh_interval" not in st.session_state:
-        try:
-            st.session_state["refresh_interval"] = int(float(qp_get("refresh_interval", "20") or 20))
-        except Exception:
-            st.session_state["refresh_interval"] = 20
-    st.session_state["refresh_interval"] = int(max(20, min(300, st.session_state["refresh_interval"])))
-
-
-def set_auto_refresh(enabled, interval=20):
-    st.session_state["auto_refresh"] = bool(enabled)
-    st.session_state["refresh_interval"] = int(max(20, min(300, int(interval or 20))))
-    qp_set("auto_refresh", "1" if enabled else "0")
-    qp_set("refresh_interval", str(st.session_state["refresh_interval"]))
-
-
-def trigger_refresh():
-    st.session_state["manual_refresh_counter"] = st.session_state.get("manual_refresh_counter", 0) + 1
-    # Do not clear the full cache. TTL handles data freshness and avoids slow reload.
-    st.rerun()
-
-
-# ------------------------- Lightweight Strategy Helpers -------------------------
-def round_strike(x, step=50):
+def v161_init_refresh_state():
+    """Keep auto-refresh ON across browser/meta refresh for up to 30 minutes."""
     try:
-        return int(round(float(x) / step) * step)
+        qp_auto = str(v161_qp_get("auto_refresh", "0")).lower() in ("1", "true", "yes", "on")
+        qp_interval = int(float(v161_qp_get("refresh_interval", "20") or 20))
+    except Exception:
+        qp_auto, qp_interval = False, 20
+    qp_interval = int(max(20, min(300, qp_interval)))
+
+    if "v161_auto_refresh" not in st.session_state:
+        st.session_state["v161_auto_refresh"] = qp_auto
+    if "v161_refresh_interval" not in st.session_state:
+        st.session_state["v161_refresh_interval"] = qp_interval
+    if "v161_auto_until" not in st.session_state:
+        st.session_state["v161_auto_until"] = v161_qp_get("auto_until", "")
+
+
+def v161_auto_remaining_seconds():
+    try:
+        raw = st.session_state.get("v161_auto_until", "")
+        if not raw:
+            return 0
+        until = pd.to_datetime(raw).to_pydatetime()
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=IST)
+        return int((until - now_ist()).total_seconds())
     except Exception:
         return 0
 
 
-def hedge_strike(sell_strike, side, hedge_gap=100):
-    sell_strike = int(sell_strike or 0)
-    return sell_strike + int(hedge_gap) if side == "CE" else sell_strike - int(hedge_gap)
-
-
-def seller_sl_target(premium, confidence=0, risk=0):
-    premium = float(premium or 0)
-    if premium <= 0:
-        return {"entry": 0.0, "sl": 0.0, "target1": 0.0, "target2": 0.0, "trail_after": 0.0}
-    sl_mult = 1.28 if confidence >= 80 and risk < 55 else 1.22 if risk < 70 else 1.16
-    t1_mult = 0.72 if confidence >= 75 else 0.78
-    t2_mult = 0.55 if confidence >= 75 else 0.62
-    return {
-        "entry": round(premium, 2),
-        "sl": round(premium * sl_mult, 2),
-        "target1": round(premium * t1_mult, 2),
-        "target2": round(premium * t2_mult, 2),
-        "trail_after": round(premium * 0.82, 2),
-    }
-
-
-def price_action_bias_engine(price, ema20, ema50, vwap, opening_high, opening_low, prev_high, prev_low):
-    score = 0.0
-    reasons = []
-    if price > ema20:
-        score += 18; reasons.append("Price EMA20 ke upar")
+def v161_set_auto_refresh(enabled, interval=20):
+    enabled = bool(enabled)
+    interval = int(max(20, min(300, int(interval or 20))))
+    st.session_state["v161_auto_refresh"] = enabled
+    st.session_state["v161_refresh_interval"] = interval
+    if enabled:
+        until = now_ist() + timedelta(minutes=30)
+        st.session_state["v161_auto_until"] = until.isoformat()
+        v161_qp_set("auto_refresh", "1")
+        v161_qp_set("refresh_interval", str(interval))
+        v161_qp_set("auto_until", until.isoformat())
     else:
-        score -= 18; reasons.append("Price EMA20 ke neeche")
-    if ema20 > ema50:
-        score += 16; reasons.append("EMA20 > EMA50")
-    else:
-        score -= 16; reasons.append("EMA20 < EMA50")
-    if price > vwap:
-        score += 16; reasons.append("Price VWAP ke upar")
-    else:
-        score -= 16; reasons.append("Price VWAP ke neeche")
-    if opening_high and price > opening_high:
-        score += 18; reasons.append("Opening range breakout")
-    elif opening_low and price < opening_low:
-        score -= 18; reasons.append("Opening range breakdown")
-    if prev_high and price > prev_high:
-        score += 12; reasons.append("Previous high ke upar")
-    elif prev_low and price < prev_low:
-        score -= 12; reasons.append("Previous low ke neeche")
-    return signed_clamp(score), reasons[:4]
+        st.session_state["v161_auto_until"] = ""
+        v161_qp_set("auto_refresh", "0")
+        v161_qp_set("refresh_interval", str(interval))
+        v161_qp_set("auto_until", "")
 
-
-def pcr_bias_engine(pcr):
-    pcr = float(pcr or 0)
-    if pcr >= 1.35:
-        return 28, "PCR bullish support zone"
-    if pcr <= 0.75 and pcr > 0:
-        return -28, "PCR bearish pressure zone"
-    if 0.95 <= pcr <= 1.20:
-        return 8, "PCR balanced/slightly supportive"
-    return 0, "PCR neutral"
-
-
-def data_quality_score(dhan_ready, option_ok, nifty_source, hw_source, vix_source, price_action_source):
-    score = 0
-    reasons = []
-    if dhan_ready:
-        score += 20; reasons.append("Dhan credentials detected")
-    else:
-        reasons.append("Dhan token missing")
-    if option_ok:
-        score += 35; reasons.append("Live Dhan option-chain active")
-    else:
-        reasons.append("Option-chain unavailable/manual fallback")
-    if str(nifty_source).lower().startswith("dhan"):
-        score += 18; reasons.append("Nifty from DhanHQ")
-    elif str(nifty_source):
-        score += 8; reasons.append(f"Nifty source: {nifty_source}")
-    if str(hw_source).lower().startswith(("dhan", "yahoo")):
-        score += 12; reasons.append(f"Heavyweights: {hw_source}")
-    if str(vix_source):
-        score += 7; reasons.append(f"VIX: {vix_source}")
-    if str(price_action_source).lower().startswith("yahoo"):
-        score += 8; reasons.append("Auto price action active")
-    return int(clamp(score)), reasons
-
-
-def select_candidate(option_analysis, side, manual_strike, hedge_gap, confidence=0, risk=0):
-    row = None
-    if option_analysis.get("success"):
-        row = option_analysis.get("best_ce") if side == "CE" else option_analysis.get("best_pe")
-    strike = int(row.get("strike", manual_strike) if row else manual_strike)
-    premium = float(row.get(f"{side.lower()}_ltp", 0) if row else 0)
-    plan = seller_sl_target(premium, confidence, risk)
-    return {"side": side, "strike": strike, "hedge": hedge_strike(strike, side, hedge_gap), "premium": premium, "plan": plan, "row": row}
-
-
-def build_market_snapshot(**kwargs):
-    snap = dict(kwargs)
-    snap["created_at"] = fmt_time()
-    snap["id"] = f"{kwargs.get('price',0):.2f}|{kwargs.get('pcr',0):.3f}|{kwargs.get('vix',0):.2f}|{fmt_time()}"
-    return snap
-
-
-def snapshot_material_change(snapshot):
-    prev = st.session_state.get("last_snapshot_for_stability")
-    st.session_state["last_snapshot_for_stability"] = snapshot
-    if not prev:
-        return True, ["First clean snapshot"]
-    reasons = []
-    if abs(float(snapshot.get("price",0))-float(prev.get("price",0))) >= max(20, float(snapshot.get("atr5",40))*0.35):
-        reasons.append("Nifty materially changed")
-    if abs(float(snapshot.get("pcr",0))-float(prev.get("pcr",0))) >= 0.08:
-        reasons.append("PCR materially changed")
-    if abs(float(snapshot.get("vix_change_pct",0))-float(prev.get("vix_change_pct",0))) >= 1.5:
-        reasons.append("VIX pressure changed")
-    if abs(float(snapshot.get("option_bias",0))-float(prev.get("option_bias",0))) >= 18:
-        reasons.append("Option-chain bias changed")
-    return bool(reasons), reasons or ["No material change"]
-
-
-def v18_ai_brain(snapshot):
-    price_bias = float(snapshot.get("price_action_bias", 0))
-    option_bias = float(snapshot.get("option_bias", 0))
-    heavy_bias = float(snapshot.get("heavy_bias", 0))
-    smart_bias = float(snapshot.get("smart_money_bias", 0))
-    pcr_bias = float(snapshot.get("pcr_bias", 0))
-    data_quality = int(snapshot.get("data_quality", 0))
-    seller_risk = float(snapshot.get("seller_risk", 0))
-    news_score = float(snapshot.get("news_score", 0))
-    gamma_score = float(snapshot.get("gamma_score", 0))
-    shock_score = float(snapshot.get("shock_score", 0))
-    best_ce_score = float(snapshot.get("best_ce_score", 0))
-    best_pe_score = float(snapshot.get("best_pe_score", 0))
-
-    directional = signed_clamp(
-        price_bias * 0.30 + option_bias * 0.30 + heavy_bias * 0.18 + smart_bias * 0.12 + pcr_bias * 0.10
-    )
-    blockers = []
-    reasons = []
-    if data_quality < 55:
-        blockers.append(f"Data quality low ({data_quality}/100)")
-    if news_score >= 78:
-        blockers.append(f"News/event risk high ({news_score:.0f}/100)")
-    if seller_risk >= 82:
-        blockers.append(f"Seller risk high ({seller_risk:.0f}/100)")
-    if gamma_score >= 82:
-        blockers.append(f"Gamma risk high ({gamma_score:.0f}/100)")
-    if shock_score >= 82:
-        blockers.append(f"Shock risk high ({shock_score:.0f}/100)")
-
-    # Direction meaning: positive = bullish market, seller usually sells PE. negative = bearish market, seller sells CE.
-    if blockers:
-        action = "WAIT"
-        reasons = blockers[:]
-    elif abs(directional) <= 18 and seller_risk < 55 and best_ce_score >= 68 and best_pe_score >= 68:
-        action = "IRON CONDOR"
-        reasons.append("Market balanced hai aur dono side seller candidates acceptable hain")
-    elif directional >= 24 and best_pe_score >= 58:
-        action = "SELL PE"
-        reasons.append("Bullish alignment: downside PE selling side better")
-    elif directional <= -24 and best_ce_score >= 58:
-        action = "SELL CE"
-        reasons.append("Bearish alignment: upside CE selling side better")
-    else:
-        action = "WAIT"
-        reasons.append("Directional edge clear nahi hai")
-
-    raw_conf = 42 + abs(directional) * 0.42 + data_quality * 0.18 - seller_risk * 0.16 - news_score * 0.08
-    if action == "IRON CONDOR":
-        raw_conf = 58 + min(best_ce_score, best_pe_score) * 0.25 - seller_risk * 0.18
-    if action == "WAIT":
-        raw_conf = min(raw_conf, 64)
-    confidence = int(round(clamp(raw_conf, 0, 96)))
-
-    material_change, change_reasons = snapshot_material_change(snapshot)
-    last_decision = st.session_state.get("v18_last_decision")
-    if last_decision and not material_change and action != last_decision.get("action") and confidence < 78:
-        reasons.insert(0, "Decision stability lock: market materially change nahi hua")
-        action = last_decision.get("action", "WAIT")
-        confidence = min(confidence, int(last_decision.get("confidence", confidence)))
-    decision = {
-        "action": action,
-        "confidence": confidence,
-        "directional_score": int(round(directional)),
-        "risk": int(round(seller_risk)),
-        "reasons": reasons[:5],
-        "change_reasons": change_reasons[:4],
-        "material_change": material_change,
-        "blockers": blockers,
-    }
-    st.session_state["v18_last_decision"] = decision
-    return decision
-
+v161_init_refresh_state()
 
 # =========================================================
-# APP UI - V18 CLEAN BASE
+# SIDEBAR + SOURCE CONFIG
 # =========================================================
-init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18 Clean Base")
-st.sidebar.caption("One Snapshot • One AI Brain • Lightweight UI")
+st.sidebar.title("⚙️ V17 Smart Lite AI")
+# V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
 else:
-    st.sidebar.warning("Dhan token missing — fallback/manual mode")
+    st.sidebar.info("DhanHQ credentials not added yet — safe fallbacks active")
 
-with st.sidebar.expander("1️⃣ Data / Refresh", expanded=True):
+# Persist UI mode settings across auto/manual refresh.
+if "developer_mode" not in st.session_state:
+    st.session_state["developer_mode"] = False
+if "trading_mode_clean" not in st.session_state:
+    st.session_state["trading_mode_clean"] = True
+
+developer_mode = st.sidebar.checkbox(
+    "🛠️ Developer Mode",
+    key="developer_mode",
+    help="OFF rakho to app clean rahegi. ON karoge to diagnostics/internal calculations dikhenge.",
+)
+trading_mode_clean = st.sidebar.checkbox(
+    "🎯 Trading Mode Clean UI",
+    key="trading_mode_clean",
+    help="Duplicate/internal sections hide karta hai.",
+)
+
+with st.sidebar.expander("1️⃣ Data Source", expanded=True):
     prefer_dhan = st.checkbox("Prefer DhanHQ Live Data", value=dhan_ready, disabled=not dhan_ready)
     nifty_security_id = int(st.number_input("Nifty Dhan Security ID", value=DEFAULT_NIFTY_SECURITY_ID, step=1))
     strikes_each_side = st.slider("Option strikes each side", 3, 10, 6)
-    refresh_interval = st.slider("Auto refresh interval seconds", 20, 300, int(st.session_state.get("refresh_interval", 20)), step=5)
-    auto_refresh = st.checkbox("Auto Refresh", value=bool(st.session_state.get("auto_refresh", False)))
-    if auto_refresh != st.session_state.get("auto_refresh") or refresh_interval != st.session_state.get("refresh_interval"):
-        set_auto_refresh(auto_refresh, refresh_interval)
-    if st.button("🔄 Manual Refresh", width="stretch"):
-        trigger_refresh()
+    st.caption("NSE direct option-chain scraping removed. DhanHQ is the intended live source.")
 
-with st.sidebar.expander("2️⃣ Manual Fallback", expanded=False):
+with st.sidebar.expander("2️⃣ Manual Market Fallback", expanded=False):
     manual_nifty = st.number_input("Manual Nifty", value=25000.0, step=1.0)
     manual_nifty_change_pct = st.number_input("Manual Nifty Change %", value=0.0, step=0.05)
     manual_vix = st.number_input("Manual India VIX", value=13.5, step=0.1)
     manual_vix_change_pct = st.number_input("Manual VIX Change %", value=0.0, step=0.1)
-    manual_ce_strike = int(st.number_input("Manual CE Sell Strike", value=25100, step=50))
-    manual_pe_strike = int(st.number_input("Manual PE Sell Strike", value=24900, step=50))
-    hedge_gap = int(st.number_input("Hedge Gap", value=100, step=50))
 
 with st.sidebar.expander("3️⃣ Price Action", expanded=False):
-    auto_price_action = st.checkbox("Auto Price Action", value=True)
+    auto_price_action = st.checkbox("Auto Price Action (EMA/VWAP/ATR/High-Low)", value=True)
+    st.caption("Auto ON: app candles se values update karegi. Manual values fallback rahengi.")
     manual_ema20 = st.number_input("Manual EMA 20", value=24950.0, step=1.0)
     manual_ema50 = st.number_input("Manual EMA 50", value=24900.0, step=1.0)
     manual_vwap = st.number_input("Manual VWAP", value=24940.0, step=1.0)
     manual_atr5 = st.number_input("Manual ATR 5 Min", value=45.0, step=1.0)
     manual_previous_day_high = st.number_input("Manual Previous Day High", value=25150.0, step=1.0)
     manual_previous_day_low = st.number_input("Manual Previous Day Low", value=24850.0, step=1.0)
-    manual_opening_range_high = st.number_input("Opening Range High", value=25060.0, step=1.0)
-    manual_opening_range_low = st.number_input("Opening Range Low", value=24940.0, step=1.0)
+    manual_today_high = st.number_input("Manual Today High", value=25080.0, step=1.0)
+    manual_today_low = st.number_input("Manual Today Low", value=24920.0, step=1.0)
+    manual_opening_range_high = st.number_input("Manual Opening Range High", value=25060.0, step=1.0)
+    manual_opening_range_low = st.number_input("Manual Opening Range Low", value=24940.0, step=1.0)
+    # Start with manual fallback. After live fetch, V16 overrides these when auto_price_action is ON.
+    ema20 = manual_ema20
+    ema50 = manual_ema50
+    vwap = manual_vwap
+    atr5 = manual_atr5
+    previous_day_high = manual_previous_day_high
+    previous_day_low = manual_previous_day_low
+    today_high = manual_today_high
+    today_low = manual_today_low
+    opening_range_high = manual_opening_range_high
+    opening_range_low = manual_opening_range_low
+    price_action_source = "Manual fallback"
+    price_action_result = {"success": False, "message": "Manual fallback active", "source": "Manual fallback"}
 
-with st.sidebar.expander("4️⃣ FII/DII Journal", expanded=False):
-    journal_df = load_fii_dii_journal()
-    data_date = st.date_input("Data Date", value=latest_journal_date(journal_df))
-    saved = journal_row_by_date(journal_df, data_date)
-    date_key = pd.to_datetime(data_date).strftime("%Y%m%d")
-    fii_today = st.number_input("FII Cash ₹ Cr", value=safe_float_from_row(saved, "FII Cash Cr", 0.0), step=100.0, key=f"fii_{date_key}")
-    dii_today = st.number_input("DII Cash ₹ Cr", value=safe_float_from_row(saved, "DII Cash Cr", 0.0), step=100.0, key=f"dii_{date_key}")
-    fut_contracts = st.number_input("FII Index Futures Contracts", value=safe_float_from_row(saved, "FII Index Futures Contracts", 0.0), step=1000.0, key=f"fut_{date_key}")
-    long_pct = st.number_input("FII Long %", value=safe_float_from_row(saved, "FII Long %", 0.0), min_value=0.0, max_value=100.0, step=0.01, key=f"long_{date_key}")
-    short_pct = st.number_input("FII Short %", value=safe_float_from_row(saved, "FII Short %", 0.0), min_value=0.0, max_value=100.0, step=0.01, key=f"short_{date_key}")
-    fut_bias = auto_fut_bias(long_pct, short_pct)
-    if st.button("💾 Save FII/DII", width="stretch"):
-        new_row = pd.DataFrame([{"Date": data_date, "FII Cash Cr": fii_today, "DII Cash Cr": dii_today, "FII Index Futures Contracts": fut_contracts, "FII Long %": long_pct, "FII Short %": short_pct, "FII Index Futures Bias": fut_bias, "Notes": "V18 clean base"}])
-        out_df = pd.concat([journal_df, new_row], ignore_index=True)
-        out_df["Date"] = pd.to_datetime(out_df["Date"], errors="coerce")
-        out_df = out_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(60)
-        st.success("Saved" if save_fii_dii_journal(out_df) else "Save failed")
+with st.sidebar.expander("3B 🕯️ 15m Candle Confirmation", expanded=False):
+    st.caption("Optional: 15-min candle values chart se daalo. Empty/default rahe to app price-action proxy use karegi.")
+    candle15_open = st.number_input("15m Open", value=manual_nifty, step=1.0)
+    candle15_high = st.number_input("15m High", value=manual_nifty + 40.0, step=1.0)
+    candle15_low = st.number_input("15m Low", value=manual_nifty - 40.0, step=1.0)
+    candle15_close = st.number_input("15m Close", value=manual_nifty, step=1.0)
 
-with st.sidebar.expander("5️⃣ Risk Controls", expanded=False):
-    capital = st.number_input("Trading Capital ₹", value=500000.0, step=10000.0)
-    margin_per_lot = st.number_input("Approx Margin Per Lot ₹", value=50000.0, step=5000.0)
-    manual_news_risk = st.selectbox("Manual News/Event Risk", ["Low", "Medium", "High", "Critical"], index=0)
-    te_key = get_secret("TRADING_ECONOMICS_KEY", "")
-    alpha_key = get_secret("ALPHA_VANTAGE_KEY", "")
+with st.sidebar.expander("4️⃣ Manual Option Fallback", expanded=False):
+    manual_call_oi_change = st.number_input("Call OI Change", value=150000, step=1000)
+    manual_put_oi_change = st.number_input("Put OI Change", value=180000, step=1000)
+    manual_total_call_oi = st.number_input("Total Call OI", value=1500000, step=10000)
+    manual_total_put_oi = st.number_input("Total Put OI", value=1800000, step=10000)
+    manual_ce_strike = int(st.number_input("Manual CE Sell Strike", value=25100, step=50))
+    manual_pe_strike = int(st.number_input("Manual PE Sell Strike", value=24900, step=50))
+    hedge_gap = int(st.number_input("Hedge Gap", value=100, step=50))
 
-developer_mode = st.sidebar.checkbox("🛠️ Developer Mode", value=False)
-max_lots = int(max(0, capital // margin_per_lot)) if margin_per_lot else 0
+with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True):
+    _quick_journal_df = v102_load_fii_dii_journal()
+    _default_data_date = v134_latest_journal_date(_quick_journal_df)
+    fii_data_date = st.date_input("FII/DII Data Date", value=_default_data_date, key="v134_fii_data_date")
+    _saved_row_for_date = v134_journal_row_by_date(_quick_journal_df, fii_data_date)
+    _default_fii_today = v135_safe_float_from_row(_saved_row_for_date, "FII Cash Cr", 0.0)
+    _default_dii_today = v135_safe_float_from_row(_saved_row_for_date, "DII Cash Cr", 0.0)
+    _default_fut_contracts = v135_safe_float_from_row(_saved_row_for_date, "FII Index Futures Contracts", 0.0)
+    _default_long_pct = v135_safe_float_from_row(_saved_row_for_date, "FII Long %", 0.0)
+    _default_short_pct = v135_safe_float_from_row(_saved_row_for_date, "FII Short %", 0.0)
+    _quick_stats = v102_journal_stats(_quick_journal_df)
+    _date_key = pd.to_datetime(fii_data_date).strftime("%Y%m%d")
+    fii_today = st.number_input("FII Cash ₹ Cr", value=_default_fii_today, step=100.0, key=f"v134_fii_today_{_date_key}")
+    dii_today = st.number_input("DII Cash ₹ Cr", value=_default_dii_today, step=100.0, key=f"v134_dii_today_{_date_key}")
+    fii_5day = st.number_input("FII 5 Day Net ₹ Cr", value=float(_quick_stats.get("fii_5", 0.0)), step=100.0, key="v134_fii_5day")
+    dii_5day = st.number_input("DII 5 Day Net ₹ Cr", value=float(_quick_stats.get("dii_5", 0.0)), step=100.0, key="v134_dii_5day")
+    fii_index_futures_contracts = st.number_input("FII Index Futures Contracts", value=_default_fut_contracts, step=1000.0, key=f"v135_fut_contracts_{_date_key}")
+    fii_long_pct = st.number_input("FII Index Futures Long %", value=_default_long_pct, min_value=0.0, max_value=100.0, step=0.01, key=f"v135_long_pct_{_date_key}")
+    fii_short_pct = st.number_input("FII Index Futures Short %", value=_default_short_pct, min_value=0.0, max_value=100.0, step=0.01, key=f"v135_short_pct_{_date_key}")
+    _auto_bias = v135_auto_fut_bias(fii_long_pct, fii_short_pct)
+    _bias_default = str((_saved_row_for_date or {}).get("FII Index Futures Bias", _auto_bias) or _auto_bias)
+    _bias_options = ["Auto", "Neutral", "Bullish", "Bearish"]
+    _bias_index = 0 if _bias_default not in ["Neutral", "Bullish", "Bearish"] else _bias_options.index(_bias_default)
+    _bias_choice = st.selectbox("FII Futures Bias", _bias_options, index=_bias_index, key=f"v135_fut_bias_{_date_key}")
+    fii_index_futures_bias = _auto_bias if _bias_choice == "Auto" else _bias_choice
+    st.caption(f"Auto Futures Bias: {fii_index_futures_bias} | Long {fii_long_pct:.2f}% / Short {fii_short_pct:.2f}%")
+    if _saved_row_for_date:
+        st.success(f"{pd.to_datetime(fii_data_date).strftime('%d-%m-%Y')} ka saved data loaded.")
+    else:
+        st.info("Is date ka data abhi save nahi hai.")
+    if st.button("💾 Save Selected Date FII/DII", width="stretch"):
+        _new_row = pd.DataFrame([{
+            "Date": fii_data_date,
+            "FII Cash Cr": fii_today,
+            "DII Cash Cr": dii_today,
+            "FII Index Futures Contracts": fii_index_futures_contracts,
+            "FII Long %": fii_long_pct,
+            "FII Short %": fii_short_pct,
+            "FII Index Futures Bias": fii_index_futures_bias,
+            "FII Options Bias": "Neutral",
+            "Notes": "Saved from date-wise manual fields",
+        }])
+        _save_df = pd.concat([_quick_journal_df, _new_row], ignore_index=True)
+        _save_df["Date"] = pd.to_datetime(_save_df["Date"], errors="coerce")
+        _save_df = _save_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
+        if v102_save_fii_dii_journal(_save_df):
+            st.success("Saved. Ab date change karoge to usi date ka data load hoga.")
+        else:
+            st.error("Save failed.")
+    st.caption("Bug fix: har date ka data alag save/load hoga; 02-07 aur 03-07 mix nahi honge.")
 
-# ------------------------- Fetch One Snapshot -------------------------
-master = get_dhan_instrument_master() if prefer_dhan else {"success": False, "df": pd.DataFrame()}
-top5_ids = resolve_top5_security_ids(master.get("df", pd.DataFrame())) if master.get("success") else {}
-dhan_bundle = get_dhan_market_bundle(client_id, access_token, top5_ids, nifty_security_id) if prefer_dhan else {"success": False, "message": "Dhan disabled"}
+with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=False):
+    fii_journal_df = v102_load_fii_dii_journal()
+    journal_date = st.date_input("Date", value=v134_latest_journal_date(fii_journal_df), key="v134_journal_date")
+    _journal_existing = v134_journal_row_by_date(fii_journal_df, journal_date)
+    _jkey = pd.to_datetime(journal_date).strftime("%Y%m%d")
+    journal_fii = st.number_input("Journal FII Cash ₹ Cr", value=float((_journal_existing or {}).get("FII Cash Cr", 0.0) or 0.0), step=100.0, key=f"journal_fii_{_jkey}")
+    journal_dii = st.number_input("Journal DII Cash ₹ Cr", value=float((_journal_existing or {}).get("DII Cash Cr", 0.0) or 0.0), step=100.0, key=f"journal_dii_{_jkey}")
+    journal_fut_contracts = st.number_input("Journal FII Index Futures Contracts", value=v135_safe_float_from_row(_journal_existing, "FII Index Futures Contracts", 0.0), step=1000.0, key=f"journal_fut_contracts_{_jkey}")
+    journal_long_pct = st.number_input("Journal FII Long %", value=v135_safe_float_from_row(_journal_existing, "FII Long %", 0.0), min_value=0.0, max_value=100.0, step=0.01, key=f"journal_long_pct_{_jkey}")
+    journal_short_pct = st.number_input("Journal FII Short %", value=v135_safe_float_from_row(_journal_existing, "FII Short %", 0.0), min_value=0.0, max_value=100.0, step=0.01, key=f"journal_short_pct_{_jkey}")
+    _jfut_auto = v135_auto_fut_bias(journal_long_pct, journal_short_pct)
+    _jfut = str((_journal_existing or {}).get("FII Index Futures Bias", _jfut_auto) or _jfut_auto)
+    _jopt = str((_journal_existing or {}).get("FII Options Bias", "Neutral") or "Neutral")
+    _journal_bias_options = ["Auto", "Neutral", "Bullish", "Bearish"]
+    _journal_bias_index = 0 if _jfut not in ["Neutral", "Bullish", "Bearish"] else _journal_bias_options.index(_jfut)
+    _journal_bias_choice = st.selectbox("Journal FII Futures Bias", _journal_bias_options, index=_journal_bias_index, key=f"journal_fut_bias_{_jkey}")
+    journal_fut_bias = _jfut_auto if _journal_bias_choice == "Auto" else _journal_bias_choice
+    journal_opt_bias = st.selectbox("Journal FII Options Bias", ["Neutral", "Bullish", "Bearish"], index=["Neutral", "Bullish", "Bearish"].index(_jopt) if _jopt in ["Neutral", "Bullish", "Bearish"] else 0, key=f"journal_opt_bias_{_jkey}")
+    journal_notes = st.text_input("Notes", value=str((_journal_existing or {}).get("Notes", "") or ""), key=f"journal_notes_{_jkey}")
+    if _journal_existing:
+        st.success("Selected date ka saved row loaded.")
+    col_j1, col_j2 = st.columns(2)
+    if col_j1.button("Save FII/DII Day"):
+        new_row = pd.DataFrame([{
+            "Date": journal_date,
+            "FII Cash Cr": journal_fii,
+            "DII Cash Cr": journal_dii,
+            "FII Index Futures Contracts": journal_fut_contracts,
+            "FII Long %": journal_long_pct,
+            "FII Short %": journal_short_pct,
+            "FII Index Futures Bias": journal_fut_bias,
+            "FII Options Bias": journal_opt_bias,
+            "Notes": journal_notes,
+        }])
+        fii_journal_df = pd.concat([fii_journal_df, new_row], ignore_index=True)
+        fii_journal_df["Date"] = pd.to_datetime(fii_journal_df["Date"], errors="coerce")
+        fii_journal_df = fii_journal_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
+        if v102_save_fii_dii_journal(fii_journal_df):
+            st.success("Saved. Last 30 trading days retained.")
+        else:
+            st.error("Save failed. Use download backup.")
+    if col_j2.button("Clear Journal"):
+        fii_journal_df = fii_journal_df.iloc[0:0]
+        v102_save_fii_dii_journal(fii_journal_df)
+        st.warning("Journal cleared.")
+    journal_stats = v102_journal_stats(fii_journal_df)
+    st.caption(f"Rows: {journal_stats['rows']} | 5D FII: ₹{journal_stats['fii_5']:,.0f} Cr | 5D DII: ₹{journal_stats['dii_5']:,.0f} Cr")
+    if not fii_journal_df.empty:
+        st.download_button(
+            "Download Journal CSV",
+            data=fii_journal_df.to_csv(index=False),
+            file_name="fii_dii_journal_backup.csv",
+            mime="text/csv",
+        )
+
+with st.sidebar.expander("6️⃣ News Risk", expanded=True):
+    manual_news_risk = st.selectbox("Manual fallback", ["Low", "Medium", "High", "Critical"])
+    use_auto_news = st.checkbox("Use automatic news APIs when keys exist", value=True)
+    st.caption("Optional secrets: TRADING_ECONOMICS_API_KEY, ALPHAVANTAGE_API_KEY")
+
+with st.sidebar.expander("7️⃣ Top-5 Weights", expanded=False):
+    st.caption("Defaults: official Nifty 50 factsheet, 30-Jun-2026")
+    weights = {}
+    for symbol, cfg in TOP5_DEFAULT.items():
+        weights[symbol] = st.number_input(f"{cfg['name']} weight %", value=float(cfg["weight"]), step=0.01)
+
+with st.sidebar.expander("8️⃣ Risk / Position", expanded=True):
+    capital = st.number_input("Capital ₹", value=500000, step=10000)
+    margin_per_lot = st.number_input("Margin Per Lot ₹", value=50000, step=5000)
+    current_lots = int(st.number_input("Current Lots", value=0, step=1))
+    lot_size = int(st.number_input("Lot Size", value=65, step=5))
+
+
+with st.sidebar.expander("9️⃣ V16 Active Trade / Discipline", expanded=True):
+    _pos_saved = v16_load_active_position()
+    _side_options = ["None", "CE", "PE"]
+    _saved_side = str(_pos_saved.get("Active Sold Side", "None"))
+    _side_index = _side_options.index(_saved_side) if _saved_side in _side_options else 0
+    active_side = st.selectbox("Active Sold Side", _side_options, index=_side_index, key="v16_active_side")
+    active_strike = int(st.number_input("Active Strike", value=int(_pos_saved.get("Active Strike", 0) or 0), step=50, key="v16_active_strike"))
+    active_entry_price = st.number_input("Entry Premium ₹", value=float(_pos_saved.get("Entry Premium ₹", 0.0) or 0.0), step=0.05, key="v16_entry_premium")
+    active_current_price = st.number_input("Current Premium ₹", value=float(_pos_saved.get("Current Premium ₹", 0.0) or 0.0), step=0.05, key="v16_current_premium")
+    active_lots = int(st.number_input("Active Lots", value=int(_pos_saved.get("Active Lots", 0) or 0), step=1, key="v16_active_lots"))
+    trades_taken_today = int(st.number_input("Trades Taken Today", value=int(_pos_saved.get("Trades Taken Today", 0) or 0), step=1, key="v16_trades_taken"))
+    daily_loss_hit = st.checkbox("Daily Loss Hit / Stop Trading", value=bool(_pos_saved.get("Daily Loss Hit / Stop Trading", False)), key="v16_daily_loss_hit")
+    pcol1, pcol2 = st.columns(2)
+    if pcol1.button("💾 Save Position", width="stretch"):
+        if v16_save_active_position(active_side, active_strike, active_entry_price, active_current_price, active_lots, trades_taken_today, daily_loss_hit):
+            st.success("Position saved. Refresh/restart ke baad bhi load hogi.")
+        else:
+            st.error("Position save failed.")
+    if pcol2.button("🧹 Clear Position", width="stretch"):
+        if v16_clear_active_position():
+            st.success("Saved position cleared.")
+            st.rerun()
+    if _pos_saved.get("Saved At"):
+        st.caption(f"Last saved: {_pos_saved.get('Saved At')}")
+
+
+# =========================================================
+# FETCH LIVE SOURCES
+# =========================================================
+master_result = get_dhan_instrument_master() if (prefer_dhan and dhan_ready) else {"success": False, "df": pd.DataFrame()}
+top5_ids = resolve_top5_security_ids(master_result.get("df", pd.DataFrame())) if master_result.get("success") else {}
+dhan_bundle = get_dhan_market_bundle(client_id, access_token, top5_ids, nifty_security_id) if (prefer_dhan and dhan_ready) else {"success": False, "message": "Dhan disabled."}
 
 # Nifty
-price = manual_nifty
-nifty_change_pct = manual_nifty_change_pct
 nifty_source = "Manual"
-if prefer_dhan and dhan_bundle.get("success"):
-    try:
-        idx = dhan_bundle.get("data", {}).get("IDX_I", {})
-        item = idx.get(str(nifty_security_id), {}) or idx.get(int(nifty_security_id), {}) or {}
-        if item:
-            price = float(item.get("last_price", manual_nifty) or manual_nifty)
-            prev_close = float((item.get("ohlc", {}) or {}).get("close", 0) or 0)
-            nifty_change_pct = pct_change(price, prev_close) if prev_close else manual_nifty_change_pct
-            nifty_source = "DhanHQ"
-    except Exception:
-        pass
-if nifty_source == "Manual":
-    yn = get_yahoo_nifty()
-    if yn.get("success"):
-        price = yn.get("price", price)
-        nifty_change_pct = yn.get("change_pct", nifty_change_pct)
-        nifty_source = yn.get("source", "Yahoo fallback")
+if dhan_bundle.get("success"):
+    idx_data = (dhan_bundle.get("data", {}) or {}).get("IDX_I", {}) or {}
+    idx_item = idx_data.get(str(nifty_security_id), {}) or idx_data.get(int(nifty_security_id), {}) or {}
+    if idx_item:
+        price = float(idx_item.get("last_price", 0) or manual_nifty)
+        idx_ohlc = idx_item.get("ohlc", {}) or {}
+        idx_prev = float(idx_ohlc.get("close", 0) or 0)
+        nifty_change = price - idx_prev if idx_prev else 0.0
+        nifty_change_pct = pct_change(price, idx_prev) if idx_prev else manual_nifty_change_pct
+        nifty_source = "DhanHQ"
+    else:
+        yahoo_nifty = get_yahoo_nifty()
+        price = yahoo_nifty.get("price", manual_nifty) if yahoo_nifty.get("success") else manual_nifty
+        nifty_change = yahoo_nifty.get("change", 0.0) if yahoo_nifty.get("success") else 0.0
+        nifty_change_pct = yahoo_nifty.get("change_pct", manual_nifty_change_pct) if yahoo_nifty.get("success") else manual_nifty_change_pct
+        nifty_source = yahoo_nifty.get("source", "Manual") if yahoo_nifty.get("success") else "Manual"
+else:
+    yahoo_nifty = get_yahoo_nifty()
+    price = yahoo_nifty.get("price", manual_nifty) if yahoo_nifty.get("success") else manual_nifty
+    nifty_change = yahoo_nifty.get("change", 0.0) if yahoo_nifty.get("success") else 0.0
+    nifty_change_pct = yahoo_nifty.get("change_pct", manual_nifty_change_pct) if yahoo_nifty.get("success") else manual_nifty_change_pct
+    nifty_source = yahoo_nifty.get("source", "Manual") if yahoo_nifty.get("success") else "Manual"
 
 # VIX
-vix = manual_vix
-vix_change_pct = manual_vix_change_pct
-vix_source = "Manual"
-yv = get_yahoo_vix()
-if yv.get("success"):
-    vix = yv.get("vix", vix)
-    vix_change_pct = yv.get("change_pct", vix_change_pct)
-    vix_source = yv.get("source", "Yahoo fallback")
-
-# Expiry + Option Chain
-expiry_result = get_dhan_expiries(client_id, access_token, nifty_security_id) if prefer_dhan else {"success": False, "expiries": []}
-expiry = expiry_result.get("expiries", [""])[0] if expiry_result.get("expiries") else ""
-option_chain = get_dhan_option_chain(client_id, access_token, expiry, nifty_security_id, DEFAULT_NIFTY_SEGMENT, strikes_each_side) if expiry else {"success": False, "message": "No expiry"}
-option_analysis = analyze_option_chain(option_chain) if option_chain.get("success") else {"success": False, "rows": [], "bias": 0, "best_ce": None, "best_pe": None}
-
-if option_chain.get("success"):
-    price = float(option_chain.get("underlying", price) or price)
-    pcr = float(option_chain.get("pcr", 0) or 0)
-    call_oi_change = int(option_chain.get("call_oi_change", 0) or 0)
-    put_oi_change = int(option_chain.get("put_oi_change", 0) or 0)
+yahoo_vix = get_yahoo_vix()
+if yahoo_vix.get("success"):
+    vix = float(yahoo_vix["vix"])
+    vix_change_pct = float(yahoo_vix["change_pct"])
+    vix_source = yahoo_vix.get("source", "Yahoo fallback")
 else:
-    pcr = 0.0
-    call_oi_change = 0
-    put_oi_change = 0
+    vix = manual_vix
+    vix_change_pct = manual_vix_change_pct
+    vix_source = "Manual"
 
-# Price Action
-ema20, ema50, vwap, atr5 = manual_ema20, manual_ema50, manual_vwap, manual_atr5
-prev_high, prev_low = manual_previous_day_high, manual_previous_day_low
-or_high, or_low = manual_opening_range_high, manual_opening_range_low
-price_action_source = "Manual"
+
+# V16 Automatic Price Action - overrides stale manual values when enabled.
 if auto_price_action:
-    pa = get_yahoo_price_action()
-    if pa.get("success"):
-        ema20, ema50, vwap, atr5 = pa["ema20"], pa["ema50"], pa["vwap"], pa["atr5"]
-        prev_high, prev_low = pa["previous_day_high"], pa["previous_day_low"]
-        or_high, or_low = pa["opening_range_high"], pa["opening_range_low"]
-        price_action_source = pa.get("source", "Yahoo candles auto")
-
-price_action_bias, price_action_reasons = price_action_bias_engine(price, ema20, ema50, vwap, or_high, or_low, prev_high, prev_low)
-pcr_bias, pcr_note = pcr_bias_engine(pcr)
+    price_action_result = get_yahoo_price_action()
+    if price_action_result.get("success"):
+        ema20 = float(price_action_result.get("ema20", ema20))
+        ema50 = float(price_action_result.get("ema50", ema50))
+        vwap = float(price_action_result.get("vwap", vwap))
+        atr5 = float(price_action_result.get("atr5", atr5))
+        previous_day_high = float(price_action_result.get("previous_day_high", previous_day_high))
+        previous_day_low = float(price_action_result.get("previous_day_low", previous_day_low))
+        today_high = float(price_action_result.get("today_high", today_high))
+        today_low = float(price_action_result.get("today_low", today_low))
+        opening_range_high = float(price_action_result.get("opening_range_high", opening_range_high))
+        opening_range_low = float(price_action_result.get("opening_range_low", opening_range_low))
+        price_action_source = price_action_result.get("source", "Auto candles")
+    else:
+        price_action_source = "Manual fallback (auto failed)"
+else:
+    price_action_source = "Manual fallback"
 
 # Heavyweights
-hw_data = parse_dhan_heavyweights(dhan_bundle, top5_ids, {k: v["weight"] for k, v in TOP5_DEFAULT.items()}) if prefer_dhan and dhan_bundle.get("success") else {"success": False, "rows": []}
-if not hw_data.get("success"):
-    hw_data = get_yahoo_heavyweights()
-hw_analysis = analyze_heavyweights(hw_data, price, nifty_change_pct) if hw_data.get("success") else {"success": False, "pressure": 0, "estimated_points": 0, "shock_score": 0, "rows": [], "source": "Unavailable"}
-heavy_bias = float(hw_analysis.get("pressure", 0) or 0)
-
-# FII/DII smart money
-journal_df = load_fii_dii_journal()
-stats = journal_stats(journal_df)
-smart_money_bias = signed_clamp(float(stats.get("bias", 0)) + fut_bias_score(long_pct, short_pct, fut_bias))
-
-# News/risk
-te_result = get_te_calendar_risk(te_key)
-alpha_result = get_alpha_news_risk(alpha_key)
-reaction_score = market_reaction_risk(nifty_change_pct, vix_change_pct, hw_analysis)
-news = build_news_risk(manual_news_risk, te_result, alpha_result, reaction_score, vix_change_pct, hw_analysis.get("shock_score", 0))
-expiry_mode, dte = detect_expiry_mode(expiry, news.get("score", 0))
-time_risk, time_zone = historical_time_zone_risk(expiry_mode == "EXPIRY MODE")
-gamma_score = gamma_risk_score(expiry_mode == "EXPIRY MODE", vix_change_pct, hw_analysis.get("shock_score", 0), option_analysis.get("bias", 0), heavy_bias)
-shock_score = shock_probability_score(time_risk, clamp(max(vix_change_pct, 0) * 10), option_analysis.get("bias", 0), heavy_bias, news.get("score", 0))
-seller_risk = clamp(news.get("score", 0) * 0.30 + gamma_score * 0.25 + shock_score * 0.25 + max(vix - 12, 0) * 3.0 + time_risk * 0.10)
-
-data_quality, data_reasons = data_quality_score(dhan_ready, option_chain.get("success"), nifty_source, hw_data.get("source", "Unavailable"), vix_source, price_action_source)
-
-best_ce = option_analysis.get("best_ce")
-best_pe = option_analysis.get("best_pe")
-best_ce_score = int(best_ce.get("ce_sell_score", 0) if best_ce else 0)
-best_pe_score = int(best_pe.get("pe_sell_score", 0) if best_pe else 0)
-
-snapshot = build_market_snapshot(
-    price=price, nifty_change_pct=nifty_change_pct, vix=vix, vix_change_pct=vix_change_pct,
-    pcr=pcr, call_oi_change=call_oi_change, put_oi_change=put_oi_change,
-    price_action_bias=price_action_bias, option_bias=option_analysis.get("bias", 0), heavy_bias=heavy_bias,
-    smart_money_bias=smart_money_bias, pcr_bias=pcr_bias, data_quality=data_quality, seller_risk=seller_risk,
-    news_score=news.get("score", 0), gamma_score=gamma_score, shock_score=shock_score, atr5=atr5,
-    best_ce_score=best_ce_score, best_pe_score=best_pe_score, expiry=expiry, dte=dte,
-    sources={"nifty": nifty_source, "vix": vix_source, "price_action": price_action_source, "heavyweights": hw_data.get("source", "Unavailable"), "option_chain": option_chain.get("source", "Unavailable") if option_chain.get("success") else "Unavailable"},
-)
-decision = v18_ai_brain(snapshot)
-
-ce_candidate = select_candidate(option_analysis, "CE", manual_ce_strike, hedge_gap, decision["confidence"], seller_risk)
-pe_candidate = select_candidate(option_analysis, "PE", manual_pe_strike, hedge_gap, decision["confidence"], seller_risk)
-
-if decision["action"] == "SELL CE":
-    chosen = ce_candidate
-elif decision["action"] == "SELL PE":
-    chosen = pe_candidate
+if dhan_bundle.get("success") and top5_ids:
+    heavy_raw = parse_dhan_heavyweights(dhan_bundle, top5_ids, weights)
+    # V9 accuracy improvement: if Dhan quote gives symbols but no usable daily move, fallback to Yahoo for movement.
+    if heavy_raw.get("success") and heavy_raw.get("rows") and all(abs(float(r.get("change_pct", 0) or 0)) < 0.001 for r in heavy_raw["rows"]):
+        yahoo_hw = get_yahoo_heavyweights()
+        if yahoo_hw.get("success"):
+            for row in yahoo_hw["rows"]:
+                row["weight"] = float(weights.get(row["symbol"], row["weight"]))
+            yahoo_hw["source"] = "Yahoo fallback (Dhan stock move unavailable)"
+            heavy_raw = yahoo_hw
 else:
-    chosen = None
+    heavy_raw = get_yahoo_heavyweights()
+    if heavy_raw.get("success"):
+        for row in heavy_raw["rows"]:
+            row["weight"] = float(weights.get(row["symbol"], row["weight"]))
+heavy_analysis = analyze_heavyweights(heavy_raw, price, nifty_change_pct)
 
-# ------------------------- Main Screen -------------------------
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI — V18 Clean Base</div>", unsafe_allow_html=True)
-st.markdown("<div class='sub-title'>Cleaned architecture: old duplicate AI layers removed. One Snapshot → One AI Brain → One Final Decision.</div>", unsafe_allow_html=True)
+# Option chain - Dhan only; manual aggregate fallback otherwise
+option_chain = {"success": False, "message": "Waiting for Dhan expiry/option-chain response. Check Data API subscription, expiry list and token."}
+selected_expiry = None
+expiry_result = {"success": False, "expiries": [], "message": "Dhan not attempted."}
+if prefer_dhan and dhan_ready:
+    expiry_result = get_dhan_expiries(client_id, access_token, nifty_security_id, DEFAULT_NIFTY_SEGMENT)
+    if expiry_result.get("success"):
+        selected_expiry = st.sidebar.selectbox("📅 Dhan Nifty Expiry", expiry_result["expiries"], index=0)
+        option_chain = get_dhan_option_chain(
+            client_id,
+            access_token,
+            selected_expiry,
+            nifty_security_id,
+            DEFAULT_NIFTY_SEGMENT,
+            strikes_each_side,
+            50,
+        )
+    else:
+        option_chain = {"success": False, "message": "Expiry list unavailable: " + str(expiry_result.get("message", "Unknown Dhan expiry error"))}
 
-status, day_name = market_status()
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("Nifty", f"{price:,.2f}", f"{nifty_change_pct:.2f}%")
-k2.metric("India VIX", f"{vix:.2f}", f"{vix_change_pct:.2f}%")
-k3.metric("PCR", f"{pcr:.2f}" if pcr else "NA")
-k4.metric("Data Quality", f"{data_quality}/100")
-k5.metric("Seller Risk", f"{seller_risk:.0f}/100")
+option_analysis = analyze_option_chain(option_chain) if option_chain.get("success") else {"success": False, "rows": [], "bias": 0}
 
-card_class = "card-wait"
-if decision["action"] == "SELL PE":
-    card_class = "card-green"
-elif decision["action"] == "SELL CE":
-    card_class = "card-red"
-elif decision["action"] == "IRON CONDOR":
-    card_class = "card-yellow"
+# Aggregates
+if option_chain.get("success"):
+    total_call_oi = option_chain["total_call_oi"]
+    total_put_oi = option_chain["total_put_oi"]
+    call_oi_change = option_chain["call_oi_change"]
+    put_oi_change = option_chain["put_oi_change"]
+    pcr = option_chain["pcr"]
+else:
+    total_call_oi = manual_total_call_oi
+    total_put_oi = manual_total_put_oi
+    call_oi_change = manual_call_oi_change
+    put_oi_change = manual_put_oi_change
+    pcr = safe_divide(total_put_oi, total_call_oi, 0.0)
 
+# News risk
+te_key = get_secret("TRADING_ECONOMICS_API_KEY")
+alpha_key = get_secret("ALPHAVANTAGE_API_KEY")
+te_result = get_te_calendar_risk(te_key) if use_auto_news and te_key else {"success": False, "score": 0}
+alpha_result = get_alpha_news_risk(alpha_key) if use_auto_news and alpha_key else {"success": False, "score": 0}
+reaction_score = market_reaction_risk(nifty_change_pct, vix_change_pct, heavy_analysis)
+news = build_news_risk(manual_news_risk, te_result, alpha_result, reaction_score, vix_change_pct, heavy_analysis.get("shock_score", 0))
+
+
+# =========================================================
+# SELLER INTELLIGENCE ENGINE
+# =========================================================
+support_levels = [previous_day_low, today_low, opening_range_low]
+resistance_levels = [previous_day_high, today_high, opening_range_high]
+nearest_support = max([x for x in support_levels if x <= price], default=min(support_levels))
+nearest_resistance = min([x for x in resistance_levels if x >= price], default=max(resistance_levels))
+support_distance = max(price - nearest_support, 0)
+resistance_distance = max(nearest_resistance - price, 0)
+
+price_action_bias = 0.0
+price_action_bias += 22 if price > ema20 else -22
+price_action_bias += 18 if price > ema50 else -18
+price_action_bias += 25 if price > vwap else -25
+price_action_bias += 15 if ema20 > ema50 else -15
+if price > opening_range_high:
+    price_action_bias += 18
+elif price < opening_range_low:
+    price_action_bias -= 18
+price_action_bias = signed_clamp(price_action_bias)
+
+sr_bias = 0.0
+if support_distance <= 30:
+    sr_bias += 55
+elif support_distance <= 60:
+    sr_bias += 25
+if resistance_distance <= 30:
+    sr_bias -= 55
+elif resistance_distance <= 60:
+    sr_bias -= 25
+sr_bias = signed_clamp(sr_bias)
+
+# Option-chain directional bias. When Dhan is absent, use aggregate OI + PCR only.
+if option_analysis.get("success"):
+    option_bias = float(option_analysis.get("bias", 0))
+else:
+    oi_delta_base = max(abs(call_oi_change), abs(put_oi_change), 1)
+    option_bias = signed_clamp(((put_oi_change - call_oi_change) / oi_delta_base) * 65)
+
+pcr_bias = 0.0
+if 0.95 <= pcr <= 1.25:
+    pcr_bias = 35
+elif 1.25 < pcr <= 1.55:
+    pcr_bias = 18
+elif pcr > 1.55:
+    pcr_bias = -5
+elif 0.75 <= pcr < 0.95:
+    pcr_bias = -22
+else:
+    pcr_bias = -45
+
+# Use FII/DII journal rolling data if available; manual fields remain fallback.
+try:
+    _journal_stats_live = v102_journal_stats(locals().get("fii_journal_df", pd.DataFrame()))
+    if _journal_stats_live.get("rows", 0) > 0:
+        if abs(float(fii_5day)) < 0.001:
+            fii_5day = _journal_stats_live["fii_5"]
+        if abs(float(dii_5day)) < 0.001:
+            dii_5day = _journal_stats_live["dii_5"]
+except Exception:
+    _journal_stats_live = {"rows": 0, "fii_5": fii_5day, "dii_5": dii_5day, "bias": 0}
+
+smart_money_bias = 0.0
+smart_money_bias += 22 if fii_today > 0 else -22 if fii_today < 0 else 0
+smart_money_bias += 10 if dii_today > 0 else -10 if dii_today < 0 else 0
+smart_money_bias += 18 if fii_5day > 0 else -18 if fii_5day < 0 else 0
+smart_money_bias += 8 if dii_5day > 0 else -8 if dii_5day < 0 else 0
+_fut_score = v135_fut_bias_score(locals().get("fii_long_pct", 0), locals().get("fii_short_pct", 0), fii_index_futures_bias)
+smart_money_bias += _fut_score
+smart_money_bias = signed_clamp(smart_money_bias)
+
+heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
+
+# Weighted directional model
+final_direction = (
+    price_action_bias * 0.24
+    + option_bias * 0.24
+    + heavy_bias * 0.19
+    + smart_money_bias * 0.12
+    + pcr_bias * 0.09
+    + sr_bias * 0.12
+)
+final_direction = signed_clamp(final_direction)
+
+# Risk model for an option seller
+vix_risk = 15 if vix <= 14 else 30 if vix <= 18 else 65 if vix <= 24 else 90
+liquidity_risk = 0
+if option_analysis.get("success"):
+    selected_rows = [r for r in option_analysis["rows"] if abs(r["strike"] - price) <= 200]
+    wide = [r for r in selected_rows if max(r.get("ce_spread_pct", 0), r.get("pe_spread_pct", 0)) > 2.0]
+    liquidity_risk = safe_divide(len(wide), len(selected_rows), 0) * 100 if selected_rows else 0
+
+divergence_risk = 35 if heavy_analysis.get("divergence") != "NONE" else 0
+seller_risk = (
+    news["score"] * 0.42
+    + vix_risk * 0.25
+    + heavy_analysis.get("shock_score", 0) * 0.18
+    + divergence_risk * 0.08
+    + liquidity_risk * 0.07
+)
+seller_risk = clamp(seller_risk)
+
+component_signs = [price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, sr_bias]
+positive_components = sum(1 for x in component_signs if x >= 15)
+negative_components = sum(1 for x in component_signs if x <= -15)
+agreement = max(positive_components, negative_components) / len(component_signs)
+confidence = clamp(abs(final_direction) * 0.72 + agreement * 35 + (100 - seller_risk) * 0.18, 0, 98)
+
+# V9 improved decision model:
+# 1) Hard risk blocks first
+# 2) Conflict mode = WAIT
+# 3) Dhan option-chain can strengthen strike-specific decision, but price action must not be strongly opposite.
+hard_block = news["score"] >= 80 or seller_risk >= 82
+conflict_mode_pre, conflict_reasons_pre = v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, 0)
+
+if hard_block:
+    final_trade = "WAIT"
+elif conflict_mode_pre:
+    final_trade = "WAIT"
+    confidence = min(confidence, 55)
+elif option_analysis.get("success") and option_bias >= 55 and price_action_bias > -45 and pcr >= 0.80:
+    final_trade = "SELL PE"
+    confidence = max(confidence, 66)
+elif option_analysis.get("success") and option_bias <= -55 and price_action_bias < 45 and pcr <= 1.30:
+    final_trade = "SELL CE"
+    confidence = max(confidence, 66)
+elif final_direction >= 24 and confidence >= 58:
+    final_trade = "SELL PE"
+elif final_direction <= -24 and confidence >= 58:
+    final_trade = "SELL CE"
+else:
+    final_trade = "WAIT"
+
+# Strike selection from Dhan ranking when available; manual fallback otherwise.
+best_ce = option_analysis.get("best_ce") if option_analysis.get("success") else None
+best_pe = option_analysis.get("best_pe") if option_analysis.get("success") else None
+ce_strike = int(best_ce["strike"]) if best_ce else manual_ce_strike
+pe_strike = int(best_pe["strike"]) if best_pe else manual_pe_strike
+
+if final_trade == "SELL PE":
+    selected_strike = f"{pe_strike} PE"
+    hedge = f"{pe_strike - hedge_gap} PE"
+    selected_strike_score = best_pe.get("pe_sell_score", 0) if best_pe else 0
+elif final_trade == "SELL CE":
+    selected_strike = f"{ce_strike} CE"
+    hedge = f"{ce_strike + hedge_gap} CE"
+    selected_strike_score = best_ce.get("ce_sell_score", 0) if best_ce else 0
+else:
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+
+max_lots = int(capital / margin_per_lot) if margin_per_lot > 0 else 0
+if final_trade == "WAIT":
+    suggested_lots = 0
+else:
+    risk_multiplier = max(0.0, (100 - seller_risk) / 100)
+    confidence_multiplier = confidence / 100
+    raw_lots = int(max_lots * risk_multiplier * confidence_multiplier)
+    suggested_lots = max(1, min(max_lots, raw_lots)) if max_lots > 0 else 0
+
+sl_points = round(max(atr5 * (1.25 if seller_risk < 50 else 1.6), 20), 2)
+target_points = round(max(atr5 * 0.85, 15), 2)
+if final_trade == "WAIT":
+    sl_display = "No Trade"
+    target_display = "No Trade"
+else:
+    sl_display = f"{sl_points} pts"
+    target_display = f"{target_points} pts"
+
+
+# V7 advanced management layer
+market_mode, dte = detect_expiry_mode(selected_expiry, news["score"])
+is_expiry_mode = market_mode in ("EXPIRY MODE", "NEAR EXPIRY MODE")
+time_risk, time_zone_label = historical_time_zone_risk(is_expiry_mode)
+theta_score_v7, active_profit_pct = theta_decay_score(is_expiry_mode, active_entry_price, active_current_price)
+gamma_score_v7 = gamma_risk_score(is_expiry_mode, vix_change_pct, time_risk, option_bias, heavy_bias)
+shock_score_v7 = shock_probability_score(time_risk, vix_risk, option_bias, heavy_bias, news["score"])
+position_ai = active_position_manager(active_side, active_strike, active_entry_price, active_current_price, active_lots, theta_score_v7, gamma_score_v7, shock_score_v7, final_trade, confidence)
+discipline_text, discipline_score, discipline_reason = discipline_status(trades_taken_today, daily_loss_hit, confidence, seller_risk)
+trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
+
+# Final V9 conflict check now includes Gamma.
+conflict_mode, conflict_reasons = v9_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma_score_v7)
+if conflict_mode and final_trade != "WAIT":
+    final_trade = "WAIT"
+    confidence = min(confidence, 55)
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+    suggested_lots = 0
+    trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
+
+
+# AI Brain: rolling memory + decision freeze + stability.
+proposed_trade_v14 = final_trade
+try:
+    vix_range = v132_vix_range_engine(price, vix)
+except Exception:
+    vix_range = {"ok": False}
+
+candle15 = v14_candle_confirmation(
+    locals().get("candle15_open", price),
+    locals().get("candle15_high", price),
+    locals().get("candle15_low", price),
+    locals().get("candle15_close", price),
+    final_direction,
+)
+# Candle is confirmation only: low weight, no overreaction.
+if candle15.get("aligned") and proposed_trade_v14 != "WAIT":
+    confidence = clamp(confidence + min(abs(candle15.get("score", 0)), 6), 0, 98)
+elif not candle15.get("aligned") and proposed_trade_v14 != "WAIT":
+    confidence = min(confidence, 68)
+
+v14_snapshot = {
+    "snapshot_id": f"{fmt_time()}|{price:.2f}|{vix:.2f}|{proposed_trade_v14}|{round(option_bias,2)}|{round(heavy_bias,2)}",
+    "time": fmt_time(),
+    "price": float(price),
+    "vix": float(vix),
+    "pcr": float(pcr),
+    "option_bias": float(option_bias),
+    "heavy_bias": float(heavy_bias),
+    "price_action_bias": float(price_action_bias),
+    "proposed_trade": proposed_trade_v14,
+    "confidence": float(confidence),
+}
+v14_memory = v14_snapshot_engine(v14_snapshot, max_len=20)
+v14_freeze = v14_decision_freeze(proposed_trade_v14, confidence, v14_memory, required=3)
+v14_stability = v14_confidence_stability(v14_memory, proposed_trade_v14, confidence)
+v14_regime = v14_market_regime(price_action_bias, option_bias, heavy_bias, vix, shock_score_v7, gamma_score_v7, is_expiry_mode, time_risk)
+v14_seller_strength = v14_seller_strength(best_ce, best_pe, option_bias)
+
+# Freeze rule: ek refresh ke signal par trade nahi. Stable confirmation ke baad hi final trade allow.
+if proposed_trade_v14 != "WAIT" and not v14_freeze.get("confirmed"):
+    final_trade = "WAIT"
+    confidence = v14_freeze.get("confidence", min(confidence, 60))
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+    suggested_lots = 0
+elif proposed_trade_v14 != "WAIT" and v14_freeze.get("confirmed"):
+    final_trade = proposed_trade_v14
+
+# Re-select strike only if freeze allowed trade.
+if final_trade == "SELL PE":
+    selected_strike = f"{pe_strike} PE"
+    hedge = f"{pe_strike - hedge_gap} PE"
+    selected_strike_score = best_pe.get("pe_sell_score", 0) if best_pe else 0
+elif final_trade == "SELL CE":
+    selected_strike = f"{ce_strike} CE"
+    hedge = f"{ce_strike + hedge_gap} CE"
+    selected_strike_score = best_ce.get("ce_sell_score", 0) if best_ce else 0
+
+if final_trade == "WAIT":
+    sl_display = "No Trade"
+    target_display = "No Trade"
+
+trade_quality = trade_quality_score(confidence, seller_risk, shock_score_v7)
+v14_entry = v14_entry_window(market_mode, time_risk, confidence, v14_stability.get("score", 0), v14_freeze.get("confirmed", False), seller_risk)
+v14_reason_items = v14_reason_breakdown(price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, 0, vix_risk, seller_risk)
+
+
+# V9.1 stable defaults: prevent NameError if any earlier block skipped.
+try:
+    _ = conflict_mode
+except NameError:
+    conflict_mode, conflict_reasons = v91_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, locals().get("gamma_score_v7", 0))
+
+try:
+    _ = data_quality
+except NameError:
+    data_quality, data_quality_reasons = v91_data_quality_score(
+        dhan_ready=locals().get("dhan_ready", False),
+        option_ok=bool(locals().get("option_chain", {}).get("success", False)) if isinstance(locals().get("option_chain", {}), dict) else False,
+        nifty_source=locals().get("nifty_source", "Fallback"),
+        heavy_source=(locals().get("heavy_analysis", {}) or {}).get("source", "Fallback") if isinstance(locals().get("heavy_analysis", {}), dict) else "Fallback",
+        vix_source=locals().get("vix_source", "Fallback"),
+    )
+
+source_text = v13_source_text(locals().get("dhan_ready", False), locals().get("option_chain", {}), locals().get("nifty_source", "Fallback"), locals().get("dhan_bundle", {}), locals().get("expiry_result", {}))
+action_plan = v91_action_plan(
+    locals().get("final_trade", "WAIT"),
+    locals().get("selected_strike", "No Strike"),
+    locals().get("hedge", "No Hedge"),
+    locals().get("confidence", 0),
+    locals().get("seller_risk", 0),
+    locals().get("shock_score_v7", 0),
+    locals().get("gamma_score_v7", 0),
+    locals().get("conflict_reasons", []),
+    source_text,
+    data_quality,
+)
+
+
+
+# =========================================================
+# V10 OPTION SELLER AI BRAIN
+# =========================================================
+def v10_probability_engine(price_action_bias, option_bias, heavy_bias, pcr, vix, gamma_score, shock_score, news_score):
+    """
+    Converts multiple live signals into directional/range probabilities.
+    This is decision-support, not prediction guarantee.
+    """
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    news = v91_safe_num(news_score)
+
+    raw_bull = 50 + (pa * 0.20) + (ob * 0.30) + (hw * 0.20)
+    if 1.0 <= pcrv <= 1.35:
+        raw_bull += 6
+    elif pcrv < 0.85:
+        raw_bull -= 8
+    elif pcrv > 1.55:
+        raw_bull -= 4
+
+    bull = int(max(5, min(95, raw_bull)))
+    bear = int(max(5, min(95, 100 - bull)))
+
+    conflict_strength = abs(ob - pa)
+    range_prob = 45
+    if conflict_strength >= 80:
+        range_prob += 22
+    if vixv <= 14:
+        range_prob += 12
+    if gamma >= 70:
+        range_prob -= 15
+    if shock >= 60:
+        range_prob -= 10
+    range_prob = int(max(5, min(95, range_prob)))
+
+    breakout_prob = int(max(5, min(95, 100 - range_prob + (gamma * 0.20) + (news * 0.10))))
+    fake_breakout = "HIGH" if conflict_strength >= 110 and vixv <= 15 else "MEDIUM" if conflict_strength >= 70 else "LOW"
+
+    return {
+        "bullish": bull,
+        "bearish": bear,
+        "range": range_prob,
+        "breakout": breakout_prob,
+        "fake_breakout": fake_breakout,
+        "conflict_strength": int(conflict_strength),
+    }
+
+def v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr):
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    notes = []
+
+    if pa <= -45 and ob >= 55:
+        notes.append("Bearish chart + bullish option-chain = possible short-covering / PE writing support, but entry risky until price confirms.")
+    elif pa >= 45 and ob <= -55:
+        notes.append("Bullish chart + bearish option-chain = possible call writing pressure / resistance, wait for confirmation.")
+    elif abs(pa) < 25 and abs(ob) >= 55:
+        notes.append("Price action neutral hai, option-chain strong signal de rahi hai. Breakout confirmation ka wait karo.")
+    elif abs(ob) < 25 and abs(pa) >= 55:
+        notes.append("Chart strong hai, option-chain support weak hai. Seller ke liye low-confidence zone.")
+    else:
+        notes.append("Major conflict limited hai; signal alignment improve ho raha hai.")
+
+    if hw >= 35 and pa < 0:
+        notes.append("Heavyweights hidden support de rahe hain; downside follow-through weak ho sakta hai.")
+    if hw <= -35 and pa > 0:
+        notes.append("Heavyweights hidden pressure de rahe hain; upside follow-through weak ho sakta hai.")
+    if pcrv < 0.85:
+        notes.append("PCR low hai: call-side pressure ya bearish sentiment possible.")
+    elif pcrv > 1.45:
+        notes.append("PCR high hai: bullish sentiment strong but overcrowding risk.")
+    return notes
+
+def v10_candidate_verdict(side, strike, score, signal, delta=None, iv=None, spread=None, final_trade="WAIT", conflict_mode=False):
+    """
+    Converts best CE/PE candidate into safe actionable wording.
+    """
+    score = v91_safe_num(score)
+    delta = v91_safe_num(delta)
+    iv = v91_safe_num(iv)
+    spread = v91_safe_num(spread)
+    reasons = []
+    action_ok = (final_trade == f"SELL {side}") and not conflict_mode and score >= 70
+
+    if score >= 80:
+        reasons.append("Candidate score strong.")
+    elif score >= 60:
+        reasons.append("Candidate score medium.")
+    else:
+        reasons.append("Candidate score weak.")
+
+    if abs(delta) <= 0.35:
+        reasons.append("Delta seller-friendly zone mein hai.")
+    elif abs(delta) >= 0.55:
+        reasons.append("Delta high risk hai.")
+    if spread and spread <= 1.0:
+        reasons.append("Spread acceptable hai.")
+    elif spread and spread > 2.0:
+        reasons.append("Spread wide hai; execution risk.")
+    if iv:
+        reasons.append(f"IV approx {iv:.2f}.")
+
+    if action_ok:
+        verdict = f"SELL {strike} {side} allowed only with SL + hedge."
+    else:
+        verdict = f"{strike} {side} candidate hai, automatic trade nahi."
+
+    return {"ok": action_ok, "verdict": verdict, "reasons": reasons[:4], "signal": signal}
+
+def v10_sl_target(entry_premium, gamma_score, shock_score, confidence):
+    """
+    Premium based SL/target suggestion for manual active trade.
+    """
+    entry = v91_safe_num(entry_premium)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    conf = v91_safe_num(confidence)
+    if entry <= 0:
+        return {"sl": 0, "target": 0, "trail_after": 0}
+    sl_pct = 0.22
+    if gamma >= 65 or shock >= 60:
+        sl_pct = 0.16
+    elif conf >= 75:
+        sl_pct = 0.25
+    target_pct = 0.35 if conf >= 70 else 0.25
+    return {
+        "sl": round(entry * (1 + sl_pct), 2),
+        "target": round(entry * (1 - target_pct), 2),
+        "trail_after": round(entry * 0.75, 2),
+    }
+
+
+
+# V10 analytics calculated after all major signals are available.
+try:
+    _ = v10_probs
+except NameError:
+    v10_probs = v10_probability_engine(
+        price_action_bias,
+        option_bias,
+        heavy_bias,
+        pcr,
+        locals().get("vix", locals().get("india_vix", 0)),
+        locals().get("gamma_score_v7", 0),
+        locals().get("shock_score_v7", 0),
+        locals().get("news", {}).get("score", 0) if isinstance(locals().get("news", {}), dict) else 0,
+    )
+
+try:
+    _ = v10_conflict_notes
+except NameError:
+    v10_conflict_notes = v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr)
+
+
+
+# =========================================================
+# V11 SUPER SIGNAL + STRATEGY ENGINE
+# =========================================================
+def v11_super_signal_engine(
+    final_trade="WAIT",
+    confidence=0,
+    data_quality=0,
+    seller_risk=100,
+    shock_score=100,
+    gamma_score=100,
+    conflict_mode=True,
+    price_action_bias=0,
+    option_bias=0,
+    heavy_bias=0,
+    smart_money_bias=0,
+    news_score=100,
+    pcr=1.0,
+    vix=99,
+):
+    """
+    High-confidence signal engine.
+    Goal: fewer signals, higher quality. No guarantee, only evidence-based grading.
+    """
+    conf = v91_safe_num(confidence)
+    dq = v91_safe_num(data_quality)
+    sr = v91_safe_num(seller_risk)
+    shock = v91_safe_num(shock_score)
+    gamma = v91_safe_num(gamma_score)
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    sm = v91_safe_num(smart_money_bias)
+    news = v91_safe_num(news_score)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+
+    bullish_votes = 0
+    bearish_votes = 0
+    range_votes = 0
+    notes = []
+
+    if pa >= 35: bullish_votes += 1
+    if pa <= -35: bearish_votes += 1
+    if ob >= 45: bullish_votes += 1
+    if ob <= -45: bearish_votes += 1
+    if hw >= 25: bullish_votes += 1
+    if hw <= -25: bearish_votes += 1
+    if sm >= 20: bullish_votes += 1
+    if sm <= -20: bearish_votes += 1
+    if 0.95 <= pcrv <= 1.35: bullish_votes += 1
+    if pcrv < 0.85: bearish_votes += 1
+    if vixv <= 15 and shock <= 45: range_votes += 1
+    if gamma <= 55: range_votes += 1
+    if news <= 35: range_votes += 1
+
+    safe_core = dq >= 75 and sr <= 55 and shock <= 55 and gamma <= 65 and news <= 55 and not conflict_mode
+
+    if not safe_core:
+        notes.append("Super signal blocked: data/risk/conflict conditions not fully safe.")
+
+    level = "NO SUPER SIGNAL"
+    signal = "WAIT"
+    score = int(max(0, min(100, (conf * 0.35) + (dq * 0.20) + ((100 - sr) * 0.15) + ((100 - shock) * 0.15) + ((100 - gamma) * 0.10) + ((100 - news) * 0.05))))
+
+    if safe_core and conf >= 82:
+        if final_trade == "SELL CE" and bearish_votes >= 3:
+            signal = "SUPER SELL CE"
+            level = "SUPER"
+            notes.append("Bearish confirmations aligned for CE selling.")
+        elif final_trade == "SELL PE" and bullish_votes >= 3:
+            signal = "SUPER SELL PE"
+            level = "SUPER"
+            notes.append("Bullish confirmations aligned for PE selling.")
+        elif range_votes >= 3 and abs(pa) < 45 and abs(ob) < 70:
+            signal = "SUPER IRON CONDOR"
+            level = "SUPER"
+            notes.append("Range + low shock + theta-friendly environment.")
+    elif safe_core and conf >= 72:
+        level = "HIGH CONFIDENCE"
+        signal = final_trade if final_trade != "WAIT" else "WAIT"
+        notes.append("High-confidence but not super-grade setup.")
+    elif safe_core and conf >= 62:
+        level = "STRONG WATCH"
+        signal = final_trade
+        notes.append("Good setup, but wait for stronger confirmation.")
+    else:
+        notes.append("No high-confidence signal. WAIT/observe preferred.")
+
+    return {
+        "signal": signal,
+        "level": level,
+        "score": score,
+        "bullish_votes": bullish_votes,
+        "bearish_votes": bearish_votes,
+        "range_votes": range_votes,
+        "notes": notes,
+    }
+
+def v11_strategy_ranker(
+    price_action_bias=0,
+    option_bias=0,
+    heavy_bias=0,
+    smart_money_bias=0,
+    pcr=1.0,
+    vix=99,
+    shock_score=100,
+    gamma_score=100,
+    news_score=100,
+    conflict_mode=True,
+    data_quality=0,
+):
+    """
+    Strategy ranking: seller-first, buy-with-hedge only on strong trend/catalyst.
+    """
+    pa = v91_safe_num(price_action_bias)
+    ob = v91_safe_num(option_bias)
+    hw = v91_safe_num(heavy_bias)
+    sm = v91_safe_num(smart_money_bias)
+    pcrv = v91_safe_num(pcr, 1.0)
+    vixv = v91_safe_num(vix)
+    shock = v91_safe_num(shock_score)
+    gamma = v91_safe_num(gamma_score)
+    news = v91_safe_num(news_score)
+    dq = v91_safe_num(data_quality)
+
+    risk_penalty = max(0, shock - 45) * 0.25 + max(0, gamma - 60) * 0.20 + max(0, news - 55) * 0.25
+    data_bonus = max(0, dq - 60) * 0.20
+    conflict_penalty = 18 if conflict_mode else 0
+
+    sell_pe = 50 + pa*0.18 + ob*0.25 + hw*0.18 + sm*0.10 + data_bonus - risk_penalty - conflict_penalty
+    sell_ce = 50 - pa*0.18 - ob*0.25 - hw*0.18 - sm*0.10 + data_bonus - risk_penalty - conflict_penalty
+    range_base = 55 + (15 if vixv <= 15 else 0) + (12 if shock <= 45 else -10) + (10 if gamma <= 55 else -12) - abs(pa)*0.10 - abs(hw)*0.06 - conflict_penalty*0.5
+    iron_condor = range_base + data_bonus
+    buy_call_hedged = 35 + pa*0.22 + hw*0.20 + sm*0.10 + max(0, news-40)*0.08 - max(0, vixv-18)*0.6 - (8 if ob < 0 else 0)
+    buy_put_hedged = 35 - pa*0.22 - hw*0.20 - sm*0.10 + max(0, news-40)*0.08 - max(0, vixv-18)*0.6 + (8 if ob < 0 else 0)
+
+    # Buy strategy should be rare and catalyst/trend based.
+    if abs(pa) < 60 or abs(hw) < 25 or dq < 75:
+        buy_call_hedged -= 18
+        buy_put_hedged -= 18
+    if news < 35 and shock < 45:
+        buy_call_hedged -= 8
+        buy_put_hedged -= 8
+
+    strategies = [
+        {"strategy": "SELL PE", "confidence": int(max(0, min(95, sell_pe))), "type": "Seller"},
+        {"strategy": "SELL CE", "confidence": int(max(0, min(95, sell_ce))), "type": "Seller"},
+        {"strategy": "IRON CONDOR", "confidence": int(max(0, min(95, iron_condor))), "type": "Seller Range"},
+        {"strategy": "BUY CALL (Hedged)", "confidence": int(max(0, min(95, buy_call_hedged))), "type": "Defined Risk Buy"},
+        {"strategy": "BUY PUT (Hedged)", "confidence": int(max(0, min(95, buy_put_hedged))), "type": "Defined Risk Buy"},
+        {"strategy": "WAIT", "confidence": int(max(25, min(95, 100 - max(sell_pe, sell_ce, iron_condor, buy_call_hedged, buy_put_hedged)))), "type": "Safety"},
+    ]
+    strategies = sorted(strategies, key=lambda x: x["confidence"], reverse=True)
+    return strategies
+
+def v11_strategy_text(strategy, confidence):
+    if strategy == "WAIT":
+        return "No trade. Capital protection priority."
+    if "BUY" in strategy:
+        return "Buy strategy sirf hedged/defined-risk mode mein consider karo."
+    if strategy == "IRON CONDOR":
+        return "Range setup. Dono sides hedge ke saath, shock/gamma low hona chahiye."
+    return "Seller setup. Hedge + SL mandatory."
+
+
+
+# =========================================================
+# V16.4 AI AUDIT + SINGLE DECISION + BEST STRIKE ENGINE
+# =========================================================
+def v164_live_move_detector(price, nifty_change_pct, atr5=40):
+    """Detect fast Nifty movement between app refreshes and daily move shock."""
+    try:
+        price = float(price or 0)
+        atr5 = max(float(atr5 or 40), 1.0)
+        prev = st.session_state.get("v164_prev_nifty_price")
+        st.session_state["v164_prev_nifty_price"] = price
+        move_points = 0.0 if prev in (None, 0) else price - float(prev)
+        move_abs = abs(move_points)
+        daily_abs_pct = abs(float(nifty_change_pct or 0))
+        # Intraday shock if move from last app snapshot is meaningful versus ATR.
+        fast_shock = move_abs >= max(35.0, atr5 * 0.70)
+        daily_shock = daily_abs_pct >= 0.45
+        direction = "DOWN" if move_points < 0 or float(nifty_change_pct or 0) < -0.45 else "UP" if move_points > 0 or float(nifty_change_pct or 0) > 0.45 else "FLAT"
+        score = 0
+        score += min(move_abs / max(atr5, 1) * 45, 60)
+        score += min(daily_abs_pct * 75, 40)
+        score = int(clamp(score, 0, 100))
+        return {
+            "fast_shock": bool(fast_shock),
+            "daily_shock": bool(daily_shock),
+            "direction": direction,
+            "move_points": round(move_points, 2),
+            "daily_pct": round(float(nifty_change_pct or 0), 2),
+            "score": score,
+            "label": "FAST FALL" if direction == "DOWN" and (fast_shock or daily_shock) else "FAST RISE" if direction == "UP" and (fast_shock or daily_shock) else "NORMAL",
+        }
+    except Exception:
+        return {"fast_shock": False, "daily_shock": False, "direction": "FLAT", "move_points": 0.0, "daily_pct": 0.0, "score": 0, "label": "NA"}
+
+
+def v164_score_candidate(row, side, spot, preferred_min=30, preferred_max=150):
+    """Robust best strike scoring: live OTM, premium zone, OI, volume, delta, spread."""
+    try:
+        side = side.upper()
+        prefix = side.lower()
+        strike = int(row.get("strike", 0) or 0)
+        spot = float(spot or 0)
+        premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+        delta_abs = abs(float(row.get(f"{prefix}_delta", 0) or 0))
+        spread_pct = float(row.get(f"{prefix}_spread_pct", 0) or 0)
+        oi_chg_pct = float(row.get(f"{prefix}_oi_change_pct", 0) or 0)
+        vol_ratio = float(row.get(f"{prefix}_volume_ratio", 0) or 0)
+        base_sell_score = float(row.get(f"{prefix}_sell_score", 0) or 0)
+        # SELL CE should be above/at spot; SELL PE should be below/at spot.
+        otm_ok = (strike >= int(round(spot / 50) * 50)) if side == "CE" else (strike <= int(round(spot / 50) * 50))
+        if not otm_ok or premium <= 0:
+            return -9999
+        distance = abs(strike - spot)
+        score = base_sell_score
+        # Premium zone: seller-friendly but not too cheap or too dangerous.
+        if preferred_min <= premium <= preferred_max:
+            score += 28
+        elif 20 <= premium < preferred_min:
+            score += 8
+        elif preferred_max < premium <= 220:
+            score -= 10
+        else:
+            score -= 35
+        # Delta: avoid very high delta and very far useless options.
+        if 0.12 <= delta_abs <= 0.34:
+            score += 18
+        elif 0.08 <= delta_abs <= 0.42:
+            score += 8
+        else:
+            score -= 18
+        # Distance: enough distance but not too far.
+        if 80 <= distance <= 350:
+            score += 14
+        elif distance < 50:
+            score -= 22
+        elif distance > 500:
+            score -= 16
+        # OI/volume/spread.
+        if oi_chg_pct > 0:
+            score += min(oi_chg_pct * 0.25, 12)
+        if vol_ratio >= 1.0:
+            score += min(vol_ratio * 4, 12)
+        if 0 < spread_pct <= 1.0:
+            score += 10
+        elif spread_pct > 2.0:
+            score -= 20
+        return score
+    except Exception:
+        return -9999
+
+
+def v164_select_best_strikes(option_analysis, spot, premium_min=30, premium_max=150):
+    rows = option_analysis.get("rows", []) if isinstance(option_analysis, dict) else []
+    best = {"CE": None, "PE": None}
+    for side in ("CE", "PE"):
+        scored = []
+        for row in rows:
+            sc = v164_score_candidate(row, side, spot, premium_min, premium_max)
+            if sc > -1000:
+                rr = row.copy()
+                rr[f"{side.lower()}_v164_score"] = round(sc, 2)
+                scored.append((sc, rr))
+        scored.sort(key=lambda x: x[0], reverse=True)
+        if scored:
+            best[side] = scored[0][1]
+    return best
+
+
+def v164_unified_decision_engine(ranked, price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, seller_risk, shock_score, gamma_score, news_score, data_quality, conflict_mode, move_guard):
+    """One engine for final decision. Strategy Matrix and final card must not contradict."""
+    ranked = ranked or [{"strategy": "WAIT", "confidence": 25}]
+    top = dict(ranked[0])
+    top_strategy = str(top.get("strategy", "WAIT")).upper()
+    top_conf = int(top.get("confidence", 0) or 0)
+    reasons = []
+    blockers = []
+    # Hard blocks.
+    if data_quality < 70:
+        blockers.append(f"Data quality {data_quality}/100 hai; minimum 70 chahiye.")
+    if news_score >= 75:
+        blockers.append(f"News risk high {news_score}/100.")
+    if seller_risk >= 72:
+        blockers.append(f"Seller risk high {seller_risk:.0f}/100.")
+    if gamma_score >= 78:
+        blockers.append(f"Gamma risk high {gamma_score:.0f}/100.")
+    # Conflict is blocker only when real disagreement, but trend shock can override to directional seller/buyer view.
+    if conflict_mode and not (move_guard.get("score", 0) >= 55):
+        blockers.append("AI modules conflict mein hain.")
+    # Market move override: if Nifty falls sharply, don't allow bullish PE sell.
+    if move_guard.get("label") == "FAST FALL":
+        reasons.append(f"Fast fall detected: {move_guard.get('move_points',0)} pts from last refresh / daily {move_guard.get('daily_pct',0)}%")
+        if top_strategy == "SELL PE":
+            top_strategy, top_conf = "SELL CE", max(70, min(92, top_conf - 5))
+            reasons.append("SELL PE blocked due to fast fall; CE side preferred.")
+    elif move_guard.get("label") == "FAST RISE":
+        reasons.append(f"Fast rise detected: {move_guard.get('move_points',0)} pts from last refresh / daily {move_guard.get('daily_pct',0)}%")
+        if top_strategy == "SELL CE":
+            top_strategy, top_conf = "SELL PE", max(70, min(92, top_conf - 5))
+            reasons.append("SELL CE blocked due to fast rise; PE side preferred.")
+    # Contributor confidence.
+    directional_alignment = abs(float(price_action_bias or 0)) * 0.18 + abs(float(option_bias or 0)) * 0.22 + abs(float(heavy_bias or 0)) * 0.16 + abs(float(smart_money_bias or 0)) * 0.10 + abs(float(pcr_bias or 0)) * 0.08
+    risk_penalty = float(seller_risk or 0) * 0.20 + float(shock_score or 0) * 0.13 + float(gamma_score or 0) * 0.10 + float(news_score or 0) * 0.12
+    final_conf = clamp(top_conf * 0.55 + directional_alignment + (data_quality * 0.12) - risk_penalty * 0.20, 0, 98)
+    if top_strategy == "WAIT":
+        blockers.append("Top strategy WAIT hai.")
+    if top_conf < 65:
+        blockers.append(f"Top setup confidence {top_conf}% hai; minimum 65 chahiye.")
+    # If top setup is very strong, use it as final unless hard blockers remain.
+    if blockers:
+        final = "WAIT"
+        final_conf = min(final_conf, 64)
+    else:
+        final = top_strategy
+        final_conf = max(final_conf, min(top_conf, 95))
+    return {
+        "final_trade": final,
+        "confidence": int(round(clamp(final_conf, 0, 98))),
+        "top_strategy": top_strategy,
+        "top_confidence": top_conf,
+        "blockers": blockers,
+        "reasons": reasons,
+    }
+
+
+
+# V11 Super Signal + Strategy Ranking
+try:
+    _ = v11_super
+except NameError:
+    v11_super = v11_super_signal_engine(
+        final_trade=locals().get("final_trade", "WAIT"),
+        confidence=locals().get("confidence", 0),
+        data_quality=locals().get("data_quality", 0),
+        seller_risk=locals().get("seller_risk", 100),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        conflict_mode=locals().get("conflict_mode", True),
+        price_action_bias=locals().get("price_action_bias", 0),
+        option_bias=locals().get("option_bias", 0),
+        heavy_bias=locals().get("heavy_bias", 0),
+        smart_money_bias=locals().get("smart_money_bias", 0),
+        news_score=(locals().get("news", {}) or {}).get("score", 100) if isinstance(locals().get("news", {}), dict) else 100,
+        pcr=locals().get("pcr", 1.0),
+        vix=locals().get("vix", 99),
+    )
+
+try:
+    _ = v11_ranked_strategies
+except NameError:
+    v11_ranked_strategies = v11_strategy_ranker(
+        price_action_bias=locals().get("price_action_bias", 0),
+        option_bias=locals().get("option_bias", 0),
+        heavy_bias=locals().get("heavy_bias", 0),
+        smart_money_bias=locals().get("smart_money_bias", 0),
+        pcr=locals().get("pcr", 1.0),
+        vix=locals().get("vix", 99),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        news_score=(locals().get("news", {}) or {}).get("score", 100) if isinstance(locals().get("news", {}), dict) else 100,
+        conflict_mode=locals().get("conflict_mode", True),
+        data_quality=locals().get("data_quality", 0),
+    )
+
+
+# V16.4 AI Audit: current market move + best strike + single final decision.
+try:
+    v164_move_guard = v164_live_move_detector(price, nifty_change_pct, atr5)
+except Exception:
+    v164_move_guard = {"fast_shock": False, "daily_shock": False, "direction": "FLAT", "move_points": 0.0, "daily_pct": 0.0, "score": 0, "label": "NA"}
+
+try:
+    _v164_best = v164_select_best_strikes(option_analysis, price, 30, 150) if option_analysis.get("success") else {"CE": best_ce, "PE": best_pe}
+    if _v164_best.get("CE"):
+        best_ce = _v164_best["CE"]
+        ce_strike = int(best_ce.get("strike", ce_strike))
+    if _v164_best.get("PE"):
+        best_pe = _v164_best["PE"]
+        pe_strike = int(best_pe.get("strike", pe_strike))
+except Exception:
+    pass
+
+try:
+    v164_unified = v164_unified_decision_engine(
+        ranked=v11_ranked_strategies,
+        price_action_bias=price_action_bias,
+        option_bias=option_bias,
+        heavy_bias=heavy_bias,
+        smart_money_bias=smart_money_bias,
+        pcr_bias=pcr_bias,
+        seller_risk=seller_risk,
+        shock_score=shock_score_v7,
+        gamma_score=gamma_score_v7,
+        news_score=news.get("score", 0),
+        data_quality=data_quality,
+        conflict_mode=conflict_mode,
+        move_guard=v164_move_guard,
+    )
+    proposed_trade_v14 = v164_unified.get("final_trade", final_trade)
+    final_trade = proposed_trade_v14
+    confidence = float(v164_unified.get("confidence", confidence))
+    # Reorder strategy matrix so top row and final AI are aligned.
+    if final_trade != "WAIT":
+        _found = False
+        for _r in v11_ranked_strategies:
+            if str(_r.get("strategy", "")).upper() == final_trade:
+                _r["confidence"] = max(int(_r.get("confidence", 0) or 0), int(confidence))
+                _found = True
+        if not _found:
+            v11_ranked_strategies.insert(0, {"strategy": final_trade, "confidence": int(confidence), "type": "Seller"})
+        v11_ranked_strategies = sorted(v11_ranked_strategies, key=lambda x: int(x.get("confidence",0) or 0), reverse=True)
+except Exception as _v164_exc:
+    v164_unified = {"final_trade": final_trade, "confidence": confidence, "blockers": [str(_v164_exc)], "reasons": []}
+
+# Re-select strike after unified decision.
+if final_trade == "SELL PE":
+    selected_strike = f"{pe_strike} PE"
+    hedge = f"{pe_strike - hedge_gap} PE"
+    selected_strike_score = best_pe.get("pe_sell_score", best_pe.get("pe_v164_score", 0)) if best_pe else 0
+elif final_trade == "SELL CE":
+    selected_strike = f"{ce_strike} CE"
+    hedge = f"{ce_strike + hedge_gap} CE"
+    selected_strike_score = best_ce.get("ce_sell_score", best_ce.get("ce_v164_score", 0)) if best_ce else 0
+elif final_trade == "IRON CONDOR":
+    selected_strike = f"CE {ce_strike} + PE {pe_strike}"
+    hedge = f"CE {ce_strike + hedge_gap} + PE {pe_strike - hedge_gap}"
+    selected_strike_score = int(min((best_ce.get("ce_sell_score", 0) if best_ce else 0), (best_pe.get("pe_sell_score", 0) if best_pe else 0)))
+else:
+    selected_strike = "No Strike"
+    hedge = "No Hedge"
+    selected_strike_score = 0
+
+if final_trade == "WAIT":
+    suggested_lots = 0
+    sl_display = "No Trade"
+    target_display = "No Trade"
+else:
+    risk_multiplier = max(0.0, (100 - seller_risk) / 100)
+    confidence_multiplier = confidence / 100
+    raw_lots = int(max_lots * risk_multiplier * confidence_multiplier)
+    suggested_lots = max(1, min(max_lots, raw_lots)) if max_lots > 0 else 0
+
+
+
+
+# =========================================================
+# V12 AI TRADE TICKET ENGINE
+# =========================================================
+def v12_round_strike(x, step=50):
+    try:
+        return int(round(float(x) / step) * step)
+    except Exception:
+        return 0
+
+def v12_option_row_by_strike(option_analysis, strike):
+    try:
+        rows = option_analysis.get("rows", [])
+        s = int(strike)
+        for r in rows:
+            if int(r.get("strike", 0)) == s:
+                return r
+    except Exception:
+        pass
+    return None
+
+def v12_premium_from_row(row, side):
+    if not row:
+        return 0.0
+    try:
+        if side == "CE":
+            return float(row.get("ce_ltp", 0) or 0)
+        if side == "PE":
+            return float(row.get("pe_ltp", 0) or 0)
+    except Exception:
+        return 0.0
+    return 0.0
+
+def v12_select_hedge_strike(sell_strike, side, hedge_gap=100):
+    try:
+        sell_strike = int(sell_strike)
+        hedge_gap = int(hedge_gap)
+        if side == "CE":
+            return sell_strike + hedge_gap
+        if side == "PE":
+            return sell_strike - hedge_gap
+    except Exception:
+        pass
+    return 0
+
+def v12_sl_target_for_seller(premium, confidence=0, gamma_score=0, shock_score=0):
+    premium = v91_safe_num(premium)
+    conf = v91_safe_num(confidence)
+    gamma = v91_safe_num(gamma_score)
+    shock = v91_safe_num(shock_score)
+    if premium <= 0:
+        return {"sl": 0.0, "target1": 0.0, "target2": 0.0, "trail_after": 0.0}
+    # seller SL: premium rises against us
+    sl_pct = 0.28
+    if gamma >= 70 or shock >= 65:
+        sl_pct = 0.18
+    elif conf >= 80:
+        sl_pct = 0.32
+    target1_pct = 0.30
+    target2_pct = 0.50
+    return {
+        "sl": round(premium * (1 + sl_pct), 2),
+        "target1": round(max(0.05, premium * (1 - target1_pct)), 2),
+        "target2": round(max(0.05, premium * (1 - target2_pct)), 2),
+        "trail_after": round(max(0.05, premium * 0.75), 2),
+    }
+
+def v12_sl_target_for_buyer(premium, confidence=0):
+    premium = v91_safe_num(premium)
+    conf = v91_safe_num(confidence)
+    if premium <= 0:
+        return {"sl": 0.0, "target1": 0.0, "target2": 0.0}
+    sl_pct = 0.28 if conf >= 85 else 0.22
+    return {
+        "sl": round(max(0.05, premium * (1 - sl_pct)), 2),
+        "target1": round(premium * 1.35, 2),
+        "target2": round(premium * 1.70, 2),
+    }
+
+def v12_build_trade_ticket(
+    top_strategy,
+    final_trade,
+    best_ce,
+    best_pe,
+    option_analysis,
+    price,
+    confidence,
+    seller_risk,
+    shock_score,
+    gamma_score,
+    hedge_gap=100,
+    max_lots=1,
+    conflict_mode=True,
+    data_quality=0,
+):
+    """
+    Builds a human-readable trade ticket. Recommendation only, no auto-order.
+    """
+    strategy = (top_strategy or {}).get("strategy", final_trade or "WAIT")
+    # V13: final WAIT must lock the ticket to NO TRADE. Ranking is only reference.
+    if str(final_trade).upper() == "WAIT" or conflict_mode or data_quality < 70:
+        strategy = "WAIT"
+    strategy_conf = int((top_strategy or {}).get("confidence", confidence or 0))
+    confidence = max(v91_safe_num(confidence), strategy_conf)
+    data_quality = v91_safe_num(data_quality)
+    max_lots = int(max(0, max_lots or 0))
+    lots = 0 if strategy == "WAIT" else min(max_lots, 1 if confidence < 82 else 2 if confidence < 90 else 3)
+
+    reasons = []
+    warnings = []
+    legs = []
+    summary = "WAIT"
+
+    if data_quality < 70:
+        warnings.append("Data quality low/medium hai. Real trade avoid karo.")
+    if conflict_mode:
+        warnings.append("Conflict mode active hai. Fresh trade avoid.")
+    if seller_risk > 60:
+        warnings.append("Seller risk elevated hai.")
+    if shock_score > 60:
+        warnings.append("Shock risk elevated hai.")
+    if gamma_score > 70:
+        warnings.append("Gamma risk high hai.")
+
+    def add_seller_leg(side, strike, label):
+        row = v12_option_row_by_strike(option_analysis, strike)
+        prem = v12_premium_from_row(row, side)
+        plan = v12_sl_target_for_seller(prem, confidence, gamma_score, shock_score)
+        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap)
+        hedge_row = v12_option_row_by_strike(option_analysis, hedge_strike)
+        hedge_prem = v12_premium_from_row(hedge_row, side)
+        legs.append({"Action": "SELL", "Leg": label, "Side": side, "Strike": int(strike), "Premium": prem, "SL": plan["sl"], "Target 1": plan["target1"], "Target 2": plan["target2"], "Trail After": plan["trail_after"]})
+        if hedge_strike:
+            legs.append({"Action": "BUY", "Leg": f"{label} Hedge", "Side": side, "Strike": int(hedge_strike), "Premium": hedge_prem, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Trail After": 0.0})
+        return prem, hedge_prem
+
+    def add_buyer_leg(side, strike, label):
+        row = v12_option_row_by_strike(option_analysis, strike)
+        prem = v12_premium_from_row(row, side)
+        plan = v12_sl_target_for_buyer(prem, confidence)
+        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap)
+        hedge_row = v12_option_row_by_strike(option_analysis, hedge_strike)
+        hedge_prem = v12_premium_from_row(hedge_row, side)
+        legs.append({"Action": "BUY", "Leg": label, "Side": side, "Strike": int(strike), "Premium": prem, "SL": plan["sl"], "Target 1": plan["target1"], "Target 2": plan["target2"], "Trail After": 0.0})
+        if hedge_strike:
+            legs.append({"Action": "SELL", "Leg": f"{label} Cost Hedge", "Side": side, "Strike": int(hedge_strike), "Premium": hedge_prem, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Trail After": 0.0})
+        return prem, hedge_prem
+
+    if strategy == "WAIT" or warnings:
+        summary = "NO TRADE / WAIT"
+        reasons.append("Capital protection priority. Trade tabhi jab Action Plan + Checklist agree kare.")
+    elif strategy == "SELL CE":
+        strike = int(best_ce.get("strike", v12_round_strike(price) + 100)) if best_ce else v12_round_strike(price) + 100
+        add_seller_leg("CE", strike, "Main CE Sell")
+        summary = f"SELL {strike} CE with hedge"
+        reasons.append("CE selling selected by strategy engine.")
+    elif strategy == "SELL PE":
+        strike = int(best_pe.get("strike", v12_round_strike(price) - 100)) if best_pe else v12_round_strike(price) - 100
+        add_seller_leg("PE", strike, "Main PE Sell")
+        summary = f"SELL {strike} PE with hedge"
+        reasons.append("PE selling selected by strategy engine.")
+    elif strategy == "IRON CONDOR":
+        ce_strike = int(best_ce.get("strike", v12_round_strike(price) + 150)) if best_ce else v12_round_strike(price) + 150
+        pe_strike = int(best_pe.get("strike", v12_round_strike(price) - 150)) if best_pe else v12_round_strike(price) - 150
+        ce_credit, ce_hedge = add_seller_leg("CE", ce_strike, "Condor CE Sell")
+        pe_credit, pe_hedge = add_seller_leg("PE", pe_strike, "Condor PE Sell")
+        summary = f"IRON CONDOR: Sell {ce_strike} CE + {pe_strike} PE"
+        reasons.append("Range strategy selected. Both sides must be hedged.")
+    elif strategy == "BUY CALL (Hedged)":
+        atm = v12_round_strike(price)
+        add_buyer_leg("CE", atm, "Hedged Call Buy")
+        summary = f"BUY {atm} CE with cost hedge"
+        reasons.append("Strong bullish/trend strategy selected. Defined risk only.")
+    elif strategy == "BUY PUT (Hedged)":
+        atm = v12_round_strike(price)
+        add_buyer_leg("PE", atm, "Hedged Put Buy")
+        summary = f"BUY {atm} PE with cost hedge"
+        reasons.append("Strong bearish/trend strategy selected. Defined risk only.")
+    else:
+        summary = "WAIT"
+        reasons.append("Strategy not clear.")
+
+    # Approx totals
+    sell_credit = sum(float(x["Premium"]) for x in legs if x["Action"] == "SELL")
+    buy_debit = sum(float(x["Premium"]) for x in legs if x["Action"] == "BUY")
+    net_credit = round(sell_credit - buy_debit, 2)
+    estimated_points_risk = int(hedge_gap) - net_credit if net_credit > 0 else buy_debit - sell_credit
+    return {
+        "summary": summary,
+        "strategy": strategy,
+        "confidence": int(confidence),
+        "lots": lots,
+        "legs": legs,
+        "net_credit": round(net_credit, 2),
+        "estimated_points_risk": round(max(0, estimated_points_risk), 2),
+        "reasons": reasons,
+        "warnings": warnings,
+    }
+
+
+
+# V12 AI Trade Ticket
+try:
+    _ = v12_top_strategy
+except NameError:
+    v12_top_strategy = v11_ranked_strategies[0] if locals().get("v11_ranked_strategies") else {"strategy": locals().get("final_trade", "WAIT"), "confidence": locals().get("confidence", 0)}
+
+try:
+    _ = v12_trade_ticket
+except NameError:
+    v12_trade_ticket = v12_build_trade_ticket(
+        top_strategy=v12_top_strategy,
+        final_trade=locals().get("final_trade", "WAIT"),
+        best_ce=locals().get("best_ce", None),
+        best_pe=locals().get("best_pe", None),
+        option_analysis=locals().get("option_analysis", {}),
+        price=locals().get("price", 0),
+        confidence=locals().get("confidence", 0),
+        seller_risk=locals().get("seller_risk", 100),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        hedge_gap=locals().get("hedge_gap", 100),
+        max_lots=locals().get("max_lots", 1),
+        conflict_mode=locals().get("conflict_mode", True),
+        data_quality=locals().get("data_quality", 0),
+    )
+
+
+# =========================================================
+# UI
+# =========================================================
+market_text, day_name = market_status()
+vix_range = v132_vix_range_engine(price, vix)
+source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
+
+top_refresh_col, top_auto_col, top_time_col = st.columns([1, 1.4, 2.2])
+if top_refresh_col.button("🔄 Refresh Live Data", width="stretch"):
+    st.cache_data.clear()
+    st.session_state["v163_last_manual_refresh"] = fmt_time()
+    st.rerun()
+
+# V16.3 Refresh Fix:
+# - Auto refresh is OFF unless the 30-min toggle is ON.
+# - Selected interval (20/30/60 sec) is respected.
+# - Scroll position is saved/restored to reduce top-jump during browser reload.
+with top_auto_col:
+    _interval_options = [20, 30, 60]
+    _saved_interval = int(st.session_state.get("v161_refresh_interval", 20) or 20)
+    if _saved_interval not in _interval_options:
+        _saved_interval = 20
+    _selected_interval = st.selectbox("Auto interval", _interval_options, index=_interval_options.index(_saved_interval), format_func=lambda x: f"{x} sec", key="v163_interval_widget")
+    _wanted_auto = st.toggle("Auto ON for 30 min", value=bool(st.session_state.get("v161_auto_refresh", False)), key="v163_auto_widget")
+    if _wanted_auto != bool(st.session_state.get("v161_auto_refresh", False)) or int(_selected_interval) != int(st.session_state.get("v161_refresh_interval", 20)):
+        v161_set_auto_refresh(_wanted_auto, _selected_interval)
+
+_auto_refresh_on = bool(st.session_state.get("v161_auto_refresh", False))
+_auto_interval = int(st.session_state.get("v161_refresh_interval", 20) or 20)
+_auto_remaining = v161_auto_remaining_seconds()
+if _auto_refresh_on and _auto_remaining <= 0:
+    v161_set_auto_refresh(False, _auto_interval)
+    _auto_refresh_on = False
+
+if _auto_refresh_on and market_text == "Market Open":
+    # V17.1: browser reload is still needed for Streamlit data refresh, but
+    # scroll position is saved continuously and restored repeatedly after render
+    # to prevent the app jumping to the top on every auto refresh.
+    st.components.v1.html(f"""
+    <script>
+    (function() {{
+      try {{
+        const key = 'nifty_seller_scroll_y_v171';
+        const parentWin = window.parent;
+        function getY() {{
+          return parentWin.pageYOffset || parentWin.scrollY || parentWin.document.documentElement.scrollTop || parentWin.document.body.scrollTop || 0;
+        }}
+        function saveY() {{
+          try {{ sessionStorage.setItem(key, String(getY())); }} catch(e) {{}}
+        }}
+        function restoreY() {{
+          try {{
+            const saved = parseInt(sessionStorage.getItem(key) || '0');
+            if (!isNaN(saved) && saved > 0) parentWin.scrollTo(0, saved);
+          }} catch(e) {{}}
+        }}
+        // Restore several times because Streamlit renders progressively.
+        [50, 150, 300, 600, 1000, 1600, 2400].forEach(t => setTimeout(restoreY, t));
+        // Keep latest manual scroll saved while user reads lower sections.
+        if (!parentWin.__niftySellerScrollSaver) {{
+          parentWin.__niftySellerScrollSaver = true;
+          parentWin.addEventListener('scroll', saveY, {{passive: true}});
+          setInterval(saveY, 750);
+        }}
+        setTimeout(() => {{
+          saveY();
+          parentWin.location.reload();
+        }}, {int(_auto_interval) * 1000});
+      }} catch(e) {{}}
+    }})();
+    </script>
+    """, height=0)
+    top_time_col.success(f"Auto ON: every {_auto_interval}s | Remaining ~{max(_auto_remaining//60,0)} min | Last refresh: {fmt_time()}")
+elif _auto_refresh_on and market_text != "Market Open":
+    top_time_col.warning(f"Auto saved ON, but market closed. No auto reload. Last refresh: {fmt_time()}")
+else:
+    top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
+
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V17 Smart Lite</div>", unsafe_allow_html=True)
+st.markdown(
+    "<div class='sub-title'>Smart Seller Terminal: Clean UI + Single AI Brain + Portfolio Intelligence</div>",
+    unsafe_allow_html=True,
+)
+
+r1, r2, r3, r4, r5 = st.columns(5)
+_price_arrow, _price_cls, _price_delta = v13_trend("nifty_price", price, 2)
+_vix_arrow, _vix_cls, _vix_delta = v13_trend("vix", vix, 2)
+_hw_arrow, _hw_cls, _hw_delta = v13_trend("heavy_bias", heavy_bias, 2)
+r1.markdown(f"<div class='ribbon'>{market_text}<br><span class='{_price_cls}'>Nifty {_price_arrow} {_price_delta}</span></div>", unsafe_allow_html=True)
+r2.markdown(f"<div class='ribbon'>Data: {source_text}</div>", unsafe_allow_html=True)
+r3.markdown(f"<div class='ribbon'>News {news['label']} {news['score']}/100<br><span class='{_vix_cls}'>VIX {_vix_arrow} {_vix_delta}</span></div>", unsafe_allow_html=True)
+r4.markdown(f"<div class='ribbon'>HW: {bias_label(heavy_bias)}<br><span class='{_hw_cls}'>{_hw_arrow} {_hw_delta}</span></div>", unsafe_allow_html=True)
+r5.markdown(f"<div class='ribbon'>PCR: {pcr:.2f}</div>", unsafe_allow_html=True)
+r6, r7, r8 = st.columns(3)
+r6.markdown(f"<div class='ribbon'>Mode: {market_mode}</div>", unsafe_allow_html=True)
+r7.markdown(f"<div class='ribbon'>Shock: {shock_score_v7}/100</div>", unsafe_allow_html=True)
+r8.markdown(f"<div class='ribbon'>Discipline: {discipline_score}/100</div>", unsafe_allow_html=True)
+
+# V17 Health Monitor: compact trading status. Details go to Developer Mode.
+_oc_age_note = "Live" if option_chain.get("success") else "Not Live"
+_pa_status = "Live" if price_action_result.get("success") else "Manual"
+_pos_status = "Saved" if ACTIVE_POSITION_STORE.exists() else "Not saved"
+_mg = locals().get("v164_move_guard", {}) or {}
+_mg_label = str(_mg.get("label", "NORMAL") or "NORMAL")
+_mg_move = float(_mg.get("move_points", 0) or 0)
+_mg_daily = float(_mg.get("daily_pct", 0) or 0)
+if _mg_label == "FAST FALL":
+    _mcls, _memoji, _marrow = "v17-red", "🔴", "↘↘↓"
+elif _mg_label == "FAST RISE":
+    _mcls, _memoji, _marrow = "v17-green", "🟢", "↗↗↑"
+elif _mg_label not in ("NA", "NORMAL"):
+    _mcls, _memoji, _marrow = "v17-yellow", "🟡", "↕"
+else:
+    _mcls, _memoji, _marrow = "v17-grey", "⚪", "→"
+st.markdown(
+    f"""
+<div class='v17-strip {_mcls}'>
+{_memoji} <b>MARKET:</b> {_mg_label} &nbsp; | &nbsp; <b>Direction:</b> {_marrow} &nbsp; | &nbsp;
+<b>Last:</b> {_mg_move:+.1f} pts &nbsp; | &nbsp; <b>Today:</b> {_mg_daily:+.2f}%
+</div>
+""",
+    unsafe_allow_html=True,
+)
+with st.expander("🩺 Live Health Monitor", expanded=False):
+    h1, h2, h3, h4, h5 = st.columns(5)
+    h1.metric("Dhan API", "🟢 Ready" if dhan_ready else "🔴 Missing")
+    h2.metric("Option Chain", "🟢 " + _oc_age_note if option_chain.get("success") else "🔴 " + _oc_age_note)
+    h3.metric("Price Action", "🟢 " + _pa_status if price_action_result.get("success") else "🟡 " + _pa_status)
+    h4.metric("Position Save", _pos_status)
+    h5.metric("Last Refresh", fmt_time())
+    if developer_mode:
+        st.caption(f"Market Move Guard: {_mg_label} | Refresh move: {_mg_move} pts | Daily: {_mg_daily}% | Score: {_mg.get('score',0)}/100")
+        if option_chain.get("success"):
+            st.caption(f"OC fetched: {option_chain.get('fetched_at', 'NA')} | Expiry: {option_chain.get('expiry', selected_expiry)} | ATM: {option_chain.get('atm_strike', 'NA')}")
+        if price_action_result.get("success"):
+            st.caption(f"Price Action fetched: {price_action_result.get('fetched_at', 'NA')} | Source: {price_action_source}")
+        else:
+            st.caption(f"Price Action auto not live: {price_action_result.get('message', 'Manual fallback')}")
+
+if "INVALID/EXPIRED" in source_text:
+    st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
+elif "Fallback" in source_text:
+    st.info("Observation Mode: live option-chain complete nahi hai. Real trade se pehle Dhan data verify karo.")
+
+# V16.2 Super: Single decision + entry gate. This removes confusion between Ranking and Final AI.
+try:
+    _top_strategy_v162 = (v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0})
+except Exception:
+    _top_strategy_v162 = {"strategy": "WAIT", "confidence": 0}
+try:
+    _strike_num_v162 = int(str(selected_strike).split()[0]) if str(selected_strike).split() and str(selected_strike).split()[0].isdigit() else 0
+except Exception:
+    _strike_num_v162 = 0
+_signal_gate_v162 = v162_signal_gate(final_trade, _top_strategy_v162.get("strategy", "WAIT"), confidence, _strike_num_v162)
+
+st.markdown("### 🎯 Super Final Decision — Entry Allowed Only If Green")
+_status_class = "green" if _signal_gate_v162["allowed"] else ("red" if final_trade != "WAIT" and confidence >= 90 else "")
+_status_text = "ENTRY ALLOWED ✅" if _signal_gate_v162["allowed"] else "ENTRY BLOCKED / WAIT ⚠️"
 st.markdown(f"""
-<div class='advisor-card {card_class}'>
-<h3>V18 Final AI Decision</h3>
-<h1>{decision['action']}</h1>
-<p><b>Confidence:</b> {decision['confidence']}% &nbsp; | &nbsp; <b>Directional Score:</b> {decision['directional_score']} &nbsp; | &nbsp; <b>Risk:</b> {decision['risk']}/100</p>
-<p><b>Stability:</b> {'Material change detected' if decision['material_change'] else 'Locked because no material change'}</p>
+<div class='v17-final {_status_class}'>
+<h2>{_status_text}</h2>
+<b>Final AI:</b> {final_trade} &nbsp; | &nbsp; <b>Best Setup:</b> {_top_strategy_v162.get('strategy','WAIT')} ({_top_strategy_v162.get('confidence',0)}%) &nbsp; | &nbsp;
+<b>Final Confidence:</b> {confidence:.0f}% &nbsp; | &nbsp; <b>Stable:</b> {_signal_gate_v162['count']}/{_signal_gate_v162.get('required',2)}<br>
+<b>Strike:</b> {selected_strike} &nbsp; | &nbsp; <b>Hedge:</b> {hedge} &nbsp; | &nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%<br>
+<b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)
 </div>
 """, unsafe_allow_html=True)
-
-left, right = st.columns([1.15, 0.85])
-with left:
-    st.subheader("🎯 Trade Ticket")
-    if decision["action"] == "SELL CE" and chosen:
-        st.success(f"SELL {chosen['strike']} CE | Hedge BUY {chosen['hedge']} CE")
-        st.write(f"Entry ₹{chosen['plan']['entry']:.2f} | SL ₹{chosen['plan']['sl']:.2f} | Target ₹{chosen['plan']['target1']:.2f} / ₹{chosen['plan']['target2']:.2f}")
-    elif decision["action"] == "SELL PE" and chosen:
-        st.success(f"SELL {chosen['strike']} PE | Hedge BUY {chosen['hedge']} PE")
-        st.write(f"Entry ₹{chosen['plan']['entry']:.2f} | SL ₹{chosen['plan']['sl']:.2f} | Target ₹{chosen['plan']['target1']:.2f} / ₹{chosen['plan']['target2']:.2f}")
-    elif decision["action"] == "IRON CONDOR":
-        ce, pe = ce_candidate, pe_candidate
-        st.info(f"CE Side: SELL {ce['strike']} CE / BUY {ce['hedge']} CE | PE Side: SELL {pe['strike']} PE / BUY {pe['hedge']} PE")
-        st.write(f"CE Entry ₹{ce['plan']['entry']:.2f}, SL ₹{ce['plan']['sl']:.2f}, Target ₹{ce['plan']['target1']:.2f}")
-        st.write(f"PE Entry ₹{pe['plan']['entry']:.2f}, SL ₹{pe['plan']['sl']:.2f}, Target ₹{pe['plan']['target1']:.2f}")
-    else:
-        st.warning("No fresh trade. WAIT is active.")
-
-    st.subheader("🧾 Why AI Decided This")
-    for reason in decision["reasons"]:
-        st.write(f"• {reason}")
-    st.caption("Change check: " + "; ".join(decision["change_reasons"]))
-
-with right:
-    st.subheader("📌 Snapshot Summary")
-    st.write(f"**Market:** {status} ({day_name})")
-    st.write(f"**Expiry Mode:** {expiry_mode} | DTE: {dte}")
-    st.write(f"**Time Zone Risk:** {time_zone} ({time_risk}/100)")
-    st.write(f"**News Risk:** {news.get('label')} ({news.get('score')}/100)")
-    st.write(f"**Max Lots by Capital:** {max_lots}")
-    st.write(f"**Snapshot:** {snapshot['created_at']}")
-
-st.subheader("🧠 One-Brain Input Scores")
-score_df = pd.DataFrame([
-    {"Factor": "Price Action", "Score": round(price_action_bias, 1), "Note": ", ".join(price_action_reasons)},
-    {"Factor": "Option Chain", "Score": round(option_analysis.get("bias", 0), 1), "Note": f"CE score {best_ce_score}, PE score {best_pe_score}"},
-    {"Factor": "Heavyweights", "Score": round(heavy_bias, 1), "Note": hw_analysis.get("divergence", "")},
-    {"Factor": "Smart Money", "Score": round(smart_money_bias, 1), "Note": stats.get("label", "")},
-    {"Factor": "PCR", "Score": round(pcr_bias, 1), "Note": pcr_note},
-])
-st.dataframe(score_df, width="stretch", hide_index=True)
-
-st.subheader("📊 Smart Strategy Matrix")
-matrix = []
-for label, cand, conf_adj in [("SELL CE", ce_candidate, -snapshot["directional_score"]), ("SELL PE", pe_candidate, snapshot["directional_score"] )]:
-    allowed = decision["action"] == label
-    matrix.append({
-        "Strategy": label,
-        "Sell Strike": cand["strike"],
-        "Hedge": cand["hedge"],
-        "Entry": cand["plan"]["entry"],
-        "SL": cand["plan"]["sl"],
-        "Target": cand["plan"]["target1"],
-        "Candidate Score": best_ce_score if label == "SELL CE" else best_pe_score,
-        "Status": "✅ Final" if allowed else "⚠️ Wait",
-    })
-matrix.append({
-    "Strategy": "IRON CONDOR", "Sell Strike": f"CE {ce_candidate['strike']} + PE {pe_candidate['strike']}",
-    "Hedge": f"CE {ce_candidate['hedge']} + PE {pe_candidate['hedge']}",
-    "Entry": round(ce_candidate['plan']['entry'] + pe_candidate['plan']['entry'], 2),
-    "SL": f"CE {ce_candidate['plan']['sl']} / PE {pe_candidate['plan']['sl']}",
-    "Target": f"CE {ce_candidate['plan']['target1']} / PE {pe_candidate['plan']['target1']}",
-    "Candidate Score": min(best_ce_score, best_pe_score),
-    "Status": "✅ Final" if decision["action"] == "IRON CONDOR" else "⚠️ Wait",
-})
-st.dataframe(pd.DataFrame(matrix), width="stretch", hide_index=True)
-
-if option_analysis.get("success"):
-    with st.expander("📈 Option Chain Near ATM", expanded=False):
-        rows = option_analysis.get("rows", [])
-        oc_df = pd.DataFrame(rows)
-        show_cols = [c for c in ["strike", "ce_ltp", "ce_oi", "ce_oi_change", "ce_signal", "ce_sell_score", "pe_ltp", "pe_oi", "pe_oi_change", "pe_signal", "pe_sell_score"] if c in oc_df.columns]
-        st.dataframe(oc_df[show_cols], width="stretch", hide_index=True)
+if not _signal_gate_v162["allowed"]:
+    st.write("**Why blocked:**")
+    for _r in _signal_gate_v162["reasons"]:
+        st.write("•", _r)
+    for _r in (locals().get("v164_unified", {}) or {}).get("blockers", []):
+        st.write("•", _r)
 else:
-    st.info("Live option-chain unavailable. Add/refresh Dhan token for full strike engine.")
-
+    st.success("Signal green hai. Broker price, spread, margin aur SL confirm karke hi order lagao.")
 if developer_mode:
-    st.subheader("🛠️ Developer Diagnostics")
-    st.json({"snapshot": snapshot, "decision": decision, "data_reasons": data_reasons, "option_message": option_chain.get("message"), "dhan_message": dhan_bundle.get("message")})
-    if hw_analysis.get("rows"):
-        st.dataframe(pd.DataFrame(hw_analysis["rows"]), width="stretch", hide_index=True)
+    for _r in (locals().get("v164_unified", {}) or {}).get("reasons", []):
+        st.info(_r)
 
-st.markdown("<div class='small-note'>V18 Clean Base: old duplicate AI decision layers removed. Educational decision-support only, not financial advice. Use hedge, strict SL and position sizing.</div>", unsafe_allow_html=True)
+# V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
+st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
 
-# Lightweight auto refresh at end.
-if st.session_state.get("auto_refresh", False):
-    time.sleep(int(st.session_state.get("refresh_interval", 20)))
-    st.rerun()
+def _v17_find_row(strike_value):
+    try:
+        strike_value = int(float(strike_value or 0))
+        for rr in (option_analysis.get("rows", []) if option_analysis.get("success") else []):
+            if int(rr.get("strike", 0) or 0) == strike_value:
+                return rr
+    except Exception:
+        pass
+    return None
+
+def _v163_side_plan(side, row, label=""):
+    if not row:
+        return {"Sell Strike": "-", "Entry": 0.0, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Hedge": "-"}
+    prefix = side.lower()
+    sell_strike = int(row.get("strike", 0) or 0)
+    premium = float(row.get(f"{prefix}_ltp", 0) or 0)
+    plan = v12_sl_target_for_seller(premium, confidence, gamma_score_v7, shock_score_v7)
+    hedge_strike = v12_select_hedge_strike(sell_strike, side, hedge_gap)
+    return {
+        "Sell Strike": f"{sell_strike} {side}" if sell_strike else "-",
+        "Entry": round(premium, 2),
+        "SL": round(float(plan.get("sl", 0.0) or 0), 2),
+        "Target 1": round(float(plan.get("target1", 0.0) or 0), 2),
+        "Target 2": round(float(plan.get("target2", 0.0) or 0), 2),
+        "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
+    }
+
+def _v17_buy_plan(side):
+    # Buyer plan is for rare strong trend only; use ATM/near-ATM option from live chain.
+    try:
+        atm = int(option_chain.get("atm_strike", round(float(price or 0)/50)*50) or 0)
+    except Exception:
+        atm = 0
+    hedge_gap_local = int(locals().get("hedge_gap", 100) or 100)
+    buy_strike = atm
+    hedge_strike = atm + hedge_gap_local if side == "CE" else atm - hedge_gap_local
+    row = _v17_find_row(buy_strike)
+    prefix = side.lower()
+    entry = float((row or {}).get(f"{prefix}_ltp", 0) or 0)
+    sl = round(entry * 0.72, 2) if entry else "Use buyer SL"
+    target = round(entry * 1.45, 2) if entry else "Use buyer target"
+    return {
+        "Buy Strike": f"{buy_strike} {side}" if buy_strike else "-",
+        "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
+        "Entry": round(entry, 2) if entry else "Defined risk",
+        "SL": sl,
+        "Target": target,
+    }
+
+def _v163_conf(strategy_name):
+    try:
+        for r in v11_ranked_strategies:
+            if str(r.get("strategy", "")).upper() == strategy_name.upper():
+                return int(r.get("confidence", 0) or 0)
+    except Exception:
+        pass
+    return 0
+
+_ce_plan = _v163_side_plan("CE", best_ce)
+_pe_plan = _v163_side_plan("PE", best_pe)
+_buy_call = _v17_buy_plan("CE")
+_buy_put = _v17_buy_plan("PE")
+_ic_credit = round(float(_ce_plan.get("Entry", 0) or 0) + float(_pe_plan.get("Entry", 0) or 0), 2)
+_strategy_rows_v163 = [
+    {"Strategy":"SELL CE","Confidence":_v163_conf("SELL CE"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_ce_plan["Entry"],"SL":_ce_plan["SL"],"Target":_ce_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait"},
+    {"Strategy":"SELL PE","Confidence":_v163_conf("SELL PE"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_pe_plan["Entry"],"SL":_pe_plan["SL"],"Target":_pe_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait"},
+    {"Strategy":"IRON CONDOR","Confidence":_v163_conf("IRON CONDOR"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_ic_credit,"SL":f"CE {_ce_plan.get('SL',0)} / PE {_pe_plan.get('SL',0)}","Target":f"CE {_ce_plan.get('Target 1',0)} / PE {_pe_plan.get('Target 1',0)}","Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "IRON CONDOR" else "⚠️ Wait"},
+    {"Strategy":"BUY PUT (Hedged)","Confidence":_v163_conf("BUY PUT (Hedged)"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_buy_put["Buy Strike"],"Buy PE Hedge":_buy_put["Hedge"],"Entry/Credit":_buy_put["Entry"],"SL":_buy_put["SL"],"Target":_buy_put["Target"],"Entry Status":"Only strong trend"},
+    {"Strategy":"BUY CALL (Hedged)","Confidence":_v163_conf("BUY CALL (Hedged)"),"Sell CE":_buy_call["Buy Strike"],"Buy CE Hedge":_buy_call["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_buy_call["Entry"],"SL":_buy_call["SL"],"Target":_buy_call["Target"],"Entry Status":"Only strong trend"},
+    {"Strategy":"WAIT","Confidence":_v163_conf("WAIT"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":0,"SL":"No trade","Target":"No trade","Entry Status":"Capital safe"},
+]
+_strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
+st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
+_best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
+st.markdown(f"**Best Setup:** {_best_row_v163.get('Strategy','WAIT')} ({_best_row_v163.get('Confidence',0)}%)  |  **Unified Final AI:** {final_trade} ({confidence:.0f}%)")
+if final_trade == "WAIT":
+    st.warning("Unified AI abhi WAIT/block kar raha hai. Reason upar Super Final Decision mein diya hai.")
+else:
+    st.success("Final AI active hai. Broker price, spread, margin aur hedge confirm karo.")
+
+# V17 Compact AI Brain - details only in Developer Mode.
+st.markdown("### 🧠 AI Brain")
+ai1, ai2, ai3, ai4, ai5 = st.columns(5)
+ai1.metric("Decision", final_trade)
+ai2.metric("Confidence", f"{confidence:.0f}%")
+ai3.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
+ai4.metric("Market", v14_regime["label"])
+ai5.metric("Entry", "OPEN" if _signal_gate_v162.get("allowed") else "WAIT")
+_reason_line = "OI + Price + Heavyweights align" if final_trade != "WAIT" else ("Signal unstable / confirmation pending" if not _signal_gate_v162.get("allowed") else "Capital safe")
+st.caption("Reason: " + _reason_line)
+with st.expander("🔎 AI Brain Details — Developer Reasoning", expanded=False):
+    st.write("**Memory:**", v14_stability["note"])
+    st.write(f"**Freeze:** {v14_freeze['status']} | {v14_freeze['reason']}")
+    st.write(f"**15m Candle:** {candle15['pattern']} | Score {candle15['score']} | {candle15['note']}")
+    s1, s2, s3 = st.columns(3)
+    s1.metric("CE Seller Strength", f"{v14_seller_strength['ce']}/100")
+    s2.metric("PE Seller Strength", f"{v14_seller_strength['pe']}/100")
+    s3.metric("Winner", v14_seller_strength["winner"])
+    st.write("**AI Reason Breakdown:**")
+    for name, pts in v14_reason_items:
+        sign = "+" if pts >= 0 else ""
+        st.write(f"• {name}: {sign}{pts}")
+
+# VIX range is useful, but not required in default trading flow.
+with st.expander("📊 India VIX Range Engine — Expected Move", expanded=False):
+    if vix_range.get("ok"):
+        vr1, vr2, vr3, vr4 = st.columns(4)
+        vr1.metric("VIX Expected Move", f"±{vix_range['move_points']:.0f} pts", f"{vix_range['move_pct']:.2f}%")
+        vr2.metric("Upper Range", f"{vix_range['upper']:.0f}")
+        vr3.metric("Lower Range", f"{vix_range['lower']:.0f}")
+        vr4.metric("Range Risk", vix_range['risk'])
+        st.caption("India VIX shortcut: VIX ÷ 16 ≈ expected 1-day % move. Ye guarantee nahi, sirf option-seller range estimate hai.")
+    else:
+        st.info("VIX/price data missing.")
+
+# Fake move calculation remains in AI engine, but duplicate UI is hidden.
+fake_move = v133_fake_move_engine(
+    price_action_bias=price_action_bias,
+    option_bias=option_bias,
+    heavy_bias=heavy_bias,
+    pcr=pcr,
+    vix=vix,
+    gamma_score=gamma_score_v7,
+    shock_score=shock_score_v7,
+    news_score=news["score"],
+    conflict_mode=conflict_mode,
+    final_trade=final_trade,
+    vix_range=vix_range,
+)
+if developer_mode:
+    with st.expander("🚨 Fake Move + Safe Expiry Details", expanded=False):
+        st.write(f"Fake Move: {fake_move['label']} ({fake_move['score']}/100)")
+        for reason in fake_move.get("reasons", []):
+            st.write("•", reason)
+        _minutes_left_v15 = v15_minutes_to_expiry_close(selected_expiry)
+        _best_ce_safe = v15_safe_expiry_for_leg("CE", best_ce, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_ce else None
+        _best_pe_safe = v15_safe_expiry_for_leg("PE", best_pe, price, vix, _minutes_left_v15, gamma_score_v7, shock_score_v7, fake_move.get("score", 0), v14_regime.get("label", "")) if best_pe else None
+        st.write("CE Safe:", _best_ce_safe)
+        st.write("PE Safe:", _best_pe_safe)
+
+# V13: put the most actionable parts near the top for mobile trading.
+# V16.3: Strategy setup moved near top as Smart Strategy Matrix.
+
+with st.expander("⚡ Live Candidate Cards — Price + SL + Target", expanded=True):
+    if option_analysis.get("success"):
+        ctop1, ctop2 = st.columns(2)
+        with ctop1:
+            v13_candidate_card("🔴 Best CE Candidate", "CE", best_ce, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
+        with ctop2:
+            v13_candidate_card("🟢 Best PE Candidate", "PE", best_pe, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
+        st.caption("Candidate reference hai. Entry sirf Super Final Decision green hone par.")
+    else:
+        st.info("Live candidate cards ke liye Dhan option-chain active hona zaroori hai.")
+
+
+with st.expander("💼 Active Positions + Add Position", expanded=False):
+    _pf = v162_portfolio_load()
+    _active_pf = _pf[_pf["Status"].astype(str).str.upper() == "ACTIVE"] if not _pf.empty else pd.DataFrame(columns=PORTFOLIO_COLUMNS)
+    if _active_pf.empty:
+        st.info("Abhi koi active saved position nahi hai. Neeche SELL CE/SELL PE ya IRON CONDOR entry save karo.")
+    else:
+        _rows = []
+        _total_pnl = 0.0
+        for _, _pos in _active_pf.iterrows():
+            _d = _pos.to_dict()
+            _a = v162_analyze_position(_d)
+            _total_pnl += float(_a.get("P/L ₹", 0) or 0)
+            _rows.append({
+                "ID": _d.get("Position ID"),
+                "Strategy": _d.get("Strategy"),
+                "Leg 1": f"SELL {_d.get('Sell1 Strike')} {_d.get('Sell1 Side')} / HEDGE {_d.get('Hedge1 Strike')}",
+                "Leg 2": (f"SELL {_d.get('Sell2 Strike')} {_d.get('Sell2 Side')} / HEDGE {_d.get('Hedge2 Strike')}" if str(_d.get('Sell2 Side','')) else "-"),
+                "Lots": int(float(_d.get("Lots",0) or 0)),
+                "P/L ₹": _a.get("P/L ₹"),
+                "Net Points": _a.get("Net Points"),
+                "Profit %": _a.get("Profit %"),
+                "AI Action": _a.get("Action"),
+                "Reason": _a.get("Reason"),
+            })
+        pc1, pc2, pc3, pc4 = st.columns(4)
+        pc1.metric("Active Positions", len(_active_pf))
+        pc2.metric("Total P/L", f"₹{_total_pnl:,.0f}")
+        pc3.metric("Portfolio Risk", "HIGH" if max(gamma_score_v7, shock_score_v7) >= 70 else "MEDIUM" if max(gamma_score_v7, shock_score_v7) >= 45 else "LOW")
+        pc4.metric("Fresh Entry", "Allowed" if _signal_gate_v162.get("allowed") else "Blocked")
+        st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
+        st.caption("AI Action har refresh par live premium + hedge + risk ke hisab se update hota hai. Current price zero aaye to option chain range/strike check karo.")
+        with st.expander("Position Actions — mark exit", expanded=False):
+            _exit_id = st.selectbox("Position ID", list(_active_pf["Position ID"].astype(str)), key="v162_exit_id")
+            if st.button("Mark Selected Position EXITED", key="v162_mark_exit"):
+                if v162_update_position_status(_exit_id, "EXITED"):
+                    st.success("Position exited mark ho gayi.")
+                    st.rerun()
+
+    st.markdown("#### ➕ Add New Hedged Seller Position")
+    _pref_ce_strike = int(best_ce.get("strike", 0) or 0) if best_ce else 0
+    _pref_pe_strike = int(best_pe.get("strike", 0) or 0) if best_pe else 0
+    _pref_ce_entry = float(best_ce.get("ce_ltp", 0) or 0) if best_ce else 0.0
+    _pref_pe_entry = float(best_pe.get("pe_ltp", 0) or 0) if best_pe else 0.0
+    with st.form("v162_add_position_form"):
+        ac1, ac2, ac3, ac4 = st.columns(4)
+        _new_strategy = ac1.selectbox("Strategy", ["SELL CE", "SELL PE", "IRON CONDOR"], key="v162_new_strategy")
+        _new_lots = int(ac2.number_input("Lots", min_value=1, value=max(1, int(suggested_lots or 1)), step=1, key="v162_new_lots"))
+        _new_lot_size = int(ac3.number_input("Lot Size", min_value=1, value=int(lot_size or 65), step=1, key="v162_new_lot_size"))
+        _new_notes = ac4.text_input("Notes", value="", key="v162_new_notes")
+        st.caption("CE/PE entries broker screen se confirm karke save karo. Hedge entry bhi add karo taaki true P/L aur risk analyze ho sake.")
+        if _new_strategy == "SELL CE":
+            c1,c2,c3,c4 = st.columns(4)
+            _s1_side="CE"; _s1_strike=int(c1.number_input("Sell CE Strike", value=_pref_ce_strike, step=50, key="v162_sellce_strike")); _s1_entry=float(c2.number_input("Sell CE Entry", value=round(_pref_ce_entry,2), step=0.05, key="v162_sellce_entry")); _h1_strike=int(c3.number_input("Hedge CE Strike", value=int(_pref_ce_strike + hedge_gap if _pref_ce_strike else 0), step=50, key="v162_sellce_hedge_strike")); _h1_entry=float(c4.number_input("Hedge CE Entry", value=0.0, step=0.05, key="v162_sellce_hedge_entry"))
+            _s2_side=""; _s2_strike=0; _s2_entry=0.0; _h2_strike=0; _h2_entry=0.0
+        elif _new_strategy == "SELL PE":
+            c1,c2,c3,c4 = st.columns(4)
+            _s1_side="PE"; _s1_strike=int(c1.number_input("Sell PE Strike", value=_pref_pe_strike, step=50, key="v162_sellpe_strike")); _s1_entry=float(c2.number_input("Sell PE Entry", value=round(_pref_pe_entry,2), step=0.05, key="v162_sellpe_entry")); _h1_strike=int(c3.number_input("Hedge PE Strike", value=int(_pref_pe_strike - hedge_gap if _pref_pe_strike else 0), step=50, key="v162_sellpe_hedge_strike")); _h1_entry=float(c4.number_input("Hedge PE Entry", value=0.0, step=0.05, key="v162_sellpe_hedge_entry"))
+            _s2_side=""; _s2_strike=0; _s2_entry=0.0; _h2_strike=0; _h2_entry=0.0
+        else:
+            c1,c2,c3,c4 = st.columns(4)
+            _s1_side="CE"; _s1_strike=int(c1.number_input("Sell CE Strike", value=_pref_ce_strike, step=50, key="v162_sellce_strike")); _s1_entry=float(c2.number_input("Sell CE Entry", value=round(_pref_ce_entry,2), step=0.05, key="v162_sellce_entry")); _h1_strike=int(c3.number_input("Hedge CE Strike", value=int(_pref_ce_strike + hedge_gap if _pref_ce_strike else 0), step=50, key="v162_sellce_hedge_strike")); _h1_entry=float(c4.number_input("Hedge CE Entry", value=0.0, step=0.05, key="v162_sellce_hedge_entry"))
+            p1,p2,p3,p4 = st.columns(4)
+            _s2_side="PE"; _s2_strike=int(p1.number_input("Sell PE Strike", value=_pref_pe_strike, step=50, key="v162_condor_pe_strike")); _s2_entry=float(p2.number_input("Sell PE Entry", value=round(_pref_pe_entry,2), step=0.05, key="v162_condor_pe_entry")); _h2_strike=int(p3.number_input("Hedge PE Strike", value=int(_pref_pe_strike - hedge_gap if _pref_pe_strike else 0), step=50, key="v162_condor_pe_hedge_strike")); _h2_entry=float(p4.number_input("Hedge PE Entry", value=0.0, step=0.05, key="v162_condor_pe_hedge_entry"))
+        slt1, slt2 = st.columns(2)
+        _sl_pct = float(slt1.number_input("SL %", value=25.0, step=1.0, key="v162_sl_pct"))
+        _target_pct = float(slt2.number_input("Target %", value=35.0, step=1.0, key="v162_target_pct"))
+        _submit_pos = st.form_submit_button("💾 Save This Position")
+        if _submit_pos:
+            if v162_add_position(_new_strategy, _new_lots, _new_lot_size, _s1_side, _s1_strike, _s1_entry, _h1_strike, _h1_entry, _s2_side, _s2_strike, _s2_entry, _h2_strike, _h2_entry, _sl_pct, _target_pct, _new_notes):
+                st.success("Position portfolio mein save ho gayi. Ab har refresh par iska HOLD/EXIT/TRAIL analysis update hoga.")
+                st.rerun()
+            else:
+                st.error("Position save failed.")
+
+with st.expander("🎯 Final Action Plan — Trade / No Trade", expanded=True):
+    q1, q2, q3, q4 = st.columns(4)
+    q1.metric("Data Quality", f"{data_quality}/100")
+    q2.metric("Conflict Mode", "YES" if conflict_mode else "NO")
+    q3.metric("Final Confidence", f"{confidence:.0f}%")
+    q4.metric("Suggested Lots", f"{suggested_lots}/{max_lots}")
+    for item in action_plan:
+        st.write("✔", item)
+    if conflict_mode:
+        st.warning("Conflict mode active hai. Iska matlab market ke major parts same direction mein nahi hain.")
+    if data_quality < 70:
+        st.info("Data quality 70 se kam ho to real trade avoid karo. Pehle data source verify karo.")
+    with st.expander("Data quality details", expanded=False):
+        for reason in data_quality_reasons:
+            st.write("•", reason)
+
+
+with st.expander("📊 India VIX Range Engine — Expected Move", expanded=False):
+    if vix_range.get("ok"):
+        st.write(f"**India VIX:** {vix:.2f}")
+        st.write(f"**Formula:** VIX ÷ 16 = {vix_range['move_pct']:.2f}% expected 1-day move")
+        st.write(f"**Nifty Expected Range:** {vix_range['lower']:.0f} to {vix_range['upper']:.0f} (approx ±{vix_range['move_points']:.0f} points)")
+        st.write("**Use:** Agar price expected range ke edge ke paas ho to fresh option selling me extra caution. Agar market range ke beech ho aur OI/price action support kare to setup safer ho sakta hai.")
+        st.caption("Note: News/event days par market VIX range se bahar bhi ja sakta hai.")
+    else:
+        st.info(vix_range.get("message", "VIX range unavailable."))
+
+
+with st.expander("🎟️ AI Trade Ticket — Strike + Price + SL + Target", expanded=not trading_mode_clean):
+    tt = v12_trade_ticket
+    t1, t2, t3, t4, t5 = st.columns(5)
+    t1.metric("Recommended", tt["summary"])
+    t2.metric("Strategy", tt["strategy"])
+    t3.metric("Confidence", f"{tt['confidence']}%")
+    t4.metric("Lots", tt["lots"])
+    t5.metric("Net Credit", f"{tt['net_credit']} pts")
+    if tt["warnings"]:
+        for w in tt["warnings"]:
+            st.warning(w)
+    else:
+        st.success("Trade ticket clean hai. Still confirm broker price, spread, margin and SL before execution.")
+    if tt["legs"]:
+        _legs_df = pd.DataFrame(tt["legs"])
+        st.dataframe(_legs_df, width="stretch", hide_index=True)
+        st.caption(f"Approx points risk: {tt['estimated_points_risk']} | Hedge gap: {hedge_gap} pts")
+    else:
+        st.info("No legs generated because current verdict is WAIT/NO TRADE.")
+    st.write("**Why this ticket:**")
+    for r in tt["reasons"]:
+        st.write("•", r)
+    st.error("Important: Ye recommendation/order-ticket hai, auto execution nahi. Final order price broker screen par confirm karo.")
+
+
+# V12 Position Manager + Expiry/Shock/Discipline panels
+with st.expander("🚀 Position Manager — Hold / Exit / Trail SL", expanded=False):
+    if active_side == "None" or active_lots <= 0:
+        st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
+    try:
+        if entry_premium > 0:
+            prem_plan = v10_sl_target(entry_premium, gamma_score_v7, shock_score_v7, confidence)
+            st.write(f"V10 Premium Plan: SL around {prem_plan['sl']} | Target around {prem_plan['target']} | Trail after premium reaches {prem_plan['trail_after']}")
+    except Exception:
+        pass
+    else:
+        p1, p2, p3, p4 = st.columns(4)
+        p1.metric("Position AI", position_ai["action"], f"Confidence {position_ai['confidence']}%")
+        p2.metric("Profit in Premium", f"{position_ai['profit_pct']:.1f}%")
+        p3.metric("Trail SL", f"₹{position_ai['trail_sl']:.2f}" if position_ai["trail_sl"] else "--")
+        p4.metric("Position Risk", f"{position_ai['risk']}/100")
+        for reason in position_ai["reasons"]:
+            st.write("✔", reason)
+        if position_ai["action"] == "EXIT NOW":
+            st.error("🔴 EXIT NOW: market structure/risk seller ke against ho raha hai.")
+        elif "BOOK" in position_ai["action"]:
+            st.warning("🟡 Profit secure karna better ho sakta hai.")
+        elif "HOLD" in position_ai["action"]:
+            st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
+
+with st.expander("🧠 Expiry + Shock + Discipline Engine", expanded=False):
+    e1, e2, e3, e4, e5 = st.columns(5)
+    with e1:
+        v102_metric_card("Market Mode", market_mode, f"DTE: {dte if dte != 99 else 'NA'}")
+    with e2:
+        v102_metric_card("Historical Zone", f"{time_risk}/100", time_zone_label)
+    with e3:
+        v102_metric_card("Theta Score", f"{theta_score_v7}/100")
+    with e4:
+        v102_metric_card("Gamma Risk", f"{gamma_score_v7}/100")
+    with e5:
+        v102_metric_card("Shock Risk", f"{shock_score_v7}/100")
+    st.write(f"**Discipline:** {discipline_text} — {discipline_reason}")
+    if shock_score_v7 >= 75:
+        st.error("🚨 High Shock Probability: new selling avoid / SL tight / profit protect.")
+    elif shock_score_v7 >= 55:
+        st.warning("⚠️ Caution Zone: quantity small, SL tight, hold decision data se confirm karo.")
+    else:
+        st.success("✅ Shock risk controlled by current inputs.")
+
+# Compact source status
+st.markdown(
+    f"<span class='source-pill'>Nifty: {nifty_source}</span>"
+    f"<span class='source-pill'>VIX: {vix_source}</span>"
+    f"<span class='source-pill'>Heavyweights: {heavy_analysis.get('source','Unavailable')}</span>"
+    f"<span class='source-pill'>Option Chain: {'DhanHQ' if option_chain.get('success') else 'Manual aggregate'}</span>",
+    unsafe_allow_html=True,
+)
+
+
+with st.expander("✅ Trade Checklist — Entry Allowed Only If Green", expanded=False):
+    checks = [
+        ("Dhan credentials detected", bool(dhan_ready)),
+        ("Live or fallback market price available", price > 0),
+        ("Option-chain edge not opposite", abs(option_bias) >= 8),
+        ("Seller risk acceptable", seller_risk < 65),
+        ("News risk not high", news["score"] < 60),
+        ("VIX risk acceptable", vix_risk < 65),
+        ("AI confidence acceptable", confidence >= 58),
+        ("No hard block", not hard_block),
+    ]
+    passed = sum(1 for _, ok in checks if ok)
+    checklist_score = int((passed / len(checks)) * 100)
+    st.metric("Checklist Score", f"{checklist_score}/100", f"{passed}/{len(checks)} green")
+    for label, ok in checks:
+        st.write(("✅" if ok else "❌"), label)
+    if checklist_score < 75:
+        st.warning("NO TRADE / SMALL SIZE: checklist fully green nahi hai. Capital protection priority.")
+    else:
+        st.success("Checklist strong hai. Still hedge + SL mandatory.")
+
+
+st.markdown("## 📡 Seller AI Radar")
+a1, a2, a3, a4 = st.columns(4)
+with a1:
+    st.metric("Price Action", f"{price_action_bias:+.0f}", bias_label(price_action_bias))
+with a2:
+    st.metric("OI + Price", f"{option_bias:+.0f}", bias_label(option_bias))
+with a3:
+    st.metric("Heavyweights", f"{heavy_bias:+.0f}", bias_label(heavy_bias))
+with a4:
+    st.metric("News Risk", f"{news['score']}/100", news["label"])
+
+
+with st.expander("📊 Market Snapshot", expanded=False):
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("Nifty", f"{price:,.2f}", f"{nifty_change_pct:+.2f}%")
+    m2.metric("India VIX", f"{vix:.2f}", f"{vix_change_pct:+.2f}%")
+    m3.metric("EMA20", f"{ema20:.2f}")
+    m4.metric("VWAP", f"{vwap:.2f}")
+    m5.metric("Nearest S/R", f"{nearest_support:.0f} / {nearest_resistance:.0f}")
+
+
+with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded=False):
+    o1, o2, o3, o4 = st.columns(4)
+    o1.metric("PCR", f"{pcr:.2f}")
+    o2.metric("Put OI Change", f"{put_oi_change:,}")
+    o3.metric("Call OI Change", f"{call_oi_change:,}")
+    o4.metric("OC Bias", f"{option_bias:+.0f}", bias_label(option_bias))
+
+    if option_analysis.get("success"):
+        table_rows = []
+        for row in option_analysis["rows"]:
+            table_rows.append({
+                "Strike": row["strike"],
+                "CE LTP": round(row["ce_ltp"], 2),
+                "CE Δ%": round(row["ce_price_change_pct"], 2),
+                "CE OI Δ%": round(row["ce_oi_change_pct"], 2),
+                "CE Signal": row["ce_signal"],
+                "CE Sell": row["ce_sell_score"],
+                "CE Delta": round(row["ce_delta"], 3),
+                "CE IV": round(row["ce_iv"], 2),
+                "CE Spread%": round(row["ce_spread_pct"], 2),
+                "PE LTP": round(row["pe_ltp"], 2),
+                "PE Δ%": round(row["pe_price_change_pct"], 2),
+                "PE OI Δ%": round(row["pe_oi_change_pct"], 2),
+                "PE Signal": row["pe_signal"],
+                "PE Sell": row["pe_sell_score"],
+                "PE Delta": round(row["pe_delta"], 3),
+                "PE IV": round(row["pe_iv"], 2),
+                "PE Spread%": round(row["pe_spread_pct"], 2),
+            })
+        _oc_df = pd.DataFrame(table_rows)
+        try:
+            _atm_strike = int(round(float(price) / 50.0) * 50)
+            def _highlight_atm(row):
+                return ["background-color: rgba(37, 99, 235, 0.35); border-top: 1px solid #60a5fa; border-bottom: 1px solid #60a5fa;" if int(row.get("Strike", 0)) == _atm_strike else "" for _ in row]
+            st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
+            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), width="stretch", hide_index=True)
+        except Exception:
+            st.dataframe(_oc_df, width="stretch", hide_index=True)
+
+        st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
+
+        # V10 candidate safety verdicts
+        try:
+            ce_verdict = v10_candidate_verdict("CE", best_ce["strike"], best_ce.get("ce_sell_score", 0), best_ce.get("ce_signal", ""), best_ce.get("ce_delta", 0), best_ce.get("ce_iv", 0), best_ce.get("ce_spread_pct", 0), final_trade, conflict_mode) if best_ce else None
+            pe_verdict = v10_candidate_verdict("PE", best_pe["strike"], best_pe.get("pe_sell_score", 0), best_pe.get("pe_signal", ""), best_pe.get("pe_delta", 0), best_pe.get("pe_iv", 0), best_pe.get("pe_spread_pct", 0), final_trade, conflict_mode) if best_pe else None
+            st.markdown("### 🧾 Candidate Verdict")
+            if ce_verdict:
+                st.write("🔴", ce_verdict["verdict"])
+                for rr in ce_verdict["reasons"]:
+                    st.caption("CE: " + rr)
+            if pe_verdict:
+                st.write("🟢", pe_verdict["verdict"])
+                for rr in pe_verdict["reasons"]:
+                    st.caption("PE: " + rr)
+        except Exception as _e:
+            st.caption("V10 candidate verdict unavailable for this snapshot.")
+
+        st.caption("OI+price labels are conventional inferences. Every option trade has both buyer and seller; OI alone does not prove who initiated the trade.")
+        st.caption("Snapshot OI acceleration becomes active after at least two fresh Dhan snapshots. Press Refresh after 4+ seconds to compare snapshots.")
+    else:
+        st.info("Per-strike OI + Price Analyzer DhanHQ data se chalega. Abhi aggregate manual OI/PCR fallback active hai.")
+        if prefer_dhan and dhan_ready:
+            st.error(option_chain.get("message", "Dhan option chain unavailable."))
+
+
+with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False):
+    if heavy_analysis.get("success"):
+        h1, h2, h3, h4 = st.columns(4)
+        h1.metric("Weighted Pressure", f"{heavy_bias:+.0f}/100", bias_label(heavy_bias))
+        h2.metric("Estimated Top-5 Points", f"{heavy_analysis['estimated_points']:+.1f}")
+        h3.metric("HDFC + ICICI", heavy_analysis["banking_pair"])
+        h4.metric("Divergence", heavy_analysis["divergence"])
+
+        hw_rows = []
+        for r in heavy_analysis["rows"]:
+            _arrow, _cls, _delta = v13_trend(f"hw_{r['symbol']}_move", r["change_pct"], 2)
+            if _arrow == "↑":
+                _trend_text = "🟢 ↑ rising"
+            elif _arrow == "↓":
+                _trend_text = "🔴 ↓ falling"
+            else:
+                _trend_text = "⚪ → flat/first"
+            hw_rows.append({
+                "Stock": r["name"],
+                "Weight %": round(r["weight"], 2),
+                "Move %": round(r["change_pct"], 2),
+                "Trend vs Refresh": _trend_text,
+                "Change vs Refresh": _delta,
+                "Snapshot Shock %pt": round(r.get("shock_delta_pct", 0.0), 2),
+                "Est. Nifty pts": round(price * (r["weight"] / 100) * (r["change_pct"] / 100), 1),
+            })
+        hw_table = pd.DataFrame(hw_rows)
+        st.dataframe(hw_table, width="stretch", hide_index=True)
+        st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
+
+        if final_trade == "SELL CE" and heavy_bias > 35:
+            st.warning("CE SELL WARNING: top-5 drivers bullish hain — short-covering/upside risk.")
+        if final_trade == "SELL PE" and heavy_bias < -35:
+            st.warning("PE SELL WARNING: top-5 drivers bearish hain — support-break risk.")
+        if heavy_analysis.get("shock_rows"):
+            st.error("🚨 Heavyweight Shock: " + ", ".join(f"{r['name']} {r['shock_delta_pct']:+.2f}%pt" for r in heavy_analysis["shock_rows"]))
+        st.caption("Estimated points are an approximation using constituent weights and stock returns; exact index attribution can differ.")
+    else:
+        st.warning(heavy_analysis.get("message", "Heavyweight data unavailable."))
+
+
+with st.expander("🚨 Automatic Market News Risk Indicator", expanded=False):
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Final News Risk", f"{news['score']}/100", news["label"])
+    n2.metric("Scheduled Event", f"{news['scheduled']}/100", "AUTO" if news["auto_calendar"] else "Manual fallback")
+    n3.metric("Breaking News", f"{news['breaking']}/100", "AUTO" if news["auto_news"] else "Fallback")
+    n4.metric("Market Reaction", f"{news['reaction']}/100")
+
+    if news["label"] == "CRITICAL":
+        st.error("⚫ CRITICAL: fresh option selling block. Event/news + market reaction risk high.")
+    elif news["label"] == "HIGH":
+        st.warning("🔴 HIGH: fresh selling reduce/avoid; hedge mandatory.")
+    elif news["label"] == "MEDIUM":
+        st.info("🟡 MEDIUM: smaller quantity and strict monitoring.")
+    else:
+        st.success("🟢 LOW: no major risk detected by available sources, but market risk remains.")
+
+    if te_result.get("success"):
+        st.caption(f"Calendar engine active | relevant high/medium events: {te_result.get('events', 0)}")
+    if alpha_result.get("success"):
+        st.caption(f"News-sentiment engine active | recent items scanned: {alpha_result.get('items', 0)}")
+    if not news["auto_calendar"] or not news["auto_news"]:
+        st.caption("Automatic APIs are optional. Until keys are added, manual fallback + live market reaction still drive the indicator.")
+
+
+with st.expander("🏛️ FII / DII Smart Money", expanded=False):
+    try:
+        _fii_stats = v102_journal_stats(locals().get("fii_journal_df", pd.DataFrame()))
+    except Exception:
+        _fii_stats = {"rows": 0, "fii_5": fii_5day, "dii_5": dii_5day, "fii_10": 0, "dii_10": 0}
+    f1, f2, f3, f4 = st.columns(4)
+    f1.metric("FII Today", f"₹{fii_today:,.0f} Cr")
+    f2.metric("DII Today", f"₹{dii_today:,.0f} Cr")
+    f3.metric("FII 5 Day", f"₹{fii_5day:,.0f} Cr")
+    f4.metric("DII 5 Day", f"₹{dii_5day:,.0f} Cr")
+    g1, g2, g3 = st.columns(3)
+    g1.metric("FII Futures Contracts", f"{locals().get('fii_index_futures_contracts', 0):,.0f}")
+    g2.metric("FII Long %", f"{locals().get('fii_long_pct', 0):.2f}%")
+    g3.metric("FII Short %", f"{locals().get('fii_short_pct', 0):.2f}%")
+    st.write(f"FII Index Futures Bias: **{fii_index_futures_bias}** | Futures Score: **{locals().get('_fut_score', 0):+.0f}**")
+    st.write(f"Smart Money Bias: **{smart_money_bias:+.0f}/100 ({bias_label(smart_money_bias)})**")
+    if locals().get('fii_short_pct', 0) >= 70 and fii_today > 0:
+        st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
+    st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
+    if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
+        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
+
+
+with st.expander("💰 Position & Risk Manager", expanded=False):
+    p1, p2, p3, p4 = st.columns(4)
+    p1.metric("Capital", f"₹{capital:,.0f}")
+    p2.metric("Max Lots", max_lots)
+    p3.metric("Current Lots", current_lots)
+    p4.metric("AI Suggested Lots", suggested_lots)
+    st.write(f"Estimated Margin: **₹{suggested_lots * margin_per_lot:,.0f}**")
+    st.write(f"Lot Size: **{lot_size}** | Seller Risk: **{seller_risk:.0f}/100**")
+
+
+
+
+with st.expander("🧪 Live Dhan API Diagnostics", expanded=False):
+    d1, d2, d3, d4 = st.columns(4)
+    d1.metric("Credentials", "Detected" if dhan_ready else "Missing")
+    d2.metric("Market Quote", "OK" if dhan_bundle.get("success") else "Fallback")
+    d3.metric("Expiry List", "OK" if expiry_result.get("success") else "Not OK")
+    d4.metric("Option Chain", "OK" if option_chain.get("success") else "Not OK")
+    if dhan_bundle.get("success"):
+        st.success("Dhan market quote is responding. Nifty/top-5 quote layer is ready.")
+    else:
+        st.warning("Dhan market quote not active. Current message: " + str(dhan_bundle.get("message", "No response")))
+    if not expiry_result.get("success"):
+        st.warning("Expiry list issue: " + str(expiry_result.get("message", "No expiry response")))
+    if not option_chain.get("success"):
+        st.error("Option chain issue: " + str(option_chain.get("message", "No option-chain response")))
+        st.info("If Data API subscription is still inactive on DhanHQ, option-chain/OI/PCR will stay on fallback. Once active, press Refresh Live Data after market open.")
+    else:
+        st.success(f"Live option chain loaded for expiry {option_chain.get('expiry')} | ATM {option_chain.get('atm_strike')} | Rows {len(option_chain.get('rows', []))}")
+
+with st.expander("🔐 DhanHQ Setup Status", expanded=False):
+    if dhan_ready:
+        st.success("DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN are detected from Streamlit secrets/environment.")
+        st.write(f"Top-5 Security IDs resolved: **{len(top5_ids)}/5**")
+        if master_result.get("success") is False:
+            st.warning(master_result.get("message", "Instrument master unavailable."))
+        st.caption("Dhan access token can expire; keep credentials only in Streamlit Secrets, never in app.py or GitHub.")
+    else:
+        st.info("Add Dhan credentials later. App remains usable with Yahoo/manual fallbacks, but per-strike Option Chain AI requires DhanHQ.")
+        st.code('DHAN_CLIENT_ID = "your_client_id"\nDHAN_ACCESS_TOKEN = "your_access_token"', language="toml")
+    st.caption("Optional news secrets: TRADING_ECONOMICS_API_KEY and ALPHAVANTAGE_API_KEY")
+
+
+st.markdown("---")
+st.markdown(
+    "<div class='small-note'>V8 build: live-data diagnostics + checklist + position intelligence. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    unsafe_allow_html=True,
+)
