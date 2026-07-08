@@ -52,9 +52,16 @@ try:
 except Exception:
     V19_RISK_ENGINE_READY = False
 
+# V19.6 Decision Engine module import.
+try:
+    from decision_engine import build_final_decision as v19_build_final_decision
+    V19_DECISION_ENGINE_READY = True
+except Exception:
+    V19_DECISION_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.5 - RISK ENGINE MODULE
+# NIFTY SELLER AI DASHBOARD V19.6 - DECISION ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -75,7 +82,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.5.1 Full Audit Fix",
+    page_title="Nifty Seller AI Dashboard V19.6 Decision Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2399,13 +2406,14 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.5 Modular AI")
-st.sidebar.caption("V19.5.1: Full app consistency audit")
+st.sidebar.title("⚙️ V19.6 Modular AI")
+st.sidebar.caption("V19.6: One Final Decision Engine")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
     st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
+    st.sidebar.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
 except Exception:
     pass
 
@@ -5076,6 +5084,79 @@ except Exception as _v1951_plan_error:
 
 
 
+
+# =========================================================
+# V19.6 DECISION ENGINE — ONE FINAL AUTHORITY
+# =========================================================
+try:
+    _legacy_action_v196 = str(final_decision.get("action", "WAIT")) if isinstance(final_decision, dict) else "WAIT"
+    _legacy_conf_v196 = float(final_decision.get("confidence", 0) or 0) if isinstance(final_decision, dict) else 0.0
+
+    _snapshot_health_v196 = {}
+    if "snapshot_health_external" in globals() and isinstance(snapshot_health_external, dict):
+        _snapshot_health_v196 = snapshot_health_external
+    if not _snapshot_health_v196 and isinstance(final_decision, dict):
+        _snapshot_health_v196 = (
+            final_decision.get("snapshot_health_external", {})
+            or final_decision.get("snapshot_health", {})
+            or {}
+        )
+
+    if V19_DECISION_ENGINE_READY:
+        decision_engine_report = v19_build_final_decision(
+            legacy_decision=final_decision,
+            snapshot=market_snapshot,
+            ai_report=ai_brain_report if isinstance(ai_brain_report, dict) else {},
+            risk_report=risk_engine_report if isinstance(risk_engine_report, dict) else {},
+            snapshot_health=_snapshot_health_v196,
+            snapshot_delta=snapshot_delta if isinstance(snapshot_delta, dict) else {},
+            market_open=bool(_market_open_v1951),
+            market_status=_market_text_v1951,
+            freeze_state=v14_freeze if isinstance(v14_freeze, dict) else {},
+        )
+
+        if isinstance(final_decision, dict):
+            final_decision["legacy_action"] = _legacy_action_v196
+            final_decision["legacy_confidence"] = _legacy_conf_v196
+            final_decision["analysis_action"] = decision_engine_report.get("analysis_action", _legacy_action_v196)
+            final_decision["decision_engine"] = decision_engine_report
+            final_decision["action"] = decision_engine_report.get("final_action", "WAIT")
+            final_decision["confidence"] = decision_engine_report.get("calibrated_confidence", 0)
+            final_decision["execution_status"] = decision_engine_report.get("execution_status", "WAIT")
+
+            _st_v196 = final_decision.get("strategy", {}) if isinstance(final_decision.get("strategy", {}), dict) else {}
+            _st_v196["execution_lots"] = int(decision_engine_report.get("approved_lots", 0) or 0)
+            _st_v196["preview_lots"] = int(decision_engine_report.get("preview_lots", 0) or 0)
+            final_decision["strategy"] = _st_v196
+
+            _status_v196 = decision_engine_report.get("execution_status", "WAIT")
+            final_decision["quality"] = {
+                "APPROVED": "OK",
+                "BLOCKED": "BLOCKED",
+                "PREVIEW_ONLY": "PREVIEW",
+                "WAIT": "WAIT",
+            }.get(_status_v196, "WAIT")
+
+            # Re-sync downstream UI to one authority.
+            final_trade = final_decision.get("action", "WAIT")
+            confidence = float(final_decision.get("confidence", 0) or 0)
+            selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
+            hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
+            suggested_lots = int(decision_engine_report.get("approved_lots", 0) or 0)
+            sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
+            target_display = final_decision.get("strategy", {}).get("target", "No Trade")
+    else:
+        decision_engine_report = {}
+except Exception as _v196_error:
+    decision_engine_report = {"error": str(_v196_error)}
+    try:
+        if isinstance(final_decision, dict):
+            final_decision.setdefault("warnings", []).append(f"V19.6 Decision Engine error: {_v196_error}")
+    except Exception:
+        pass
+
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -5084,7 +5165,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.5.1 Full Audit Fix</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.6 Decision Engine</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -5093,23 +5174,63 @@ try:
     _class = "green" if _quality == "OK" else ("red" if _quality in ("BLOCKED", "ERROR", "DATA_WEAK", "RISK_HIGH") else "")
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     _market_open_card = (market_text == "Market Open")
-    _card_heading = f"🧠 V19.5.1 Full Audit Fix — {_quality}" if _market_open_card else f"🧠 MARKET CLOSED PREVIEW — {_quality}"
-    _action_label = "Final Action" if _market_open_card else "Plan Bias"
+    _de_card = _fd.get("decision_engine", {}) if isinstance(_fd.get("decision_engine", {}), dict) else {}
+    _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
+    _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
+    _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
+    _card_heading = f"🧠 V19.6 Decision Engine — {_exec_status_card}"
+    _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
 <h3>{_card_heading}</h3>
-<b>{_action_label}:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
-<b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
+<b>{_action_label}:</b> {_final_action_card} &nbsp; | &nbsp;
+<b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
+<b>Status:</b> {_exec_status_card}<br>
+<b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
 <b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
 <b>Entry:</b> {_strategy.get('entry','No Trade')} &nbsp; | &nbsp;
 <b>SL:</b> {_strategy.get('sl','No Trade')} &nbsp; | &nbsp;
 <b>Target:</b> {_strategy.get('target','No Trade')} &nbsp; | &nbsp;
-<b>Suggested Lots:</b> {_strategy.get('lots',0)}
+<b>Approved Lots:</b> {_de_card.get('approved_lots',0)} &nbsp; | &nbsp;
+<b>Preview Lots:</b> {_de_card.get('preview_lots',0)}
 </div>
 """, unsafe_allow_html=True)
 
     
+    try:
+        if _de_card:
+            with st.expander("⚖️ Decision Engine Verdict — Why Approved / Blocked", expanded=False):
+                d1, d2, d3, d4 = st.columns(4)
+                d1.metric("Final Verdict", _de_card.get("final_action", "WAIT"))
+                d2.metric("Execution Status", _de_card.get("execution_status", "WAIT"))
+                d3.metric("Calibrated Confidence", f"{_de_card.get('calibrated_confidence',0)}%")
+                d4.metric("Approved Lots", _de_card.get("approved_lots", 0))
+
+                st.write("**Analysis Bias:**", _de_card.get("analysis_action", "WAIT"))
+                st.write("**Consensus:**", _de_card.get("consensus", "NA"))
+                st.write("**Execution Reason:**", _de_card.get("execution_reason", "NA"))
+
+                if _de_card.get("blockers"):
+                    st.write("**Blockers:**")
+                    for _x in _de_card.get("blockers", [])[:10]:
+                        st.write("•", _x)
+
+                if _de_card.get("warnings"):
+                    st.write("**Warnings:**")
+                    for _x in _de_card.get("warnings", [])[:8]:
+                        st.write("•", _x)
+
+                if _de_card.get("reasons"):
+                    st.write("**Positive Reasons:**")
+                    for _x in _de_card.get("reasons", [])[:10]:
+                        st.write("•", _x)
+
+                st.write("**Validated Trade Plan:**")
+                st.json(_de_card.get("plan_validation", {}))
+    except Exception:
+        pass
+
     try:
         _intel = _fd.get("ai_intelligence", {}) if isinstance(_fd.get("ai_intelligence", {}), dict) else {}
         if _intel:
@@ -5118,7 +5239,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.5.1: Full app consistency audit active — core engines untouched.")
+            st.caption("V19.6: Decision Engine is final execution authority; AI bias remains visible separately.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -5227,6 +5348,7 @@ try:
             st.write("Snapshot Engine Module:", "READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK")
             st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
             st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
+            st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
             st.write("Next module target: decision_engine.py")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
             st.write("V18.5 removed: None")
@@ -5263,6 +5385,8 @@ try:
 
                 st.markdown("#### V19.5 Risk Engine Report")
                 st.json(risk_engine_report if "risk_engine_report" in globals() else {})
+                st.markdown("#### V19.6 Decision Engine Report")
+                st.json(decision_engine_report if "decision_engine_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5371,13 +5495,13 @@ try:
 except Exception:
     pass
 
-st.markdown("### 🎯 Super Final Decision — Fresh Entry Allowed Only If Green")
+st.markdown("### ⚖️ Decision Engine Final Authority — Fresh Entry Only If Approved")
 _status_class = "green" if _signal_gate_v162["allowed"] else ("red" if final_trade != "WAIT" and confidence >= 90 else "")
 _status_text = "ENTRY ALLOWED ✅" if _signal_gate_v162["allowed"] else ("MARKET CLOSED — PLAN PREVIEW 🔒" if market_text != "Market Open" else "ENTRY BLOCKED / WAIT ⚠️")
 st.markdown(f"""
 <div class='v17-final {_status_class}'>
 <h2>{_status_text}</h2>
-<b>Final AI:</b> {final_trade} &nbsp; | &nbsp; <b>Best Setup:</b> {_top_strategy_v162.get('strategy','WAIT')} ({_top_strategy_v162.get('confidence',0)}%) &nbsp; | &nbsp;
+<b>Decision Verdict:</b> {final_trade} &nbsp; | &nbsp; <b>Best Setup:</b> {_top_strategy_v162.get('strategy','WAIT')} ({_top_strategy_v162.get('confidence',0)}%) &nbsp; | &nbsp;
 <b>Final Confidence:</b> {confidence:.0f}% &nbsp; | &nbsp; <b>Stable:</b> {_signal_gate_v162['count']}/{_signal_gate_v162.get('required',2)}<br>
 <b>Strike:</b> {selected_strike} &nbsp; | &nbsp; <b>Hedge:</b> {hedge} &nbsp; | &nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%<br>
 <b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)
@@ -5479,15 +5603,16 @@ else:
     st.success("Final AI active hai. Broker price, spread, margin aur hedge confirm karo.")
 
 # V17 Compact AI Brain - details only in Developer Mode.
-st.markdown("### 🧠 AI Brain")
+st.markdown("### 🧠 AI Brain + ⚖️ Decision Authority")
 ai1, ai2, ai3, ai4, ai5 = st.columns(5)
-ai1.metric("Decision", final_trade)
-ai2.metric("Confidence", f"{confidence:.0f}%")
-ai3.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
-ai4.metric("Market", v14_regime["label"])
+_de_ai = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+ai1.metric("AI Bias", _de_ai.get("analysis_action", "WAIT"))
+ai2.metric("Final Verdict", final_trade)
+ai3.metric("Decision Confidence", f"{confidence:.0f}%")
+ai4.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
 ai5.metric("Entry", "OPEN" if _signal_gate_v162.get("allowed") else ("CLOSED/PREVIEW" if market_text != "Market Open" else "WAIT"))
-_reason_line = "OI + Price + Heavyweights align" if final_trade != "WAIT" else ("Signal unstable / confirmation pending" if not _signal_gate_v162.get("allowed") else "Capital safe")
-st.caption("Reason: " + _reason_line)
+_reason_line = _de_ai.get("execution_reason", "Decision Engine report unavailable.")
+st.caption("Decision Engine: " + _reason_line)
 with st.expander("🔎 AI Brain Details — Developer Reasoning", expanded=False):
     st.write("**Memory:**", v14_stability["note"])
     st.write(f"**Freeze:** {v14_freeze['status']} | {v14_freeze['reason']}")
@@ -5971,6 +6096,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.5.1 audited build: modular snapshot + AI brain + risk engine + consistency gates. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.6 build: Snapshot + AI Brain + Risk Engine + one Decision Engine authority. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
