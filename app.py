@@ -3831,6 +3831,209 @@ except NameError:
     )
 
 
+
+# =========================================================
+# V18.0 SAFE ADAPTER: ONE FINAL DECISION OBJECT
+# =========================================================
+# Purpose:
+# - Do NOT delete old working code yet.
+# - Collect the current final outputs into one safe decision object.
+# - UI and trade ticket should read one final decision only.
+# - All access is defensive to avoid KeyError / NameError during refactor.
+
+def v18_safe_num(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        return float(value)
+    except Exception:
+        return default
+
+
+def v18_safe_text(value, default=""):
+    try:
+        if value is None:
+            return default
+        value = str(value).strip()
+        return value if value else default
+    except Exception:
+        return default
+
+
+def v18_final_decision_adapter(ctx):
+    """
+    V18 Phase-1 Adapter.
+    This is not a new strategy engine. It is a safety layer over the current V17 engine.
+    It prevents multiple final outputs from contradicting each other.
+    """
+    current_action = v18_safe_text(ctx.get("final_trade"), "WAIT").upper()
+    current_conf = int(max(0, min(98, v18_safe_num(ctx.get("confidence"), 0))))
+    current_strike = v18_safe_text(ctx.get("selected_strike"), "No Strike")
+    current_hedge = v18_safe_text(ctx.get("hedge"), "No Hedge")
+    current_lots = int(max(0, v18_safe_num(ctx.get("suggested_lots"), 0)))
+    current_sl = ctx.get("sl_display", "No Trade")
+    current_target = ctx.get("target_display", "No Trade")
+
+    seller_risk_v = v18_safe_num(ctx.get("seller_risk"), 100)
+    data_quality_v = int(max(0, min(100, v18_safe_num(ctx.get("data_quality"), 0))))
+    shock_v = int(max(0, min(100, v18_safe_num(ctx.get("shock_score_v7"), 100))))
+    gamma_v = int(max(0, min(100, v18_safe_num(ctx.get("gamma_score_v7"), 100))))
+    news_obj = ctx.get("news", {}) if isinstance(ctx.get("news", {}), dict) else {}
+    news_score_v = int(max(0, min(100, v18_safe_num(news_obj.get("score"), 100))))
+    conflict_v = bool(ctx.get("conflict_mode", False))
+
+    blockers = []
+    reasons = []
+
+    v164 = ctx.get("v164_unified", {}) if isinstance(ctx.get("v164_unified", {}), dict) else {}
+    for b in v164.get("blockers", []) or []:
+        if b and str(b) not in blockers:
+            blockers.append(str(b))
+    for r in v164.get("reasons", []) or []:
+        if r and str(r) not in reasons:
+            reasons.append(str(r))
+
+    if data_quality_v < 60:
+        blockers.append(f"Data quality low {data_quality_v}/100.")
+    if seller_risk_v >= 78:
+        blockers.append(f"Seller risk high {seller_risk_v:.0f}/100.")
+    if news_score_v >= 80:
+        blockers.append(f"News/Event risk high {news_score_v}/100.")
+    if gamma_v >= 82:
+        blockers.append(f"Gamma risk high {gamma_v}/100.")
+    if conflict_v and current_conf < 82:
+        blockers.append("Conflict mode active; confidence not strong enough.")
+
+    allowed_actions = {"WAIT", "SELL CE", "SELL PE", "IRON CONDOR", "BUY CALL", "BUY PUT", "BUY CALL (HEDGED)", "BUY PUT (HEDGED)"}
+    if current_action not in allowed_actions:
+        blockers.append(f"Unknown action '{current_action}' converted to WAIT.")
+        current_action = "WAIT"
+
+    if current_action != "WAIT":
+        if current_strike in ("", "No Strike", "None"):
+            blockers.append("Valid strike missing.")
+        if current_hedge in ("", "No Hedge", "None") and current_action in ("SELL CE", "SELL PE", "IRON CONDOR"):
+            blockers.append("Hedge missing for seller strategy.")
+        if current_conf < 65:
+            blockers.append(f"Final confidence {current_conf}% below minimum 65%.")
+        if current_lots <= 0:
+            blockers.append("Suggested lots are zero.")
+
+    if blockers:
+        final_action = "WAIT"
+        final_conf = min(current_conf, 64)
+        final_strike = "No Strike"
+        final_hedge = "No Hedge"
+        final_lots = 0
+        final_sl = "No Trade"
+        final_target = "No Trade"
+        stability = "BLOCKED"
+    else:
+        final_action = current_action
+        final_conf = current_conf
+        final_strike = current_strike
+        final_hedge = current_hedge
+        final_lots = current_lots
+        final_sl = current_sl
+        final_target = current_target
+        stability = "OK"
+
+    if not reasons:
+        if final_action == "WAIT":
+            reasons.append("Capital protection priority. Fresh trade only after clean alignment.")
+        else:
+            reasons.append("Final action passed V18 safety adapter checks.")
+
+    return {
+        "version": "V18.0 Safe Adapter",
+        "final_action": final_action,
+        "confidence": int(final_conf),
+        "selected_strike": final_strike,
+        "hedge": final_hedge,
+        "suggested_lots": int(final_lots),
+        "sl": final_sl,
+        "target": final_target,
+        "seller_risk": int(max(0, min(100, seller_risk_v))),
+        "data_quality": data_quality_v,
+        "shock_score": shock_v,
+        "gamma_score": gamma_v,
+        "news_score": news_score_v,
+        "stability_status": stability,
+        "blockers": blockers[:8],
+        "reasons": reasons[:8],
+    }
+
+
+try:
+    v18_decision = v18_final_decision_adapter(locals())
+except Exception as _v18_error:
+    v18_decision = {
+        "version": "V18.0 Safe Adapter",
+        "final_action": "WAIT",
+        "confidence": 0,
+        "selected_strike": "No Strike",
+        "hedge": "No Hedge",
+        "suggested_lots": 0,
+        "sl": "No Trade",
+        "target": "No Trade",
+        "seller_risk": int(v18_safe_num(locals().get("seller_risk"), 100)),
+        "data_quality": int(v18_safe_num(locals().get("data_quality"), 0)),
+        "shock_score": int(v18_safe_num(locals().get("shock_score_v7"), 100)),
+        "gamma_score": int(v18_safe_num(locals().get("gamma_score_v7"), 100)),
+        "news_score": 100,
+        "stability_status": "ADAPTER ERROR",
+        "blockers": [str(_v18_error)],
+        "reasons": ["V18 adapter error. WAIT selected for safety."],
+    }
+
+final_trade = v18_decision.get("final_action", "WAIT")
+confidence = float(v18_decision.get("confidence", 0))
+selected_strike = v18_decision.get("selected_strike", "No Strike")
+hedge = v18_decision.get("hedge", "No Hedge")
+suggested_lots = int(v18_decision.get("suggested_lots", 0) or 0)
+sl_display = v18_decision.get("sl", "No Trade")
+target_display = v18_decision.get("target", "No Trade")
+
+try:
+    source_text = v13_source_text(locals().get("dhan_ready", False), locals().get("option_chain", {}), locals().get("nifty_source", "Fallback"), locals().get("dhan_bundle", {}), locals().get("expiry_result", {}))
+    action_plan = v91_action_plan(
+        final_trade,
+        selected_strike,
+        hedge,
+        confidence,
+        locals().get("seller_risk", 0),
+        locals().get("shock_score_v7", 0),
+        locals().get("gamma_score_v7", 0),
+        locals().get("conflict_reasons", []),
+        source_text,
+        locals().get("data_quality", 0),
+    )
+except Exception:
+    action_plan = ["V18 adapter locked final decision. Action plan unavailable."]
+
+try:
+    v12_top_strategy = {"strategy": final_trade, "confidence": int(confidence), "type": "V18 Final"}
+    v12_trade_ticket = v12_build_trade_ticket(
+        top_strategy=v12_top_strategy,
+        final_trade=final_trade,
+        best_ce=locals().get("best_ce", None),
+        best_pe=locals().get("best_pe", None),
+        option_analysis=locals().get("option_analysis", {}),
+        price=locals().get("price", 0),
+        confidence=confidence,
+        seller_risk=locals().get("seller_risk", 100),
+        shock_score=locals().get("shock_score_v7", 100),
+        gamma_score=locals().get("gamma_score_v7", 100),
+        hedge_gap=locals().get("hedge_gap", 100),
+        max_lots=locals().get("max_lots", 1),
+        conflict_mode=(final_trade == "WAIT"),
+        data_quality=locals().get("data_quality", 0),
+    )
+except Exception:
+    pass
+
+
+
 # =========================================================
 # UI
 # =========================================================
