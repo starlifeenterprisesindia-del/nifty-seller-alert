@@ -27,7 +27,7 @@ try:
 except Exception:
     V19_UTILS_READY = False
 
-# V19.3 Snapshot Engine module import.
+# V19.4 AI Brain Module module import.
 try:
     from snapshot_engine import (
         build_market_snapshot as v19_build_market_snapshot,
@@ -38,9 +38,16 @@ try:
 except Exception:
     V19_SNAPSHOT_ENGINE_READY = False
 
+# V19.4 AI Brain module import.
+try:
+    from ai_brain import build_ai_explanation as v19_build_ai_explanation
+    V19_AI_BRAIN_READY = True
+except Exception:
+    V19_AI_BRAIN_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.3 - SNAPSHOT ENGINE MODULE
+# NIFTY SELLER AI DASHBOARD V19.4 - AI BRAIN MODULE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -61,7 +68,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.3 Snapshot Engine",
+    page_title="Nifty Seller AI Dashboard V19.4 AI Brain Module",
     page_icon="🧠",
     layout="wide",
 )
@@ -2385,11 +2392,12 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.3 Modular AI")
-st.sidebar.caption("V19.3: Snapshot engine module")
+st.sidebar.title("⚙️ V19.4 Modular AI")
+st.sidebar.caption("V19.4: AI Brain module")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
+    st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
 except Exception:
     pass
 
@@ -4094,7 +4102,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V19.3 Snapshot Engine",
+        "version": "V19.4 AI Brain Module",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4131,7 +4139,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V19.3 Snapshot Engine",
+        "version": "V19.4 AI Brain Module",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4350,7 +4358,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V19.3 Snapshot Engine"
+    fd["version"] = "V19.4 AI Brain Module"
 
     return fd
 
@@ -4458,7 +4466,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V19.3 Snapshot Engine",
+        "version": "V19.4 AI Brain Module",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4569,7 +4577,7 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V19.3 Snapshot Engine", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V19.4 AI Brain Module", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
 
 
@@ -4716,7 +4724,7 @@ def v187_apply_snapshot_ai(fd, snapshot, delta):
     if snap_reason not in reasons:
         reasons.insert(0, snap_reason)
     fd["reasons"] = reasons[:12]
-    fd["version"] = "V19.3 Snapshot Engine"
+    fd["version"] = "V19.4 AI Brain Module"
 
     return fd
 
@@ -4866,7 +4874,7 @@ def v188_apply_snapshot_health_guard(fd, snapshot):
     if health_reason not in reasons:
         reasons.insert(0, health_reason)
     fd["reasons"] = reasons[:14]
-    fd["version"] = "V19.3 Snapshot Engine"
+    fd["version"] = "V19.4 AI Brain Module"
     return fd
 
 
@@ -4927,6 +4935,31 @@ except Exception as _v193_error:
 
 
 
+
+# =========================================================
+# V19.4 AI BRAIN MODULE BRIDGE
+# =========================================================
+# External ai_brain creates explainability and scorecard.
+try:
+    if V19_AI_BRAIN_READY:
+        ai_brain_report = v19_build_ai_explanation(market_snapshot, final_decision)
+        if isinstance(final_decision, dict):
+            final_decision["ai_brain_module"] = "READY"
+            final_decision["ai_explanation"] = ai_brain_report
+            # Do not overwrite final action here; V19.4 is explainability-first.
+            # Use confidence only for display/reporting, not trade execution.
+    else:
+        ai_brain_report = {}
+except Exception as _v194_error:
+    ai_brain_report = {"error": str(_v194_error)}
+    try:
+        if isinstance(final_decision, dict):
+            final_decision.setdefault("warnings", []).append(f"V19.4 AI Brain module error: {_v194_error}")
+    except Exception:
+        pass
+
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -4935,7 +4968,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.3 Snapshot Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.4 AI Brain Module</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4945,7 +4978,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V19.3 Snapshot Engine AI — {_quality}</h3>
+<h3>🧠 V19.4 AI Brain Module — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4965,7 +4998,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.3: Snapshot engine module active — core engines untouched.")
+            st.caption("V19.4: AI Brain module active — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -4986,6 +5019,26 @@ try:
         pass
 
 
+    
+    try:
+        _brain = _fd.get("ai_explanation", {}) if isinstance(_fd.get("ai_explanation", {}), dict) else {}
+        if _brain:
+            with st.expander("🧠 AI Brain Explanation / Scorecard", expanded=False):
+                st.write("**Decision ID:**", _brain.get("decision_id", "NA"))
+                st.write("**Regime:**", _brain.get("regime", "NA"))
+                st.write("**Smart Confidence:**", str(_brain.get("smart_confidence", 0)) + "%")
+                st.write("**Top Reasons:**")
+                for _r in _brain.get("reasons", [])[:5]:
+                    st.write("•", _r)
+                st.write("**Scorecard:**")
+                try:
+                    st.dataframe(pd.DataFrame(_brain.get("scorecard", [])), use_container_width=True)
+                except Exception:
+                    st.json(_brain.get("scorecard", []))
+    except Exception:
+        pass
+
+
     if _fd.get("blockers"):
         with st.expander("🛑 Why WAIT / Blockers", expanded=False):
             for _b in _fd.get("blockers", [])[:8]:
@@ -5000,8 +5053,9 @@ try:
             st.write("V18.4 safe cleanup active.")
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
-            st.write("V19.3 Snapshot Engine:", "READY" if V19_UTILS_READY else "FALLBACK")
+            st.write("V19.4 AI Brain Module:", "READY" if V19_UTILS_READY else "FALLBACK")
             st.write("Snapshot Engine Module:", "READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK")
+            st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
             st.write("Next module target: ai_brain.py")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
             st.write("V18.5 removed: None")
@@ -5032,6 +5086,9 @@ try:
 
                 st.markdown("#### V18.8 Snapshot Health")
                 st.json(_fd.get("snapshot_health", {}) if isinstance(_fd, dict) else {})
+
+                st.markdown("#### V19.4 AI Brain Report")
+                st.json(ai_brain_report if "ai_brain_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5039,7 +5096,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Snapshot Engine Module + Clean Sidebar Refresh</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Modular AI Brain + Snapshot Engine</div>",
     unsafe_allow_html=True,
 )
 
