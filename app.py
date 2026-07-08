@@ -61,7 +61,7 @@ except Exception:
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.6 - DECISION ENGINE
+# NIFTY SELLER AI DASHBOARD V19.7 - DECISION AUTHORITY CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -82,7 +82,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.6 Decision Engine",
+    page_title="Nifty Seller AI Dashboard V19.7 Decision Authority Cleanup",
     page_icon="🧠",
     layout="wide",
 )
@@ -1612,37 +1612,8 @@ def v162_analyze_position(pos):
         "Hedge2 Cur": round(leg2["hedge_current"], 2),
     }
 
-def v162_signal_gate(final_trade_value, top_strategy_value, confidence_value, selected_strike_value):
-    """Smart entry gate.
-    90%+ high-confidence directional signals can pass on first refresh.
-    70-89% signals need 2 stable refresh confirmations.
-    This prevents random strike flips without blocking a very strong move.
-    """
-    sig = f"{final_trade_value}|{top_strategy_value}|{selected_strike_value}"
-    prev = st.session_state.get("v162_prev_signal")
-    count = int(st.session_state.get("v162_signal_count", 0) or 0)
-    if sig == prev:
-        count += 1
-    else:
-        count = 1
-    st.session_state["v162_prev_signal"] = sig
-    st.session_state["v162_signal_count"] = count
-    conf = float(confidence_value or 0)
-    reasons = []
-    allowed = True
-    required = 1 if conf >= 90 else 2
-    if final_trade_value == "WAIT":
-        allowed = False; reasons.append("Final AI WAIT hai.")
-    if conf < 70:
-        allowed = False; reasons.append(f"Final confidence {conf:.0f}% hai; minimum 70% chahiye.")
-    if not selected_strike_value or int(float(selected_strike_value or 0)) <= 0:
-        allowed = False; reasons.append("Valid strike select nahi hui.")
-    if count < required:
-        allowed = False; reasons.append(f"Signal {required} refresh tak stable nahi hua.")
-    if conf >= 90 and count >= 1 and final_trade_value != "WAIT" and selected_strike_value:
-        reasons = [r for r in reasons if "stable" not in r.lower()]
-        allowed = not any(("WAIT" in r or "confidence" in r or "Valid strike" in r) for r in reasons)
-    return {"allowed": allowed, "count": count, "required": required, "signature": sig, "reasons": reasons or ["Entry checklist green."]}
+# V19.7 CLEANUP: removed obsolete v162_signal_gate().
+# Decision Engine report is the single execution-gate authority.
 
 
 def v102_metric_card(label, value, delta=None):
@@ -2406,8 +2377,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.6 Modular AI")
-st.sidebar.caption("V19.6: One Final Decision Engine")
+st.sidebar.title("⚙️ V19.7 Modular AI")
+st.sidebar.caption("V19.7: Single Decision Authority Cleanup")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
@@ -4407,37 +4378,9 @@ except Exception:
 
 
 # =========================================================
-# V18.5 DUPLICATE DECISION CLEANUP GUARD
+# V19.7 CLEANUP — OLD V18.5 CONSISTENCY GUARD REMOVED
 # =========================================================
-# This guard does not create a new decision. It checks whether old UI variables still match final_decision.
-
-def v185_decision_consistency_check(fd, ctx):
-    try:
-        if not isinstance(fd, dict):
-            return {"status": "NO_FINAL_DECISION", "issues": ["final_decision object missing."]}
-        issues = []
-        fd_action = str(fd.get("action", "WAIT"))
-        old_action = str(ctx.get("final_trade", "WAIT"))
-        if fd_action != old_action:
-            issues.append(f"Action mismatch: final_decision={fd_action}, legacy={old_action}")
-        fd_conf = int(float(fd.get("confidence", 0)))
-        old_conf = int(float(ctx.get("confidence", 0)))
-        if abs(fd_conf - old_conf) > 1:
-            issues.append(f"Confidence mismatch: final_decision={fd_conf}, legacy={old_conf}")
-        strategy = fd.get("strategy", {}) if isinstance(fd.get("strategy", {}), dict) else {}
-        if str(strategy.get("sell_strike", "No Strike")) != str(ctx.get("selected_strike", "No Strike")):
-            issues.append("Strike mismatch between final_decision and legacy variable.")
-        return {"status": "OK" if not issues else "REVIEW", "issues": issues[:5]}
-    except Exception as exc:
-        return {"status": "ERROR", "issues": [str(exc)]}
-
-try:
-    v185_consistency = v185_decision_consistency_check(final_decision, locals())
-except Exception:
-    v185_consistency = {"status": "ERROR", "issues": ["Consistency check failed."]}
-
-
-
+# Decision Engine report is now the consistency source of truth.
 
 # =========================================================
 # V18.6 SNAPSHOT OBJECT FOUNDATION
@@ -4605,320 +4548,44 @@ except Exception as _v186_error:
 
 
 # =========================================================
-# V18.7 SNAPSHOT DRIVEN AI
+# V19.7 CLEANUP — OLD V18.7 MUTATING SNAPSHOT AI REMOVED
 # =========================================================
-# Goal:
-# - Make V18 AI read from market_snapshot.
-# - Do not change DhanHQ / refresh / portfolio.
-# - Do not remove old variables yet.
-# - Strengthen one-snapshot architecture.
+# ai_brain.py now provides snapshot bias/explanation.
+# It does not overwrite final action; Decision Engine owns execution verdict.
 
-def v187_score_from_snapshot(snapshot):
-    try:
-        m = snapshot.get("market", {}) if isinstance(snapshot.get("market", {}), dict) else {}
-        oc = snapshot.get("option_chain", {}) if isinstance(snapshot.get("option_chain", {}), dict) else {}
-        sig = snapshot.get("signals", {}) if isinstance(snapshot.get("signals", {}), dict) else {}
-        risk = snapshot.get("risk", {}) if isinstance(snapshot.get("risk", {}), dict) else {}
-        ai = snapshot.get("ai", {}) if isinstance(snapshot.get("ai", {}), dict) else {}
-
-        option_bias = float(sig.get("option_bias", 0) or 0)
-        price_bias = float(sig.get("price_action_bias", 0) or 0)
-        heavy_bias = float(sig.get("heavyweight_bias", 0) or 0)
-        market_bias = float(sig.get("market_bias", 0) or 0)
-
-        bullish_power = 0
-        bearish_power = 0
-        parts = [
-            ("Option", option_bias, 0.36),
-            ("Price", price_bias, 0.28),
-            ("Heavy", heavy_bias, 0.24),
-            ("Market", market_bias, 0.12),
-        ]
-        notes = []
-        for name, val, weight in parts:
-            if val > 0:
-                bullish_power += min(abs(val), 100) * weight
-                notes.append(f"{name} bullish {val:.0f}")
-            elif val < 0:
-                bearish_power += min(abs(val), 100) * weight
-                notes.append(f"{name} bearish {abs(val):.0f}")
-            else:
-                notes.append(f"{name} neutral")
-
-        net_bias = bullish_power - bearish_power
-        data_quality = float(risk.get("data_quality", 0) or 0)
-        seller_risk = float(risk.get("seller_risk", 100) or 100)
-        news_risk = float(risk.get("news_risk", 0) or 0)
-        gamma_risk = float(risk.get("gamma_risk", 0) or 0)
-        shock_risk = float(risk.get("shock_risk", 0) or 0)
-        pcr = float(oc.get("pcr", 0) or 0)
-
-        risk_score = seller_risk * 0.34 + news_risk * 0.18 + gamma_risk * 0.24 + shock_risk * 0.24
-        clean_risk = max(0, 100 - risk_score)
-
-        if net_bias >= 22:
-            proposed = "SELL PE"
-        elif net_bias <= -22:
-            proposed = "SELL CE"
-        else:
-            proposed = "WAIT"
-
-        # PCR sanity filter
-        warnings = []
-        if proposed == "SELL PE" and pcr > 1.65:
-            warnings.append("PCR overheated; bullish trade caution.")
-        if proposed == "SELL CE" and pcr < 0.75 and pcr > 0:
-            warnings.append("PCR bearish already; CE sell caution.")
-
-        confidence = int(round(max(0, min(98, data_quality * 0.28 + abs(net_bias) * 0.40 + clean_risk * 0.32))))
-
-        return {
-            "proposed_action": proposed,
-            "net_bias": int(round(net_bias)),
-            "bullish_power": int(round(bullish_power)),
-            "bearish_power": int(round(bearish_power)),
-            "risk_score": int(round(risk_score)),
-            "clean_risk": int(round(clean_risk)),
-            "snapshot_confidence": confidence,
-            "notes": notes[:6],
-            "warnings": warnings,
-        }
-    except Exception as exc:
-        return {"proposed_action": "WAIT", "net_bias": 0, "snapshot_confidence": 0, "notes": [str(exc)], "warnings": ["Snapshot AI error."]}
-
-
-def v187_apply_snapshot_ai(fd, snapshot, delta):
-    if not isinstance(fd, dict):
-        return fd
-    fd = dict(fd)
-    s_ai = v187_score_from_snapshot(snapshot)
-    fd["snapshot_ai"] = s_ai
-
-    current_action = str(fd.get("action", "WAIT")).upper()
-    proposed = str(s_ai.get("proposed_action", "WAIT")).upper()
-    material = 0
-    try:
-        material = int(delta.get("material_change", 0))
-    except Exception:
-        material = 0
-
-    blockers = fd.get("blockers", []) if isinstance(fd.get("blockers", []), list) else []
-    warnings = fd.get("warnings", []) if isinstance(fd.get("warnings", []), list) else []
-
-    for w in s_ai.get("warnings", []) or []:
-        if w not in warnings:
-            warnings.append(w)
-
-    # Snapshot AI should not aggressively overwrite a working final decision yet.
-    # It only blocks contradiction or improves WAIT explanation.
-    if current_action != proposed and proposed != "WAIT":
-        if material < 35:
-            blockers.append(f"Snapshot AI wants {proposed}, but material change only {material}/100. Wait for confirmation.")
-        else:
-            warnings.append(f"Snapshot AI bias shifted toward {proposed}; confirm before changing trade.")
-
-    if current_action != "WAIT" and proposed == "WAIT":
-        warnings.append("Snapshot AI sees no clean directional edge; manage existing trade carefully.")
-
-    # If current action is WAIT and snapshot confidence is strong, show opportunity but do not force trade.
-    if current_action == "WAIT" and proposed != "WAIT" and s_ai.get("snapshot_confidence", 0) >= 75 and material >= 35:
-        warnings.append(f"Possible setup forming: {proposed}. Need final strike/hedge validation.")
-
-    if blockers:
-        fd["action"] = "WAIT"
-        fd["quality"] = "BLOCKED"
-        fd["confidence"] = min(int(fd.get("confidence", 0) or 0), 64)
-        if isinstance(fd.get("strategy", {}), dict):
-            fd["strategy"]["type"] = "WAIT"
-            fd["strategy"]["sell_side"] = None
-            fd["strategy"]["sell_strike"] = "No Strike"
-            fd["strategy"]["hedge_strike"] = "No Hedge"
-            fd["strategy"]["sl"] = "No Trade"
-            fd["strategy"]["target"] = "No Trade"
-            fd["strategy"]["lots"] = 0
-
-    fd["blockers"] = blockers[:12]
-    fd["warnings"] = warnings[:12]
-
-    reasons = fd.get("reasons", []) if isinstance(fd.get("reasons", []), list) else []
-    snap_reason = f"Snapshot AI: {proposed} bias | Net bias {s_ai.get('net_bias',0)} | Confidence {s_ai.get('snapshot_confidence',0)}%."
-    if snap_reason not in reasons:
-        reasons.insert(0, snap_reason)
-    fd["reasons"] = reasons[:12]
-    fd["version"] = "V19.5.1 Full Audit Fix"
-
-    return fd
-
-
+# =========================================================
+# V19.7 SNAPSHOT HEALTH COMPATIBILITY BRIDGE
+# =========================================================
+# snapshot_engine.py is the single snapshot-health scorer.
+# final_decision["snapshot_health"] is retained only for old UI compatibility.
 try:
-    final_decision = v187_apply_snapshot_ai(final_decision, market_snapshot, snapshot_delta)
-except Exception as _v187_error:
+    if V19_SNAPSHOT_ENGINE_READY:
+        _v197_snapshot_health = v19_snapshot_health(market_snapshot)
+    else:
+        _v197_snapshot_health = {
+            "score": 0,
+            "label": "FALLBACK",
+            "issues": [],
+            "warnings": [],
+        }
+
+    if isinstance(final_decision, dict):
+        final_decision["snapshot_health"] = _v197_snapshot_health
+except Exception as _v197_health_error:
+    _v197_snapshot_health = {
+        "score": 0,
+        "label": "ERROR",
+        "issues": [str(_v197_health_error)],
+        "warnings": [],
+    }
     try:
-        final_decision.setdefault("warnings", []).append(f"V18.7 snapshot AI error: {_v187_error}")
+        if isinstance(final_decision, dict):
+            final_decision["snapshot_health"] = _v197_snapshot_health
+            final_decision.setdefault("warnings", []).append(
+                f"V19.7 snapshot health bridge error: {_v197_health_error}"
+            )
     except Exception:
         pass
-
-try:
-    final_trade = final_decision.get("action", "WAIT")
-    confidence = float(final_decision.get("confidence", 0))
-    selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
-    hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
-    suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
-    sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
-    target_display = final_decision.get("strategy", {}).get("target", "No Trade")
-except Exception:
-    pass
-
-
-
-
-# =========================================================
-# V18.8 SNAPSHOT HEALTH + AI INPUT QUALITY GUARD
-# =========================================================
-# Goal:
-# - Check whether one snapshot is reliable enough for action.
-# - No API change.
-# - No refresh/portfolio change.
-# - Adds safer blockers when critical input is weak.
-
-def v188_snapshot_health(snapshot):
-    try:
-        issues = []
-        warnings = []
-        points = 100
-
-        m = snapshot.get("market", {}) if isinstance(snapshot.get("market", {}), dict) else {}
-        oc = snapshot.get("option_chain", {}) if isinstance(snapshot.get("option_chain", {}), dict) else {}
-        sig = snapshot.get("signals", {}) if isinstance(snapshot.get("signals", {}), dict) else {}
-        risk = snapshot.get("risk", {}) if isinstance(snapshot.get("risk", {}), dict) else {}
-        src = snapshot.get("source_health", {}) if isinstance(snapshot.get("source_health", {}), dict) else {}
-
-        nifty_price = float(m.get("nifty_price", 0) or 0)
-        if nifty_price <= 0:
-            issues.append("Nifty price missing.")
-            points -= 30
-
-        if not oc.get("success", False):
-            issues.append("Live option-chain not confirmed.")
-            points -= 35
-
-        if int(oc.get("rows_count", 0) or 0) < 5:
-            issues.append("Option-chain rows too low.")
-            points -= 15
-
-        pcr = float(oc.get("pcr", 0) or 0)
-        if pcr <= 0:
-            warnings.append("PCR missing/zero.")
-            points -= 10
-        elif pcr < 0.55 or pcr > 2.20:
-            warnings.append(f"PCR extreme/unusual: {pcr:.2f}.")
-            points -= 8
-
-        data_quality = float(risk.get("data_quality", 0) or 0)
-        if data_quality < 60:
-            issues.append(f"Base data quality weak: {data_quality:.0f}/100.")
-            points -= 20
-
-        if not src.get("dhan_ready", False):
-            warnings.append("Dhan credentials/source not ready.")
-            points -= 10
-
-        # Bias availability check
-        bias_values = [
-            abs(float(sig.get("option_bias", 0) or 0)),
-            abs(float(sig.get("price_action_bias", 0) or 0)),
-            abs(float(sig.get("heavyweight_bias", 0) or 0)),
-        ]
-        if sum(1 for v in bias_values if v > 0) < 2:
-            warnings.append("Less than two signal engines have meaningful bias.")
-            points -= 10
-
-        points = int(max(0, min(100, points)))
-        if points >= 80 and not issues:
-            label = "HEALTHY"
-        elif points >= 65:
-            label = "CAUTION"
-        elif points >= 50:
-            label = "WEAK"
-        else:
-            label = "UNRELIABLE"
-
-        return {
-            "score": points,
-            "label": label,
-            "issues": issues[:8],
-            "warnings": warnings[:8],
-        }
-    except Exception as exc:
-        return {"score": 0, "label": "ERROR", "issues": [str(exc)], "warnings": []}
-
-
-def v188_apply_snapshot_health_guard(fd, snapshot):
-    if not isinstance(fd, dict):
-        return fd
-    fd = dict(fd)
-    health = v188_snapshot_health(snapshot)
-    fd["snapshot_health"] = health
-
-    blockers = fd.get("blockers", []) if isinstance(fd.get("blockers", []), list) else []
-    warnings = fd.get("warnings", []) if isinstance(fd.get("warnings", []), list) else []
-
-    for w in health.get("warnings", []):
-        if w not in warnings:
-            warnings.append(w)
-
-    if health.get("score", 0) < 55:
-        blockers.append(f"Snapshot health weak: {health.get('score',0)}/100 ({health.get('label','')}).")
-        for issue in health.get("issues", [])[:3]:
-            blockers.append(issue)
-    elif health.get("score", 0) < 70 and str(fd.get("action", "WAIT")).upper() != "WAIT":
-        warnings.append(f"Snapshot health caution: {health.get('score',0)}/100. Use small size/confirmation.")
-
-    if blockers:
-        fd["action"] = "WAIT"
-        fd["quality"] = "BLOCKED"
-        fd["confidence"] = min(int(fd.get("confidence", 0) or 0), 64)
-        if isinstance(fd.get("strategy", {}), dict):
-            fd["strategy"]["type"] = "WAIT"
-            fd["strategy"]["sell_side"] = None
-            fd["strategy"]["sell_strike"] = "No Strike"
-            fd["strategy"]["hedge_strike"] = "No Hedge"
-            fd["strategy"]["sl"] = "No Trade"
-            fd["strategy"]["target"] = "No Trade"
-            fd["strategy"]["lots"] = 0
-
-    fd["blockers"] = blockers[:14]
-    fd["warnings"] = warnings[:14]
-
-    reasons = fd.get("reasons", []) if isinstance(fd.get("reasons", []), list) else []
-    health_reason = f"Snapshot health: {health.get('score',0)}/100 ({health.get('label','NA')})."
-    if health_reason not in reasons:
-        reasons.insert(0, health_reason)
-    fd["reasons"] = reasons[:14]
-    fd["version"] = "V19.5.1 Full Audit Fix"
-    return fd
-
-
-try:
-    final_decision = v188_apply_snapshot_health_guard(final_decision, market_snapshot)
-except Exception as _v188_error:
-    try:
-        final_decision.setdefault("warnings", []).append(f"V18.8 health guard error: {_v188_error}")
-    except Exception:
-        pass
-
-try:
-    final_trade = final_decision.get("action", "WAIT")
-    confidence = float(final_decision.get("confidence", 0))
-    selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
-    hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
-    suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
-    sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
-    target_display = final_decision.get("strategy", {}).get("target", "No Trade")
-except Exception:
-    pass
-
-
 
 
 # =========================================================
@@ -5165,7 +4832,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.6 Decision Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.7 Decision Authority Cleanup</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -5239,15 +4906,24 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V19.6: Decision Engine is final execution authority; AI bias remains visible separately.")
+            st.caption("V19.7: Decision Engine is the single execution authority; rankings and AI bias are advisory inputs.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
 
                 try:
-                    _sai = _fd.get("snapshot_ai", {}) if isinstance(_fd.get("snapshot_ai", {}), dict) else {}
-                    if _sai:
-                        st.caption(f"Snapshot AI: {_sai.get('proposed_action','WAIT')} | Net Bias: {_sai.get('net_bias',0)} | Snapshot Confidence: {_sai.get('snapshot_confidence',0)}%")
+                    _sai = (
+                        ai_brain_report.get("snapshot_bias", {})
+                        if isinstance(ai_brain_report, dict)
+                        else {}
+                    )
+                    if isinstance(_sai, dict) and _sai:
+                        st.caption(
+                            f"AI Brain Snapshot Bias: {_sai.get('proposed_action','WAIT')} | "
+                            f"Net Bias: {_sai.get('net_bias',0)} | "
+                            f"Bull Power: {_sai.get('bullish_power',0)} | "
+                            f"Bear Power: {_sai.get('bearish_power',0)}"
+                        )
 
                     _health = _fd.get("snapshot_health", {}) if isinstance(_fd.get("snapshot_health", {}), dict) else {}
                     if _health:
@@ -5349,14 +5025,16 @@ try:
             st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
             st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
             st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
-            st.write("Next module target: decision_engine.py")
-            st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
-            st.write("V18.5 removed: None")
-            st.write("Decision consistency:", v185_consistency.get("status", "NA"))
-            if v185_consistency.get("issues"):
-                st.write("Issues:")
-                for _issue in v185_consistency.get("issues", []):
-                    st.write("•", _issue)
+            st.write("V19.7 cleanup:", "ACTIVE")
+            st.write("Removed old execution gate:", "v162_signal_gate")
+            st.write("Removed old mutating Snapshot AI:", "V18.7")
+            st.write("Removed duplicate Snapshot Health:", "V18.8 internal scorer")
+            st.write("Removed old consistency guard:", "V18.5")
+            st.write("Single execution authority:", "decision_engine.py")
+            st.write(
+                "Next cleanup target:",
+                "legacy confidence / ranking overlap after live-market validation",
+            )
 
         with st.expander("🧪 Developer: final_decision object", expanded=False):
             st.json(_fd)
@@ -5374,10 +5052,14 @@ try:
                     "health": snapshot_health_external if "snapshot_health_external" in globals() else {},
                 })
 
-                st.markdown("#### V18.7 Snapshot AI")
-                st.json(_fd.get("snapshot_ai", {}) if isinstance(_fd, dict) else {})
+                st.markdown("#### AI Brain Snapshot Bias")
+                st.json(
+                    ai_brain_report.get("snapshot_bias", {})
+                    if isinstance(ai_brain_report, dict)
+                    else {}
+                )
 
-                st.markdown("#### V18.8 Snapshot Health")
+                st.markdown("#### Snapshot Engine Health")
                 st.json(_fd.get("snapshot_health", {}) if isinstance(_fd, dict) else {})
 
                 st.markdown("#### V19.4 AI Brain Report")
@@ -5458,66 +5140,68 @@ if "INVALID/EXPIRED" in source_text:
 elif "Fallback" in source_text:
     st.info("Observation Mode: live option-chain complete nahi hai. Real trade se pehle Dhan data verify karo.")
 
-# V16.2 Super: Single decision + entry gate. This removes confusion between Ranking and Final AI.
-try:
-    _top_strategy_v162 = (v11_ranked_strategies[0] if v11_ranked_strategies else {"strategy": "WAIT", "confidence": 0})
-except Exception:
-    _top_strategy_v162 = {"strategy": "WAIT", "confidence": 0}
-try:
-    _strike_num_v162 = int(str(selected_strike).split()[0]) if str(selected_strike).split() and str(selected_strike).split()[0].isdigit() else 0
-except Exception:
-    _strike_num_v162 = 0
-_signal_gate_v162 = v162_signal_gate(final_trade, _top_strategy_v162.get("strategy", "WAIT"), confidence, _strike_num_v162)
+# V19.7 Decision Authority Projection
+# Existing UI still reads _signal_gate_v162 for compatibility,
+# but the value now comes only from decision_engine_report.
+_de_gate_v197 = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+_de_status_v197 = str(_de_gate_v197.get("execution_status", "WAIT"))
+_de_final_v197 = str(_de_gate_v197.get("final_action", "WAIT"))
+_de_freeze_v197 = (
+    _de_gate_v197.get("freeze", {})
+    if isinstance(_de_gate_v197.get("freeze", {}), dict)
+    else {}
+)
 
-# V19.5.1 execution consistency gate:
-# analytical bias may exist while fresh entry remains blocked.
-try:
-    _gate_reasons_v1951 = list(_signal_gate_v162.get("reasons", []) or [])
-    if market_text != "Market Open":
-        _signal_gate_v162["allowed"] = False
-        _gate_reasons_v1951.append("Market closed hai — plan preview only, fresh entry allowed nahi.")
+_gate_reasons_v197 = []
+if _de_gate_v197.get("blockers"):
+    _gate_reasons_v197.extend(_de_gate_v197.get("blockers", []))
+if _de_gate_v197.get("warnings"):
+    _gate_reasons_v197.extend(_de_gate_v197.get("warnings", []))
+if not _gate_reasons_v197:
+    _gate_reasons_v197.append(
+        _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable.")
+    )
 
-    if final_trade != "WAIT" and isinstance(v14_freeze, dict) and not bool(v14_freeze.get("confirmed", False)):
-        _signal_gate_v162["allowed"] = False
-        _gate_reasons_v1951.append(
-            f"Freeze confirmation pending: {int(v14_freeze.get('same_count',0) or 0)}/{int(v14_freeze.get('required',3) or 3)} refresh."
-        )
-
-    _rr_v1951 = risk_engine_report if isinstance(risk_engine_report, dict) else {}
-    if _rr_v1951.get("hard_blockers"):
-        _signal_gate_v162["allowed"] = False
-        _gate_reasons_v1951.append("Risk Engine hard blocker active.")
-    if str(_rr_v1951.get("guidance", "")).upper() in ("BLOCK TRADE", "WAIT / REDUCE SIZE"):
-        _signal_gate_v162["allowed"] = False
-        _gate_reasons_v1951.append(f"Risk guidance: {_rr_v1951.get('guidance')}.")
-
-    _signal_gate_v162["reasons"] = list(dict.fromkeys(_gate_reasons_v1951)) or ["Entry checklist green."]
-except Exception:
-    pass
+_signal_gate_v162 = {
+    "allowed": bool(
+        _de_status_v197 == "APPROVED"
+        and _de_final_v197 in ("SELL CE", "SELL PE")
+    ),
+    "count": int(_de_freeze_v197.get("count", 0) or 0),
+    "required": int(_de_freeze_v197.get("required", 3) or 3),
+    "reasons": list(
+        dict.fromkeys([str(x) for x in _gate_reasons_v197 if x])
+    )[:16],
+}
 
 st.markdown("### ⚖️ Decision Engine Final Authority — Fresh Entry Only If Approved")
-_status_class = "green" if _signal_gate_v162["allowed"] else ("red" if final_trade != "WAIT" and confidence >= 90 else "")
-_status_text = "ENTRY ALLOWED ✅" if _signal_gate_v162["allowed"] else ("MARKET CLOSED — PLAN PREVIEW 🔒" if market_text != "Market Open" else "ENTRY BLOCKED / WAIT ⚠️")
+_status_class = "green" if _de_status_v197 == "APPROVED" else ("red" if _de_status_v197 == "BLOCKED" else "")
+_status_text = {
+    "APPROVED": "ENTRY APPROVED ✅",
+    "BLOCKED": "ENTRY BLOCKED / WAIT ⚠️",
+    "PREVIEW_ONLY": "MARKET CLOSED — PLAN PREVIEW 🔒",
+    "WAIT": "WAIT — NO FRESH TRADE",
+}.get(_de_status_v197, "WAIT — NO FRESH TRADE")
 st.markdown(f"""
 <div class='v17-final {_status_class}'>
 <h2>{_status_text}</h2>
-<b>Decision Verdict:</b> {final_trade} &nbsp; | &nbsp; <b>Best Setup:</b> {_top_strategy_v162.get('strategy','WAIT')} ({_top_strategy_v162.get('confidence',0)}%) &nbsp; | &nbsp;
-<b>Final Confidence:</b> {confidence:.0f}% &nbsp; | &nbsp; <b>Stable:</b> {_signal_gate_v162['count']}/{_signal_gate_v162.get('required',2)}<br>
+<b>Decision Verdict:</b> {_de_final_v197} &nbsp; | &nbsp;
+<b>AI Bias:</b> {_de_gate_v197.get('analysis_action','WAIT')} &nbsp; | &nbsp;
+<b>Status:</b> {_de_status_v197}<br>
+<b>Calibrated Confidence:</b> {_de_gate_v197.get('calibrated_confidence',0)}% &nbsp; | &nbsp;
+<b>Freeze:</b> {_signal_gate_v162['count']}/{_signal_gate_v162.get('required',3)}<br>
 <b>Strike:</b> {selected_strike} &nbsp; | &nbsp; <b>Hedge:</b> {hedge} &nbsp; | &nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%<br>
 <b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)
 </div>
 """, unsafe_allow_html=True)
 if not _signal_gate_v162["allowed"]:
-    st.write("**Why blocked:**")
+    st.write("**Decision Engine reasons:**")
     for _r in _signal_gate_v162["reasons"]:
         st.write("•", _r)
-    for _r in (locals().get("v164_unified", {}) or {}).get("blockers", []):
-        st.write("•", _r)
 else:
-    st.success("Signal green hai. Broker price, spread, margin aur SL confirm karke hi order lagao.")
-if developer_mode:
-    for _r in (locals().get("v164_unified", {}) or {}).get("reasons", []):
-        st.info(_r)
+    st.success(
+        "Decision Engine APPROVED. Broker price, spread, margin, hedge aur SL confirm karke hi order lagao."
+    )
 
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
@@ -5596,11 +5280,16 @@ _strategy_rows_v163 = [
 _strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Confidence", 0) or 0), reverse=True)
 st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
 _best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Confidence": 0}
-st.markdown(f"**Best Ranked Setup:** {_best_row_v163.get('Strategy','WAIT')} (Rank {_best_row_v163.get('Confidence',0)}/100)  |  **Unified Final AI:** {final_trade} ({confidence:.0f}%)")
+st.markdown(
+    f"**Best Ranked Setup:** {_best_row_v163.get('Strategy','WAIT')} "
+    f"(Rank {_best_row_v163.get('Confidence',0)}/100)  |  "
+    f"**Decision Engine Verdict:** {_de_final_v197} "
+    f"({_de_gate_v197.get('calibrated_confidence',0)}%)"
+)
 if final_trade == "WAIT":
-    st.warning("Unified AI abhi WAIT/block kar raha hai. Reason upar Super Final Decision mein diya hai.")
+    st.warning("Decision Engine abhi WAIT/BLOCK kar raha hai. Exact reason upar Final Authority section mein diya hai.")
 else:
-    st.success("Final AI active hai. Broker price, spread, margin aur hedge confirm karo.")
+    st.success("Decision Engine verdict active hai. Broker price, spread, margin aur hedge confirm karo.")
 
 # V17 Compact AI Brain - details only in Developer Mode.
 st.markdown("### 🧠 AI Brain + ⚖️ Decision Authority")
@@ -6096,6 +5785,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.6 build: Snapshot + AI Brain + Risk Engine + one Decision Engine authority. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.7 build: one Decision Engine authority; duplicate gate, snapshot-AI mutation and internal health scorer removed. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
