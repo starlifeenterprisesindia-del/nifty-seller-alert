@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V18.4 - SAFE CLEANUP
+# NIFTY SELLER AI DASHBOARD V18.5 - DUPLICATE DECISION CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V18.4 Safe Cleanup",
+    page_title="Nifty Seller AI Dashboard V18.5 Duplicate Decision Cleanup",
     page_icon="🧠",
     layout="wide",
 )
@@ -2308,7 +2308,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18.4 Clean AI")
+st.sidebar.title("⚙️ V18.5 Clean AI")
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -3977,7 +3977,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V18.4 Safe Cleanup",
+        "version": "V18.5 Duplicate Decision Cleanup",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4014,7 +4014,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V18.4 Safe Cleanup",
+        "version": "V18.5 Duplicate Decision Cleanup",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4233,7 +4233,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V18.4 Safe Cleanup"
+    fd["version"] = "V18.5 Duplicate Decision Cleanup"
 
     return fd
 
@@ -4256,6 +4256,39 @@ try:
     target_display = final_decision.get("strategy", {}).get("target", "No Trade")
 except Exception:
     pass
+
+
+
+
+# =========================================================
+# V18.5 DUPLICATE DECISION CLEANUP GUARD
+# =========================================================
+# This guard does not create a new decision. It checks whether old UI variables still match final_decision.
+
+def v185_decision_consistency_check(fd, ctx):
+    try:
+        if not isinstance(fd, dict):
+            return {"status": "NO_FINAL_DECISION", "issues": ["final_decision object missing."]}
+        issues = []
+        fd_action = str(fd.get("action", "WAIT"))
+        old_action = str(ctx.get("final_trade", "WAIT"))
+        if fd_action != old_action:
+            issues.append(f"Action mismatch: final_decision={fd_action}, legacy={old_action}")
+        fd_conf = int(float(fd.get("confidence", 0)))
+        old_conf = int(float(ctx.get("confidence", 0)))
+        if abs(fd_conf - old_conf) > 1:
+            issues.append(f"Confidence mismatch: final_decision={fd_conf}, legacy={old_conf}")
+        strategy = fd.get("strategy", {}) if isinstance(fd.get("strategy", {}), dict) else {}
+        if str(strategy.get("sell_strike", "No Strike")) != str(ctx.get("selected_strike", "No Strike")):
+            issues.append("Strike mismatch between final_decision and legacy variable.")
+        return {"status": "OK" if not issues else "REVIEW", "issues": issues[:5]}
+    except Exception as exc:
+        return {"status": "ERROR", "issues": [str(exc)]}
+
+try:
+    v185_consistency = v185_decision_consistency_check(final_decision, locals())
+except Exception:
+    v185_consistency = {"status": "ERROR", "issues": ["Consistency check failed."]}
 
 
 
@@ -4337,7 +4370,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.4 Safe Cleanup</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.5 Duplicate Decision Cleanup</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4347,7 +4380,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V18.4 Clean Smart AI — {_quality}</h3>
+<h3>🧠 V18.5 Clean Smart AI — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4367,7 +4400,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V18.4: Safe cleanup active — core engines untouched.")
+            st.caption("V18.5: Duplicate decision cleanup active — core engines untouched.")
     except Exception:
         pass
 
@@ -4387,6 +4420,12 @@ try:
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
+            st.write("V18.5 removed: None")
+            st.write("Decision consistency:", v185_consistency.get("status", "NA"))
+            if v185_consistency.get("issues"):
+                st.write("Issues:")
+                for _issue in v185_consistency.get("issues", []):
+                    st.write("•", _issue)
 
         with st.expander("🧪 Developer: final_decision object", expanded=False):
             st.json(_fd)
@@ -4395,7 +4434,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Clean AI Output + Smart Confidence + Trade Quality</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Duplicate Decision Cleanup + One AI Output</div>",
     unsafe_allow_html=True,
 )
 
