@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V18.7 - SNAPSHOT DRIVEN AI
+# NIFTY SELLER AI DASHBOARD V18.8 - SNAPSHOT HEALTH GUARD
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V18.7 Snapshot Driven AI",
+    page_title="Nifty Seller AI Dashboard V18.8 Snapshot Health Guard",
     page_icon="🧠",
     layout="wide",
 )
@@ -2308,7 +2308,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18.7 Snapshot AI")
+st.sidebar.title("⚙️ V18.8 Snapshot Guard")
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -3977,7 +3977,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V18.7 Snapshot Driven AI",
+        "version": "V18.8 Snapshot Health Guard",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4014,7 +4014,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V18.7 Snapshot Driven AI",
+        "version": "V18.8 Snapshot Health Guard",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4233,7 +4233,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V18.7 Snapshot Driven AI"
+    fd["version"] = "V18.8 Snapshot Health Guard"
 
     return fd
 
@@ -4341,7 +4341,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V18.7 Snapshot Driven AI",
+        "version": "V18.8 Snapshot Health Guard",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4452,7 +4452,7 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V18.7 Snapshot Driven AI", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V18.8 Snapshot Health Guard", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
 
 
@@ -4599,7 +4599,7 @@ def v187_apply_snapshot_ai(fd, snapshot, delta):
     if snap_reason not in reasons:
         reasons.insert(0, snap_reason)
     fd["reasons"] = reasons[:12]
-    fd["version"] = "V18.7 Snapshot Driven AI"
+    fd["version"] = "V18.8 Snapshot Health Guard"
 
     return fd
 
@@ -4609,6 +4609,155 @@ try:
 except Exception as _v187_error:
     try:
         final_decision.setdefault("warnings", []).append(f"V18.7 snapshot AI error: {_v187_error}")
+    except Exception:
+        pass
+
+try:
+    final_trade = final_decision.get("action", "WAIT")
+    confidence = float(final_decision.get("confidence", 0))
+    selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
+    hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
+    suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
+    sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
+    target_display = final_decision.get("strategy", {}).get("target", "No Trade")
+except Exception:
+    pass
+
+
+
+
+# =========================================================
+# V18.8 SNAPSHOT HEALTH + AI INPUT QUALITY GUARD
+# =========================================================
+# Goal:
+# - Check whether one snapshot is reliable enough for action.
+# - No API change.
+# - No refresh/portfolio change.
+# - Adds safer blockers when critical input is weak.
+
+def v188_snapshot_health(snapshot):
+    try:
+        issues = []
+        warnings = []
+        points = 100
+
+        m = snapshot.get("market", {}) if isinstance(snapshot.get("market", {}), dict) else {}
+        oc = snapshot.get("option_chain", {}) if isinstance(snapshot.get("option_chain", {}), dict) else {}
+        sig = snapshot.get("signals", {}) if isinstance(snapshot.get("signals", {}), dict) else {}
+        risk = snapshot.get("risk", {}) if isinstance(snapshot.get("risk", {}), dict) else {}
+        src = snapshot.get("source_health", {}) if isinstance(snapshot.get("source_health", {}), dict) else {}
+
+        nifty_price = float(m.get("nifty_price", 0) or 0)
+        if nifty_price <= 0:
+            issues.append("Nifty price missing.")
+            points -= 30
+
+        if not oc.get("success", False):
+            issues.append("Live option-chain not confirmed.")
+            points -= 35
+
+        if int(oc.get("rows_count", 0) or 0) < 5:
+            issues.append("Option-chain rows too low.")
+            points -= 15
+
+        pcr = float(oc.get("pcr", 0) or 0)
+        if pcr <= 0:
+            warnings.append("PCR missing/zero.")
+            points -= 10
+        elif pcr < 0.55 or pcr > 2.20:
+            warnings.append(f"PCR extreme/unusual: {pcr:.2f}.")
+            points -= 8
+
+        data_quality = float(risk.get("data_quality", 0) or 0)
+        if data_quality < 60:
+            issues.append(f"Base data quality weak: {data_quality:.0f}/100.")
+            points -= 20
+
+        if not src.get("dhan_ready", False):
+            warnings.append("Dhan credentials/source not ready.")
+            points -= 10
+
+        # Bias availability check
+        bias_values = [
+            abs(float(sig.get("option_bias", 0) or 0)),
+            abs(float(sig.get("price_action_bias", 0) or 0)),
+            abs(float(sig.get("heavyweight_bias", 0) or 0)),
+        ]
+        if sum(1 for v in bias_values if v > 0) < 2:
+            warnings.append("Less than two signal engines have meaningful bias.")
+            points -= 10
+
+        points = int(max(0, min(100, points)))
+        if points >= 80 and not issues:
+            label = "HEALTHY"
+        elif points >= 65:
+            label = "CAUTION"
+        elif points >= 50:
+            label = "WEAK"
+        else:
+            label = "UNRELIABLE"
+
+        return {
+            "score": points,
+            "label": label,
+            "issues": issues[:8],
+            "warnings": warnings[:8],
+        }
+    except Exception as exc:
+        return {"score": 0, "label": "ERROR", "issues": [str(exc)], "warnings": []}
+
+
+def v188_apply_snapshot_health_guard(fd, snapshot):
+    if not isinstance(fd, dict):
+        return fd
+    fd = dict(fd)
+    health = v188_snapshot_health(snapshot)
+    fd["snapshot_health"] = health
+
+    blockers = fd.get("blockers", []) if isinstance(fd.get("blockers", []), list) else []
+    warnings = fd.get("warnings", []) if isinstance(fd.get("warnings", []), list) else []
+
+    for w in health.get("warnings", []):
+        if w not in warnings:
+            warnings.append(w)
+
+    if health.get("score", 0) < 55:
+        blockers.append(f"Snapshot health weak: {health.get('score',0)}/100 ({health.get('label','')}).")
+        for issue in health.get("issues", [])[:3]:
+            blockers.append(issue)
+    elif health.get("score", 0) < 70 and str(fd.get("action", "WAIT")).upper() != "WAIT":
+        warnings.append(f"Snapshot health caution: {health.get('score',0)}/100. Use small size/confirmation.")
+
+    if blockers:
+        fd["action"] = "WAIT"
+        fd["quality"] = "BLOCKED"
+        fd["confidence"] = min(int(fd.get("confidence", 0) or 0), 64)
+        if isinstance(fd.get("strategy", {}), dict):
+            fd["strategy"]["type"] = "WAIT"
+            fd["strategy"]["sell_side"] = None
+            fd["strategy"]["sell_strike"] = "No Strike"
+            fd["strategy"]["hedge_strike"] = "No Hedge"
+            fd["strategy"]["sl"] = "No Trade"
+            fd["strategy"]["target"] = "No Trade"
+            fd["strategy"]["lots"] = 0
+
+    fd["blockers"] = blockers[:14]
+    fd["warnings"] = warnings[:14]
+
+    reasons = fd.get("reasons", []) if isinstance(fd.get("reasons", []), list) else []
+    health_reason = f"Snapshot health: {health.get('score',0)}/100 ({health.get('label','NA')})."
+    if health_reason not in reasons:
+        reasons.insert(0, health_reason)
+    fd["reasons"] = reasons[:14]
+    fd["version"] = "V18.8 Snapshot Health Guard"
+    return fd
+
+
+try:
+    final_decision = v188_apply_snapshot_health_guard(final_decision, market_snapshot)
+except Exception as _v188_error:
+    try:
+        final_decision.setdefault("warnings", []).append(f"V18.8 health guard error: {_v188_error}")
     except Exception:
         pass
 
@@ -4703,7 +4852,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.7 Snapshot Driven AI</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.8 Snapshot Health Guard</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4713,7 +4862,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V18.7 Snapshot Driven AI — {_quality}</h3>
+<h3>🧠 V18.8 Snapshot Health AI — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4733,7 +4882,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V18.7: AI reads from snapshot — core engines untouched.")
+            st.caption("V18.8: Snapshot health guard active — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -4742,6 +4891,10 @@ try:
                     _sai = _fd.get("snapshot_ai", {}) if isinstance(_fd.get("snapshot_ai", {}), dict) else {}
                     if _sai:
                         st.caption(f"Snapshot AI: {_sai.get('proposed_action','WAIT')} | Net Bias: {_sai.get('net_bias',0)} | Snapshot Confidence: {_sai.get('snapshot_confidence',0)}%")
+
+                    _health = _fd.get("snapshot_health", {}) if isinstance(_fd.get("snapshot_health", {}), dict) else {}
+                    if _health:
+                        st.caption(f"Snapshot Health: {_health.get('score',0)}/100 ({_health.get('label','NA')})")
                 except Exception:
                     pass
             except Exception:
@@ -4782,6 +4935,9 @@ try:
 
                 st.markdown("#### V18.7 Snapshot AI")
                 st.json(_fd.get("snapshot_ai", {}) if isinstance(_fd, dict) else {})
+
+                st.markdown("#### V18.8 Snapshot Health")
+                st.json(_fd.get("snapshot_health", {}) if isinstance(_fd, dict) else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -4789,7 +4945,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Snapshot Driven AI + One Final Decision</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Snapshot Health + Guarded AI Decision</div>",
     unsafe_allow_html=True,
 )
 
