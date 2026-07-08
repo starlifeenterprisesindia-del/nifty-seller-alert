@@ -9,8 +9,27 @@ import requests
 import streamlit as st
 import yfinance as yf
 
+# V19.0 Modular foundation.
+# Safe optional import: app keeps original helpers in this release for compatibility.
+try:
+    from v19_utils import (
+        safe_float as v19_safe_float,
+        safe_int as v19_safe_int,
+        safe_text as v19_safe_text,
+        clamp as v19_clamp,
+        signed_clamp as v19_signed_clamp,
+        safe_divide as v19_safe_divide,
+        pct_change as v19_pct_change,
+        fmt_time as v19_fmt_time,
+        now_ist as v19_now_ist,
+    )
+    V19_UTILS_READY = True
+except Exception:
+    V19_UTILS_READY = False
+
+
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V18.8 - SNAPSHOT HEALTH GUARD
+# NIFTY SELLER AI DASHBOARD V19.0 - UTILITY MODULE FOUNDATION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +50,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V18.8 Snapshot Health Guard",
+    page_title="Nifty Seller AI Dashboard V19.0 Utility Module",
     page_icon="🧠",
     layout="wide",
 )
@@ -2308,7 +2327,12 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18.8 Snapshot Guard")
+st.sidebar.title("⚙️ V19.0 Modular AI")
+st.sidebar.caption("V19.0: Utility module foundation")
+try:
+    st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
+except Exception:
+    pass
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -3977,7 +4001,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V18.8 Snapshot Health Guard",
+        "version": "V19.0 Utility Module",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4014,7 +4038,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V18.8 Snapshot Health Guard",
+        "version": "V19.0 Utility Module",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4233,7 +4257,7 @@ def v183_rewrite_confidence(fd, ctx):
         if item not in reasons:
             reasons.insert(0, item)
     fd["reasons"] = reasons[:10]
-    fd["version"] = "V18.8 Snapshot Health Guard"
+    fd["version"] = "V19.0 Utility Module"
 
     return fd
 
@@ -4341,7 +4365,7 @@ def build_v186_market_snapshot(ctx):
     pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
 
     snapshot = {
-        "version": "V18.8 Snapshot Health Guard",
+        "version": "V19.0 Utility Module",
         "created_at": fmt_time() if "fmt_time" in globals() else "",
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -4452,7 +4476,7 @@ try:
     market_snapshot = build_v186_market_snapshot(locals())
     snapshot_delta = v186_snapshot_delta(market_snapshot)
 except Exception as _v186_error:
-    market_snapshot = {"version": "V18.8 Snapshot Health Guard", "snapshot_id": "ERROR", "error": str(_v186_error)}
+    market_snapshot = {"version": "V19.0 Utility Module", "snapshot_id": "ERROR", "error": str(_v186_error)}
     snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
 
 
@@ -4599,7 +4623,7 @@ def v187_apply_snapshot_ai(fd, snapshot, delta):
     if snap_reason not in reasons:
         reasons.insert(0, snap_reason)
     fd["reasons"] = reasons[:12]
-    fd["version"] = "V18.8 Snapshot Health Guard"
+    fd["version"] = "V19.0 Utility Module"
 
     return fd
 
@@ -4749,7 +4773,7 @@ def v188_apply_snapshot_health_guard(fd, snapshot):
     if health_reason not in reasons:
         reasons.insert(0, health_reason)
     fd["reasons"] = reasons[:14]
-    fd["version"] = "V18.8 Snapshot Health Guard"
+    fd["version"] = "V19.0 Utility Module"
     return fd
 
 
@@ -4852,7 +4876,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.8 Snapshot Health Guard</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.0 Utility Module</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4862,7 +4886,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V18.8 Snapshot Health AI — {_quality}</h3>
+<h3>🧠 V19.0 Modular Smart AI — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4882,7 +4906,7 @@ try:
             m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
             m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
             m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
-            st.caption("V18.8: Snapshot health guard active — core engines untouched.")
+            st.caption("V19.0: Utility module active — core engines untouched.")
 
             try:
                 st.caption(f"Snapshot: {snapshot_delta.get('status','NA')} | Material Change: {snapshot_delta.get('material_change',0)}/100")
@@ -4917,6 +4941,8 @@ try:
             st.write("V18.4 safe cleanup active.")
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
+            st.write("V19.0 Utility Module:", "READY" if V19_UTILS_READY else "FALLBACK")
+            st.write("Next module target: snapshot_engine.py")
             st.write("Next cleanup target: duplicate V9.1/V12/V16 display logic after more testing.")
             st.write("V18.5 removed: None")
             st.write("Decision consistency:", v185_consistency.get("status", "NA"))
@@ -4945,7 +4971,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Snapshot Health + Guarded AI Decision</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Modular Foundation + Snapshot Health + Guarded AI Decision</div>",
     unsafe_allow_html=True,
 )
 
