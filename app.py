@@ -59,9 +59,16 @@ try:
 except Exception:
     V19_DECISION_ENGINE_READY = False
 
+# V19.10 Strategy Engine module import.
+try:
+    from strategy_engine import build_strategy_plan as v19_build_strategy_plan
+    V19_STRATEGY_ENGINE_READY = True
+except Exception:
+    V19_STRATEGY_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.9 - SNAPSHOT AUTHORITY CLEANUP
+# NIFTY SELLER AI DASHBOARD V19.10 - STRATEGY ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -82,7 +89,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.9 Snapshot Authority Cleanup",
+    page_title="Nifty Seller AI Dashboard V19.10 Strategy Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2377,14 +2384,15 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.9 Modular AI")
-st.sidebar.caption("V19.9: Single Snapshot Authority Cleanup")
+st.sidebar.title("⚙️ V19.10 Modular AI")
+st.sidebar.caption("V19.10: Single Strategy Plan Engine")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
     st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
     st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
+    st.sidebar.caption("strategy_engine: " + ("READY / PLAN AUTHORITY" if V19_STRATEGY_ENGINE_READY else "MISSING"))
 except Exception:
     pass
 
@@ -4169,67 +4177,141 @@ except Exception as _v195_error:
 
 
 # =========================================================
-# V19.5.1 FULL APP CONSISTENCY AUDIT BRIDGE
+# V19.10 STRATEGY ENGINE — SINGLE FINAL PLAN AUTHORITY
 # =========================================================
-# Goal: keep analysis, execution gating, trade plan and risk messaging consistent.
 try:
     _market_text_v1951, _market_day_v1951 = market_status()
     _market_open_v1951 = (_market_text_v1951 == "Market Open")
 except Exception:
-    _market_text_v1951, _market_day_v1951, _market_open_v1951 = "Unknown", "", False
+    _market_text_v1951, _market_day_v1951, _market_open_v1951 = (
+        "Unknown",
+        "",
+        False,
+    )
 
-# Sync entry/SL/target from the selected live candidate after the final action is known.
+if not V19_STRATEGY_ENGINE_READY:
+    st.error(
+        "V19.10 requires strategy_engine.py. "
+        "Final strategy-plan authority is missing or failed to import."
+    )
+    st.stop()
+
 try:
+    _strategy_seed_v1910 = (
+        final_decision.get("strategy", {})
+        if isinstance(final_decision, dict)
+        and isinstance(final_decision.get("strategy", {}), dict)
+        else {}
+    )
+
+    _strategy_action_v1910 = (
+        str(final_decision.get("action", "WAIT")).upper()
+        if isinstance(final_decision, dict)
+        else "WAIT"
+    )
+
+    _strategy_conf_v1910 = (
+        float(final_decision.get("confidence", confidence) or 0)
+        if isinstance(final_decision, dict)
+        else float(confidence or 0)
+    )
+
+    strategy_engine_report = v19_build_strategy_plan(
+        action=_strategy_action_v1910,
+        best_ce=best_ce if isinstance(best_ce, dict) else None,
+        best_pe=best_pe if isinstance(best_pe, dict) else None,
+        hedge_gap=hedge_gap,
+        confidence=_strategy_conf_v1910,
+        gamma_score=gamma_score_v7,
+        shock_score=shock_score_v7,
+        base_lots=(
+            int(_strategy_seed_v1910.get("lots", suggested_lots) or 0)
+        ),
+        existing_strategy=_strategy_seed_v1910,
+        market_open=bool(_market_open_v1951),
+        market_status=_market_text_v1951,
+    )
+
     if isinstance(final_decision, dict):
-        _fd_action_v1951 = str(final_decision.get("action", "WAIT")).upper()
-        _fd_strategy_v1951 = final_decision.get("strategy", {}) if isinstance(final_decision.get("strategy", {}), dict) else {}
-        _fd_conf_v1951 = float(final_decision.get("confidence", confidence) or 0)
+        final_decision["strategy_engine_module"] = "READY"
+        final_decision["strategy_engine_report"] = strategy_engine_report
 
-        _plan_row_v1951 = None
-        _plan_side_v1951 = None
-        if _fd_action_v1951 == "SELL CE" and best_ce:
-            _plan_row_v1951, _plan_side_v1951 = best_ce, "CE"
-        elif _fd_action_v1951 == "SELL PE" and best_pe:
-            _plan_row_v1951, _plan_side_v1951 = best_pe, "PE"
-
-        if _plan_row_v1951 and _plan_side_v1951:
-            _prefix_v1951 = _plan_side_v1951.lower()
-            _premium_v1951 = float(_plan_row_v1951.get(f"{_prefix_v1951}_ltp", 0) or 0)
-            if _premium_v1951 > 0:
-                _prem_plan_v1951 = v12_sl_target_for_seller(
-                    _premium_v1951,
-                    _fd_conf_v1951,
-                    gamma_score_v7,
-                    shock_score_v7,
-                )
-                _fd_strategy_v1951["entry"] = f"₹{_premium_v1951:.2f}"
-                _fd_strategy_v1951["sl"] = f"₹{float(_prem_plan_v1951.get('sl',0) or 0):.2f}"
-                _fd_strategy_v1951["target"] = f"₹{float(_prem_plan_v1951.get('target1',0) or 0):.2f}"
-                final_decision["strategy"] = _fd_strategy_v1951
-
-        final_decision["entry_context"] = {
-            "market_open": bool(_market_open_v1951),
-            "market_status": _market_text_v1951,
-            "freeze_confirmed": bool((v14_freeze or {}).get("confirmed", False)) if isinstance(v14_freeze, dict) else False,
-            "freeze_count": int((v14_freeze or {}).get("same_count", 0) or 0) if isinstance(v14_freeze, dict) else 0,
-            "freeze_required": int((v14_freeze or {}).get("required", 3) or 3) if isinstance(v14_freeze, dict) else 3,
+        final_decision["strategy"] = {
+            "type": strategy_engine_report.get(
+                "action",
+                _strategy_action_v1910,
+            ),
+            "sell_side": strategy_engine_report.get("side"),
+            "sell_strike": strategy_engine_report.get(
+                "sell_strike",
+                "No Strike",
+            ),
+            "hedge_strike": strategy_engine_report.get(
+                "hedge_strike",
+                "No Hedge",
+            ),
+            "entry": strategy_engine_report.get(
+                "entry",
+                "No Trade",
+            ),
+            "sl": strategy_engine_report.get(
+                "sl",
+                "No Trade",
+            ),
+            "target": strategy_engine_report.get(
+                "target",
+                "No Trade",
+            ),
+            "target2": strategy_engine_report.get(
+                "target2",
+                "No Trade",
+            ),
+            "trail_after": strategy_engine_report.get(
+                "trail_after",
+                "No Trade",
+            ),
+            "lots": int(
+                strategy_engine_report.get("lots", 0) or 0
+            ),
+            "plan_status": strategy_engine_report.get(
+                "status",
+                "INCOMPLETE",
+            ),
+            "plan_source": strategy_engine_report.get(
+                "source",
+                "UNKNOWN",
+            ),
         }
 
-        # Re-sync legacy display variables after trade-plan repair.
+        # Re-sync compatibility variables from one strategy authority.
         final_trade = final_decision.get("action", "WAIT")
         confidence = float(final_decision.get("confidence", 0) or 0)
-        selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
-        hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
-        suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
-        sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
-        target_display = final_decision.get("strategy", {}).get("target", "No Trade")
-except Exception as _v1951_plan_error:
-    try:
-        final_decision.setdefault("warnings", []).append(f"V19.5.1 trade-plan sync: {_v1951_plan_error}")
-    except Exception:
-        pass
+        selected_strike = final_decision["strategy"].get(
+            "sell_strike",
+            "No Strike",
+        )
+        hedge = final_decision["strategy"].get(
+            "hedge_strike",
+            "No Hedge",
+        )
+        suggested_lots = int(
+            final_decision["strategy"].get("lots", 0) or 0
+        )
+        sl_display = final_decision["strategy"].get(
+            "sl",
+            "No Trade",
+        )
+        target_display = final_decision["strategy"].get(
+            "target",
+            "No Trade",
+        )
 
-
+except Exception as _v1910_strategy_error:
+    st.error(
+        "Strategy Engine authority failed: "
+        + str(_v1910_strategy_error)
+    )
+    st.stop()
 
 
 # =========================================================
@@ -4312,7 +4394,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.9 Snapshot Authority Cleanup</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.10 Strategy Engine</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4325,14 +4407,15 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.9 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.10 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
 <h3>{_card_heading}</h3>
 <b>{_action_label}:</b> {_final_action_card} &nbsp; | &nbsp;
 <b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
-<b>Status:</b> {_exec_status_card}<br>
+<b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
+<b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')}<br>
 <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
 <b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
@@ -4345,6 +4428,48 @@ try:
 """, unsafe_allow_html=True)
 
     
+    try:
+        _strategy_report_ui = (
+            _fd.get("strategy_engine_report", {})
+            if isinstance(_fd.get("strategy_engine_report", {}), dict)
+            else {}
+        )
+        if _strategy_report_ui:
+            with st.expander(
+                "🎯 Strategy Engine Plan — Strike + Hedge + Entry + SL + Target",
+                expanded=False,
+            ):
+                s1, s2, s3, s4 = st.columns(4)
+                s1.metric("Plan Status", _strategy_report_ui.get("status", "NA"))
+                s2.metric("Plan Source", _strategy_report_ui.get("source", "NA"))
+                s3.metric("Side", _strategy_report_ui.get("side", "NA"))
+                s4.metric("Lots", _strategy_report_ui.get("lots", 0))
+
+                _strategy_rows_ui = [
+                    {"Field": "Sell Strike", "Value": _strategy_report_ui.get("sell_strike", "No Strike")},
+                    {"Field": "Hedge Strike", "Value": _strategy_report_ui.get("hedge_strike", "No Hedge")},
+                    {"Field": "Entry", "Value": _strategy_report_ui.get("entry", "No Trade")},
+                    {"Field": "Stop Loss", "Value": _strategy_report_ui.get("sl", "No Trade")},
+                    {"Field": "Target 1", "Value": _strategy_report_ui.get("target", "No Trade")},
+                    {"Field": "Target 2", "Value": _strategy_report_ui.get("target2", "No Trade")},
+                    {"Field": "Trail After", "Value": _strategy_report_ui.get("trail_after", "No Trade")},
+                ]
+                st.dataframe(
+                    pd.DataFrame(_strategy_rows_ui),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                if _strategy_report_ui.get("issues"):
+                    st.write("**Plan Issues:**")
+                    for _issue in _strategy_report_ui.get("issues", [])[:8]:
+                        st.write("•", _issue)
+                elif _strategy_report_ui.get("valid"):
+                    st.success("Strategy plan validated.")
+
+    except Exception:
+        pass
+
     try:
         if _de_card:
             with st.expander("⚖️ Decision Engine Verdict — Why Approved / Blocked", expanded=False):
@@ -4505,12 +4630,14 @@ try:
             st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
             st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
             st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
+            st.write("Strategy Engine Authority:", "READY" if V19_STRATEGY_ENGINE_READY else "MISSING")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
             st.write("Removed duplicate Snapshot Health:", "V18.8 internal scorer")
             st.write("Removed internal Snapshot Builder:", "V18.6")
             st.write("Single snapshot authority:", "snapshot_engine.py")
+            st.write("Single strategy-plan authority:", "strategy_engine.py")
             st.write("Removed old consistency guard:", "V18.5")
             st.write("Single execution authority:", "decision_engine.py")
             st.write("Decision Confidence:", "decision_engine.py only")
@@ -4556,6 +4683,9 @@ try:
                 st.json(risk_engine_report if "risk_engine_report" in globals() else {})
                 st.markdown("#### V19.6 Decision Engine Report")
                 st.json(decision_engine_report if "decision_engine_report" in globals() else {})
+
+                st.markdown("#### V19.10 Strategy Engine Report")
+                st.json(strategy_engine_report if "strategy_engine_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5339,6 +5469,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.9 build: snapshot_engine.py is the single snapshot, delta and health authority. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.10 build: strategy_engine.py is the single final strike, hedge, entry, SL and target plan authority. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
