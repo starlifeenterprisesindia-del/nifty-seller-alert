@@ -61,7 +61,7 @@ except Exception:
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.8 - CONFIDENCE RANKING CLEANUP
+# NIFTY SELLER AI DASHBOARD V19.9 - SNAPSHOT AUTHORITY CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -82,7 +82,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.8 Confidence Ranking Cleanup",
+    page_title="Nifty Seller AI Dashboard V19.9 Snapshot Authority Cleanup",
     page_icon="🧠",
     layout="wide",
 )
@@ -2377,11 +2377,11 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.8 Modular AI")
-st.sidebar.caption("V19.8: Confidence + Ranking Cleanup")
+st.sidebar.title("⚙️ V19.9 Modular AI")
+st.sidebar.caption("V19.9: Single Snapshot Authority Cleanup")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
-    st.sidebar.caption("snapshot_engine: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK"))
+    st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
     st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
     st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
@@ -4042,169 +4042,10 @@ except Exception:
 # Decision Engine report is now the consistency source of truth.
 
 # =========================================================
-# V18.6 SNAPSHOT OBJECT FOUNDATION
+# V19.9 CLEANUP — OLD V18.6 INTERNAL SNAPSHOT ENGINE REMOVED
 # =========================================================
-# Goal:
-# - Build one market_snapshot object from existing calculated variables.
-# - No new API calls.
-# - No DhanHQ / refresh / portfolio change.
-# - Future AI Brain will read from this snapshot instead of scattered variables.
-
-def v186_safe_float(value, default=0.0):
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except Exception:
-        return default
-
-
-def v186_safe_int(value, default=0):
-    try:
-        return int(round(v186_safe_float(value, default)))
-    except Exception:
-        return default
-
-
-def v186_safe_text(value, default=""):
-    try:
-        if value is None:
-            return default
-        value = str(value).strip()
-        return value if value else default
-    except Exception:
-        return default
-
-
-def build_v186_market_snapshot(ctx):
-    """Create a single snapshot object from already available V18 calculations."""
-    option_chain = ctx.get("option_chain", {}) if isinstance(ctx.get("option_chain", {}), dict) else {}
-    option_analysis = ctx.get("option_analysis", {}) if isinstance(ctx.get("option_analysis", {}), dict) else {}
-    heavyweight_analysis = ctx.get("heavyweight_analysis", {}) if isinstance(ctx.get("heavyweight_analysis", {}), dict) else {}
-    news = ctx.get("news", {}) if isinstance(ctx.get("news", {}), dict) else {}
-    final_decision_obj = ctx.get("final_decision", {}) if isinstance(ctx.get("final_decision", {}), dict) else {}
-
-    nifty_price = v186_safe_float(ctx.get("price", ctx.get("nifty_price", 0)), 0)
-    vix_value = v186_safe_float(ctx.get("vix", ctx.get("india_vix", 0)), 0)
-    pcr_value = v186_safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
-
-    snapshot = {
-        "version": "V19.5.1 Full Audit Fix",
-        "created_at": fmt_time() if "fmt_time" in globals() else "",
-        "market": {
-            "status": ctx.get("status", ctx.get("market_status_text", "")),
-            "day": ctx.get("day_name", ""),
-            "nifty_price": nifty_price,
-            "nifty_change": v186_safe_float(ctx.get("change", ctx.get("nifty_change", 0)), 0),
-            "nifty_change_pct": v186_safe_float(ctx.get("change_pct", ctx.get("nifty_change_pct", 0)), 0),
-            "india_vix": vix_value,
-            "vix_change_pct": v186_safe_float(ctx.get("vix_change_pct", 0), 0),
-        },
-        "option_chain": {
-            "success": bool(option_chain.get("success", False)),
-            "source": option_chain.get("source", ""),
-            "expiry": option_chain.get("expiry", ctx.get("selected_expiry", "")),
-            "atm_strike": option_chain.get("atm_strike", ctx.get("atm_strike", "")),
-            "pcr": pcr_value,
-            "total_call_oi": v186_safe_int(option_chain.get("total_call_oi", 0), 0),
-            "total_put_oi": v186_safe_int(option_chain.get("total_put_oi", 0), 0),
-            "call_oi_change": v186_safe_int(option_chain.get("call_oi_change", 0), 0),
-            "put_oi_change": v186_safe_int(option_chain.get("put_oi_change", 0), 0),
-            "rows_count": len(option_chain.get("rows", []) or []),
-        },
-        "signals": {
-            "option_bias": v186_safe_float(option_analysis.get("bias", ctx.get("option_bias", 0)), 0),
-            "price_action_bias": v186_safe_float(ctx.get("price_action_bias", 0), 0),
-            "heavyweight_bias": v186_safe_float(heavyweight_analysis.get("pressure", ctx.get("heavy_bias", 0)), 0),
-            "market_bias": v186_safe_float(ctx.get("market_bias", 0), 0),
-            "conflict_mode": bool(ctx.get("conflict_mode", False)),
-        },
-        "risk": {
-            "data_quality": v186_safe_int(ctx.get("data_quality", 0), 0),
-            "seller_risk": v186_safe_int(ctx.get("seller_risk", 0), 0),
-            "news_risk": v186_safe_int(news.get("score", ctx.get("news_score", 0)), 0),
-            "gamma_risk": v186_safe_int(ctx.get("gamma_score_v7", 0), 0),
-            "shock_risk": v186_safe_int(ctx.get("shock_score_v7", 0), 0),
-            "expiry_mode": ctx.get("expiry_mode", ctx.get("mode", "")),
-        },
-        "ai": {
-            "final_action": final_decision_obj.get("action", ctx.get("final_trade", "WAIT")),
-            "confidence": v186_safe_int(final_decision_obj.get("confidence", ctx.get("confidence", 0)), 0),
-            "quality": final_decision_obj.get("quality", ""),
-            "regime": (final_decision_obj.get("ai_intelligence", {}) or {}).get("regime", ""),
-            "trade_quality": (final_decision_obj.get("ai_intelligence", {}) or {}).get("trade_quality_score", 0),
-        },
-        "source_health": {
-            "dhan_ready": bool(ctx.get("dhan_ready", False)),
-            "nifty_source": ctx.get("nifty_source", ""),
-            "heavy_source": ctx.get("heavy_source", ""),
-            "vix_source": ctx.get("vix_source", ""),
-        }
-    }
-
-    # Stable snapshot id from meaningful fields only.
-    snapshot["snapshot_id"] = "|".join([
-        str(snapshot["market"]["nifty_price"]),
-        str(snapshot["option_chain"]["expiry"]),
-        str(snapshot["option_chain"]["atm_strike"]),
-        str(snapshot["option_chain"]["pcr"]),
-        str(snapshot["signals"]["option_bias"]),
-        str(snapshot["risk"]["seller_risk"]),
-        str(snapshot["ai"]["final_action"]),
-    ])
-
-    return snapshot
-
-
-def v186_snapshot_delta(current_snapshot):
-    """Compare current snapshot with previous snapshot. No decision override here."""
-    try:
-        previous = st.session_state.get("v186_last_market_snapshot", {})
-        if not previous:
-            st.session_state["v186_last_market_snapshot"] = current_snapshot
-            return {"status": "FIRST", "material_change": 100, "changes": ["First snapshot created."]}
-
-        changes = []
-        cur_m = current_snapshot.get("market", {})
-        prev_m = previous.get("market", {})
-        cur_s = current_snapshot.get("signals", {})
-        prev_s = previous.get("signals", {})
-        cur_r = current_snapshot.get("risk", {})
-        prev_r = previous.get("risk", {})
-
-        price_delta = abs(v186_safe_float(cur_m.get("nifty_price")) - v186_safe_float(prev_m.get("nifty_price")))
-        option_delta = abs(v186_safe_float(cur_s.get("option_bias")) - v186_safe_float(prev_s.get("option_bias")))
-        heavy_delta = abs(v186_safe_float(cur_s.get("heavyweight_bias")) - v186_safe_float(prev_s.get("heavyweight_bias")))
-        risk_delta = abs(v186_safe_float(cur_r.get("seller_risk")) - v186_safe_float(prev_r.get("seller_risk")))
-        news_delta = abs(v186_safe_float(cur_r.get("news_risk")) - v186_safe_float(prev_r.get("news_risk")))
-
-        if price_delta >= 20:
-            changes.append(f"Nifty moved {price_delta:.1f} points.")
-        if option_delta >= 12:
-            changes.append(f"Option bias changed {option_delta:.0f} points.")
-        if heavy_delta >= 12:
-            changes.append(f"Heavyweight bias changed {heavy_delta:.0f} points.")
-        if risk_delta >= 10:
-            changes.append(f"Seller risk changed {risk_delta:.0f} points.")
-        if news_delta >= 10:
-            changes.append(f"News risk changed {news_delta:.0f} points.")
-
-        material = min(100, price_delta * 0.8 + option_delta * 1.5 + heavy_delta * 1.2 + risk_delta * 1.0 + news_delta * 1.0)
-        st.session_state["v186_last_market_snapshot"] = current_snapshot
-        return {"status": "CHANGED" if changes else "STABLE", "material_change": int(round(material)), "changes": changes or ["No material market change."]}
-    except Exception as exc:
-        return {"status": "ERROR", "material_change": 0, "changes": [str(exc)]}
-
-
-try:
-    market_snapshot = build_v186_market_snapshot(locals())
-    snapshot_delta = v186_snapshot_delta(market_snapshot)
-except Exception as _v186_error:
-    market_snapshot = {"version": "V19.5.1 Full Audit Fix", "snapshot_id": "ERROR", "error": str(_v186_error)}
-    snapshot_delta = {"status": "ERROR", "material_change": 0, "changes": [str(_v186_error)]}
-
-
-
+# snapshot_engine.py is now the only snapshot builder, delta engine,
+# and snapshot-health authority.
 
 # =========================================================
 # V19.7 CLEANUP — OLD V18.7 MUTATING SNAPSHOT AI REMOVED
@@ -4213,74 +4054,54 @@ except Exception as _v186_error:
 # It does not overwrite final action; Decision Engine owns execution verdict.
 
 # =========================================================
-# V19.7 SNAPSHOT HEALTH COMPATIBILITY BRIDGE
+# V19.9 SNAPSHOT ENGINE — SINGLE AUTHORITY
 # =========================================================
-# snapshot_engine.py is the single snapshot-health scorer.
-# final_decision["snapshot_health"] is retained only for old UI compatibility.
+# No internal snapshot fallback remains.
+# Fail closed if the required snapshot module is missing.
+if not V19_SNAPSHOT_ENGINE_READY:
+    st.error(
+        "V19.9 requires snapshot_engine.py. "
+        "Snapshot authority module is missing or failed to import."
+    )
+    st.stop()
+
 try:
-    if V19_SNAPSHOT_ENGINE_READY:
-        _v197_snapshot_health = v19_snapshot_health(market_snapshot)
-    else:
-        _v197_snapshot_health = {
-            "score": 0,
-            "label": "FALLBACK",
-            "issues": [],
-            "warnings": [],
-        }
+    _previous_snapshot_v199 = st.session_state.get(
+        "v199_last_market_snapshot",
+        {},
+    )
+
+    market_snapshot = v19_build_market_snapshot(
+        locals(),
+        fmt_time,
+    )
+
+    snapshot_delta = v19_snapshot_delta(
+        market_snapshot,
+        _previous_snapshot_v199,
+    )
+
+    snapshot_health_external = v19_snapshot_health(
+        market_snapshot,
+    )
+
+    st.session_state["v199_last_market_snapshot"] = market_snapshot
+
+    # Compatibility aliases for existing Developer/UI panels.
+    market_snapshot_external = market_snapshot
+    snapshot_delta_external = snapshot_delta
 
     if isinstance(final_decision, dict):
-        final_decision["snapshot_health"] = _v197_snapshot_health
-except Exception as _v197_health_error:
-    _v197_snapshot_health = {
-        "score": 0,
-        "label": "ERROR",
-        "issues": [str(_v197_health_error)],
-        "warnings": [],
-    }
-    try:
-        if isinstance(final_decision, dict):
-            final_decision["snapshot_health"] = _v197_snapshot_health
-            final_decision.setdefault("warnings", []).append(
-                f"V19.7 snapshot health bridge error: {_v197_health_error}"
-            )
-    except Exception:
-        pass
+        final_decision["external_snapshot_engine"] = "READY"
+        final_decision["snapshot_health"] = snapshot_health_external
+        final_decision["snapshot_health_external"] = snapshot_health_external
 
-
-# =========================================================
-# V19.3 SNAPSHOT ENGINE MODULE BRIDGE
-# =========================================================
-# External snapshot_engine runs in parallel first. Core AI remains safe.
-try:
-    if V19_SNAPSHOT_ENGINE_READY:
-        _previous_external_snapshot = st.session_state.get("v193_last_market_snapshot", {})
-        market_snapshot_external = v19_build_market_snapshot(locals(), fmt_time)
-        snapshot_delta_external = v19_snapshot_delta(market_snapshot_external, _previous_external_snapshot)
-        snapshot_health_external = v19_snapshot_health(market_snapshot_external)
-        st.session_state["v193_last_market_snapshot"] = market_snapshot_external
-
-        # V19.3 safe adoption: use external snapshot if it is healthy and structurally valid.
-        if isinstance(market_snapshot_external, dict) and market_snapshot_external.get("snapshot_id"):
-            market_snapshot = market_snapshot_external
-            snapshot_delta = snapshot_delta_external
-            if isinstance(final_decision, dict):
-                final_decision["external_snapshot_engine"] = "READY"
-                final_decision["snapshot_health_external"] = snapshot_health_external
-    else:
-        market_snapshot_external = {}
-        snapshot_delta_external = {}
-        snapshot_health_external = {}
-except Exception as _v193_error:
-    market_snapshot_external = {}
-    snapshot_delta_external = {"status": "ERROR", "material_change": 0, "changes": [str(_v193_error)]}
-    snapshot_health_external = {"score": 0, "label": "ERROR", "issues": [str(_v193_error)], "warnings": []}
-    try:
-        if isinstance(final_decision, dict):
-            final_decision.setdefault("warnings", []).append(f"V19.3 snapshot engine error: {_v193_error}")
-    except Exception:
-        pass
-
-
+except Exception as _v199_snapshot_error:
+    st.error(
+        "Snapshot Engine authority failed: "
+        + str(_v199_snapshot_error)
+    )
+    st.stop()
 
 
 # =========================================================
@@ -4491,7 +4312,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.8 Confidence Ranking Cleanup</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.9 Snapshot Authority Cleanup</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4504,7 +4325,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.8 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.9 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -4680,7 +4501,7 @@ try:
             st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
             st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
             st.write("V19.5.1 App:", "READY")
-            st.write("Snapshot Engine Module:", "READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK")
+            st.write("Snapshot Engine Authority:", "READY" if V19_SNAPSHOT_ENGINE_READY else "MISSING")
             st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
             st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
             st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
@@ -4688,6 +4509,8 @@ try:
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
             st.write("Removed duplicate Snapshot Health:", "V18.8 internal scorer")
+            st.write("Removed internal Snapshot Builder:", "V18.6")
+            st.write("Single snapshot authority:", "snapshot_engine.py")
             st.write("Removed old consistency guard:", "V18.5")
             st.write("Single execution authority:", "decision_engine.py")
             st.write("Decision Confidence:", "decision_engine.py only")
@@ -4708,7 +4531,7 @@ try:
                 st.markdown("#### Snapshot Delta")
                 st.json(snapshot_delta)
 
-                st.markdown("#### V19.3 External Snapshot Engine")
+                st.markdown("#### V19.9 Snapshot Authority")
                 st.json({
                     "ready": V19_SNAPSHOT_ENGINE_READY,
                     "snapshot": market_snapshot_external if "market_snapshot_external" in globals() else {},
@@ -4740,7 +4563,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Audited Risk + AI Brain + Snapshot Engine</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Snapshot Authority + AI Brain + Risk + Decision Engine</div>",
     unsafe_allow_html=True,
 )
 
@@ -5516,6 +5339,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.8 build: one Decision Confidence authority; AI Evidence Score and Rank Score are advisory only. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.9 build: snapshot_engine.py is the single snapshot, delta and health authority. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
