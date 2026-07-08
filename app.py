@@ -10,7 +10,7 @@ import streamlit as st
 import yfinance as yf
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V18.2 - AI BRAIN FOUNDATION
+# NIFTY SELLER AI DASHBOARD V18.3 - SMART AI CONFIDENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -31,7 +31,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V18.2 AI Brain Foundation",
+    page_title="Nifty Seller AI Dashboard V18.3 Smart AI Confidence",
     page_icon="🧠",
     layout="wide",
 )
@@ -2342,7 +2342,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V18.2 AI Brain")
+st.sidebar.title("⚙️ V18.3 Smart AI")
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
 if dhan_ready:
     st.sidebar.success("DhanHQ credentials detected")
@@ -4011,7 +4011,7 @@ def build_v18_final_decision(ctx):
             reasons.append("Final action passed V18.2 AI Brain foundation checks.")
 
     decision = {
-        "version": "V18.2 AI Brain Foundation",
+        "version": "V18.3 Smart AI Confidence",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": str(ctx.get("snapshot_id", ctx.get("oc_snapshot_id", ""))),
         "action": final_action,
@@ -4048,7 +4048,7 @@ try:
     final_decision = build_v18_final_decision(locals())
 except Exception as _v182_error:
     final_decision = {
-        "version": "V18.2 AI Brain Foundation",
+        "version": "V18.3 Smart AI Confidence",
         "timestamp": fmt_time() if "fmt_time" in globals() else "",
         "snapshot_id": "",
         "action": "WAIT",
@@ -4081,6 +4081,213 @@ try:
     else:
         action_plan.append(f"Final action: {final_trade}.")
         action_plan.extend(final_decision.get("reasons", [])[:4])
+except Exception:
+    pass
+
+
+
+
+# =========================================================
+# V18.3 SMART AI CONFIDENCE + MARKET REGIME
+# =========================================================
+# Safe intelligence layer over V18.2. No data/refresh/portfolio changes.
+
+def v183_abs(value):
+    try:
+        return abs(float(value))
+    except Exception:
+        return 0.0
+
+
+def v183_direction_alignment(scores, action):
+    action = str(action or "WAIT").upper()
+    if action == "SELL PE" or "BUY CALL" in action:
+        direction = 1
+    elif action == "SELL CE" or "BUY PUT" in action:
+        direction = -1
+    else:
+        return 0, ["WAIT has no directional alignment requirement."]
+
+    components = [
+        ("Option Chain", float(scores.get("option_bias", 0)), 0.36),
+        ("Price Action", float(scores.get("price_action_bias", 0)), 0.28),
+        ("Heavyweights", float(scores.get("heavyweight_bias", 0)), 0.24),
+        ("Market Bias", float(scores.get("market_bias", 0)), 0.12),
+    ]
+
+    support = 0.0
+    weight_sum = 0.0
+    notes = []
+    for name, bias, weight in components:
+        weight_sum += weight
+        signed = bias * direction
+        if signed >= 45:
+            support += 100 * weight
+            notes.append(f"{name} strongly supports action.")
+        elif signed >= 20:
+            support += 75 * weight
+            notes.append(f"{name} supports action.")
+        elif signed >= -15:
+            support += 45 * weight
+            notes.append(f"{name} is neutral/mixed.")
+        else:
+            support += 10 * weight
+            notes.append(f"{name} opposes action.")
+
+    return int(round(max(0, min(100, support / max(weight_sum, 0.01))))), notes
+
+
+def v183_detect_market_regime(scores, ctx):
+    news_risk = float(scores.get("news_risk", 0))
+    gamma_risk = float(scores.get("gamma_risk", 0))
+    shock_risk = float(scores.get("shock_risk", 0))
+    seller_risk = float(scores.get("seller_risk", 0))
+    option_bias = float(scores.get("option_bias", 0))
+    price_bias = float(scores.get("price_action_bias", 0))
+    heavy_bias = float(scores.get("heavyweight_bias", 0))
+    expiry_mode = str(ctx.get("expiry_mode", ctx.get("mode", ""))).upper()
+
+    if news_risk >= 75:
+        return "NEWS DRIVEN", "High news/event risk is dominating normal signals."
+    if gamma_risk >= 75 or "EXPIRY" in expiry_mode:
+        return "EXPIRY / GAMMA", "Expiry/gamma risk requires extra safety."
+    if shock_risk >= 70 or seller_risk >= 72:
+        return "VOLATILE", "Shock/seller risk is elevated."
+    if abs(option_bias) >= 45 and abs(price_bias) >= 35 and (option_bias * price_bias) > 0:
+        return "TRENDING", "Option chain and price action are aligned."
+    if abs(price_bias) <= 25 and abs(option_bias) <= 35 and abs(heavy_bias) <= 30:
+        return "RANGE / NO EDGE", "Major signals are mixed or flat."
+    return "MIXED", "Market is not clean enough for aggressive confidence."
+
+
+def v183_trade_quality(scores, action, alignment_score, regime):
+    if str(action).upper() == "WAIT":
+        return 0, "NO TRADE"
+
+    data_quality = float(scores.get("data_quality", 0))
+    seller_risk = float(scores.get("seller_risk", 100))
+    news_risk = float(scores.get("news_risk", 100))
+    gamma_risk = float(scores.get("gamma_risk", 100))
+    shock_risk = float(scores.get("shock_risk", 100))
+
+    risk_clean = max(0, 100 - (seller_risk * 0.36 + news_risk * 0.20 + gamma_risk * 0.24 + shock_risk * 0.20))
+    regime_bonus = {
+        "TRENDING": 10,
+        "RANGE / NO EDGE": -12,
+        "VOLATILE": -15,
+        "NEWS DRIVEN": -25,
+        "EXPIRY / GAMMA": -10,
+        "MIXED": -7,
+    }.get(regime, 0)
+
+    quality = data_quality * 0.25 + alignment_score * 0.38 + risk_clean * 0.37 + regime_bonus
+    quality = int(round(max(0, min(100, quality))))
+
+    if quality >= 85:
+        label = "EXCELLENT"
+    elif quality >= 72:
+        label = "GOOD"
+    elif quality >= 60:
+        label = "CAUTION"
+    else:
+        label = "WEAK"
+    return quality, label
+
+
+def v183_rewrite_confidence(fd, ctx):
+    if not isinstance(fd, dict):
+        return fd
+
+    fd = dict(fd)
+    scores = dict(fd.get("scores", {}) if isinstance(fd.get("scores", {}), dict) else {})
+    action = str(fd.get("action", "WAIT")).upper()
+
+    regime, regime_reason = v183_detect_market_regime(scores, ctx)
+    alignment_score, alignment_notes = v183_direction_alignment(scores, action)
+    quality_score, quality_label = v183_trade_quality(scores, action, alignment_score, regime)
+
+    old_conf = float(fd.get("confidence", 0))
+    data_quality = float(scores.get("data_quality", 0))
+    seller_risk = float(scores.get("seller_risk", 100))
+    news_risk = float(scores.get("news_risk", 100))
+    gamma_risk = float(scores.get("gamma_risk", 100))
+    shock_risk = float(scores.get("shock_risk", 100))
+
+    risk_penalty = seller_risk * 0.20 + news_risk * 0.14 + gamma_risk * 0.16 + shock_risk * 0.12
+
+    if action == "WAIT":
+        smart_conf = max(45, min(88, 55 + risk_penalty * 0.35 + (100 - data_quality) * 0.25))
+    else:
+        smart_conf = old_conf * 0.25 + data_quality * 0.20 + alignment_score * 0.32 + quality_score * 0.23 - risk_penalty * 0.10
+        if regime in ("NEWS DRIVEN", "VOLATILE") and smart_conf < 85:
+            fd.setdefault("warnings", []).append(f"{regime} regime: avoid aggressive size.")
+        if quality_score < 60:
+            fd.setdefault("blockers", []).append(f"Trade quality weak: {quality_score}/100.")
+
+    smart_conf = int(round(max(0, min(98, smart_conf))))
+
+    blockers = fd.get("blockers", []) if isinstance(fd.get("blockers", []), list) else []
+    if blockers:
+        fd["action"] = "WAIT"
+        fd["quality"] = "BLOCKED"
+        fd["confidence"] = min(smart_conf, 64)
+        if isinstance(fd.get("strategy", {}), dict):
+            fd["strategy"]["type"] = "WAIT"
+            fd["strategy"]["sell_side"] = None
+            fd["strategy"]["sell_strike"] = "No Strike"
+            fd["strategy"]["hedge_strike"] = "No Hedge"
+            fd["strategy"]["sl"] = "No Trade"
+            fd["strategy"]["target"] = "No Trade"
+            fd["strategy"]["lots"] = 0
+    else:
+        fd["confidence"] = smart_conf
+        if quality_score >= 72 and smart_conf >= 70:
+            fd["quality"] = "OK"
+        elif action != "WAIT":
+            fd["quality"] = "CAUTION"
+
+    fd["ai_intelligence"] = {
+        "regime": regime,
+        "regime_reason": regime_reason,
+        "alignment_score": int(alignment_score),
+        "alignment_notes": alignment_notes[:5],
+        "trade_quality_score": int(quality_score),
+        "trade_quality_label": quality_label,
+        "old_confidence": int(round(old_conf)),
+        "smart_confidence": int(fd.get("confidence", smart_conf)),
+    }
+
+    reasons = fd.get("reasons", []) if isinstance(fd.get("reasons", []), list) else []
+    smart_reasons = [
+        f"Market regime: {regime} — {regime_reason}",
+        f"Signal alignment score: {alignment_score}/100.",
+        f"Trade quality: {quality_score}/100 ({quality_label}).",
+    ]
+    for item in reversed(smart_reasons):
+        if item not in reasons:
+            reasons.insert(0, item)
+    fd["reasons"] = reasons[:10]
+    fd["version"] = "V18.3 Smart AI Confidence"
+
+    return fd
+
+
+try:
+    final_decision = v183_rewrite_confidence(final_decision, locals())
+except Exception as _v183_error:
+    try:
+        final_decision.setdefault("warnings", []).append(f"V18.3 confidence layer error: {_v183_error}")
+    except Exception:
+        pass
+
+try:
+    final_trade = final_decision.get("action", "WAIT")
+    confidence = float(final_decision.get("confidence", 0))
+    selected_strike = final_decision.get("strategy", {}).get("sell_strike", "No Strike")
+    hedge = final_decision.get("strategy", {}).get("hedge_strike", "No Hedge")
+    suggested_lots = int(final_decision.get("strategy", {}).get("lots", 0) or 0)
+    sl_display = final_decision.get("strategy", {}).get("sl", "No Trade")
+    target_display = final_decision.get("strategy", {}).get("target", "No Trade")
 except Exception:
     pass
 
@@ -4164,7 +4371,7 @@ elif _auto_refresh_on and market_text != "Market Open":
 else:
     top_time_col.caption(f"Auto OFF | Manual refresh works anytime | Last refresh: {fmt_time()}")
 
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.2 AI Brain Foundation</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V18.3 Smart AI Confidence</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4174,7 +4381,7 @@ try:
     _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
     st.markdown(f"""
 <div class='v17-final {_class}'>
-<h3>🧠 V18.2 One AI Brain — {_quality}</h3>
+<h3>🧠 V18.3 Smart AI Brain — {_quality}</h3>
 <b>Final Action:</b> {_fd.get('action','WAIT')} &nbsp; | &nbsp;
 <b>Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4184,6 +4391,19 @@ try:
 <b>Lots:</b> {_strategy.get('lots',0)}
 </div>
 """, unsafe_allow_html=True)
+
+    
+    try:
+        _intel = _fd.get("ai_intelligence", {}) if isinstance(_fd.get("ai_intelligence", {}), dict) else {}
+        if _intel:
+            m1, m2, m3, m4 = st.columns(4)
+            m1.metric("Regime", _intel.get("regime", "NA"))
+            m2.metric("Alignment", f"{_intel.get('alignment_score', 0)}/100")
+            m3.metric("Trade Quality", f"{_intel.get('trade_quality_score', 0)}/100")
+            m4.metric("Smart Confidence", f"{_intel.get('smart_confidence', _fd.get('confidence',0))}%")
+    except Exception:
+        pass
+
 
     if _fd.get("blockers"):
         with st.expander("🛑 Why WAIT / Blockers", expanded=False):
@@ -4202,7 +4422,7 @@ except Exception as _fd_ui_error:
 
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: One Final Decision Object + AI Brain Foundation + Portfolio Intelligence</div>",
+    "<div class='sub-title'>Smart Seller Terminal: Smart Confidence + Market Regime + Trade Quality</div>",
     unsafe_allow_html=True,
 )
 
