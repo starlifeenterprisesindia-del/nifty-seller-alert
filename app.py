@@ -66,9 +66,16 @@ try:
 except Exception:
     V19_STRATEGY_ENGINE_READY = False
 
+# V19.11 Intelligence Engine module import.
+try:
+    from intelligence_engine import build_intelligence_report as v19_build_intelligence_report
+    V19_INTELLIGENCE_ENGINE_READY = True
+except Exception:
+    V19_INTELLIGENCE_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.10 - STRATEGY ENGINE
+# NIFTY SELLER AI DASHBOARD V19.11 - AI INTELLIGENCE ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -89,7 +96,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.10 Strategy Engine",
+    page_title="Nifty Seller AI Dashboard V19.11 AI Intelligence Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2384,8 +2391,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.10 Modular AI")
-st.sidebar.caption("V19.10: Single Strategy Plan Engine")
+st.sidebar.title("⚙️ V19.11 Modular AI")
+st.sidebar.caption("V19.11: AI Intelligence Engine")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -2393,6 +2400,7 @@ try:
     st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
     st.sidebar.caption("strategy_engine: " + ("READY / PLAN AUTHORITY" if V19_STRATEGY_ENGINE_READY else "MISSING"))
+    st.sidebar.caption("intelligence_engine: " + ("READY / EXPLAINER" if V19_INTELLIGENCE_ENGINE_READY else "MISSING"))
 except Exception:
     pass
 
@@ -4387,6 +4395,41 @@ except Exception as _v196_error:
 
 
 # =========================================================
+# V19.11 INTELLIGENCE ENGINE — HUMAN EXPLANATION LAYER
+# =========================================================
+# Decision Engine remains final execution authority.
+# Intelligence Engine explains quality, conflict, trap risk and reasoning.
+if not V19_INTELLIGENCE_ENGINE_READY:
+    st.error(
+        "V19.11 requires intelligence_engine.py. "
+        "AI intelligence/explanation module is missing or failed to import."
+    )
+    st.stop()
+
+try:
+    intelligence_report = v19_build_intelligence_report(
+        snapshot=market_snapshot,
+        ai_report=ai_brain_report if isinstance(ai_brain_report, dict) else {},
+        risk_report=risk_engine_report if isinstance(risk_engine_report, dict) else {},
+        strategy_report=strategy_engine_report if isinstance(strategy_engine_report, dict) else {},
+        decision_report=decision_engine_report if isinstance(decision_engine_report, dict) else {},
+    )
+
+    if isinstance(final_decision, dict):
+        final_decision["intelligence_engine_module"] = "READY"
+        final_decision["intelligence_report"] = intelligence_report
+
+except Exception as _v1911_intelligence_error:
+    st.error(
+        "Intelligence Engine failed: "
+        + str(_v1911_intelligence_error)
+    )
+    st.stop()
+
+
+
+
+# =========================================================
 # UI
 # =========================================================
 market_text, day_name = market_status()
@@ -4394,7 +4437,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.10 Strategy Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.11 AI Intelligence Engine</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4407,7 +4450,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.10 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.11 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -4417,6 +4460,7 @@ try:
 <b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
 <b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')}<br>
 <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
+<b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
 <b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
 <b>Entry:</b> {_strategy.get('entry','No Trade')} &nbsp; | &nbsp;
@@ -4428,6 +4472,49 @@ try:
 """, unsafe_allow_html=True)
 
     
+    try:
+        _intel_report_ui = (
+            _fd.get("intelligence_report", {})
+            if isinstance(_fd.get("intelligence_report", {}), dict)
+            else {}
+        )
+        if _intel_report_ui:
+            with st.expander("🧠 AI Intelligence Explanation — Why / Why Not", expanded=True):
+                ix1, ix2, ix3, ix4 = st.columns(4)
+                ix1.metric("Market Context", _intel_report_ui.get("market_context", "NA"))
+                ix2.metric("Intelligence Score", f"{_intel_report_ui.get('intelligence_score',0)}/100")
+                ix3.metric("Fake Move Risk", f"{_intel_report_ui.get('fake_move_risk',0)}/100")
+                ix4.metric("Conflict Score", f"{_intel_report_ui.get('conflict_score',0)}/100")
+
+                st.info(_intel_report_ui.get("verdict_summary", "No intelligence summary."))
+
+                st.write("**Positive Factors:**")
+                if _intel_report_ui.get("positives"):
+                    for _p in _intel_report_ui.get("positives", [])[:8]:
+                        st.write("✅", _p)
+                else:
+                    st.write("• No strong positive factor.")
+
+                st.write("**Negative / Caution Factors:**")
+                if _intel_report_ui.get("negatives"):
+                    for _n in _intel_report_ui.get("negatives", [])[:8]:
+                        st.write("⚠️", _n)
+                else:
+                    st.write("• No major negative factor.")
+
+                st.write("**Signal Reliability Table:**")
+                try:
+                    st.dataframe(
+                        pd.DataFrame(_intel_report_ui.get("reliability_rows", [])),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                except Exception:
+                    st.json(_intel_report_ui.get("reliability_rows", []))
+
+    except Exception:
+        pass
+
     try:
         _strategy_report_ui = (
             _fd.get("strategy_engine_report", {})
@@ -4631,6 +4718,7 @@ try:
             st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
             st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
             st.write("Strategy Engine Authority:", "READY" if V19_STRATEGY_ENGINE_READY else "MISSING")
+            st.write("Intelligence Engine:", "READY" if V19_INTELLIGENCE_ENGINE_READY else "MISSING")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
@@ -4686,6 +4774,9 @@ try:
 
                 st.markdown("#### V19.10 Strategy Engine Report")
                 st.json(strategy_engine_report if "strategy_engine_report" in globals() else {})
+
+                st.markdown("#### V19.11 Intelligence Engine Report")
+                st.json(intelligence_report if "intelligence_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5469,6 +5560,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.10 build: strategy_engine.py is the single final strike, hedge, entry, SL and target plan authority. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.11 build: intelligence_engine.py explains signal reliability, conflict, fake-move risk and trade quality. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
