@@ -77,6 +77,13 @@ try:
 except Exception:
     V19_OI_FLOW_ENGINE_READY = False
 
+# V21.4 Single Advisor Authority module import.
+try:
+    from advisor_engine import build_advisor_report as v214_build_advisor_report
+    V21_ADVISOR_ENGINE_READY = True
+except Exception:
+    V21_ADVISOR_ENGINE_READY = False
+
 
 # =========================================================
 # NIFTY SELLER AI DASHBOARD V21.1 - DEEP ARCHITECTURE CLEANUP
@@ -4674,6 +4681,48 @@ except Exception as _v1914_oi_error:
 
 
 
+# =========================================================
+# V21.4 SINGLE ADVISOR AUTHORITY — ONE ADVICE FOR ALL UI
+# =========================================================
+# This is a display authority only. It does not create a separate signal.
+# It reads the stabilized Decision Engine output and gives one common
+# advice object to AI Final, Signal Table, Strategy Matrix and Candidates.
+if not V21_ADVISOR_ENGINE_READY:
+    st.error(
+        "V21.4 requires advisor_engine.py. "
+        "Single Advisor Authority module is missing or failed to import."
+    )
+    st.stop()
+
+try:
+    advisor_report = v214_build_advisor_report(
+        snapshot=market_snapshot if isinstance(market_snapshot, dict) else {},
+        final_decision=final_decision if isinstance(final_decision, dict) else {},
+        decision_report=decision_engine_report if isinstance(decision_engine_report, dict) else {},
+        strategy_report=strategy_engine_report if isinstance(strategy_engine_report, dict) else {},
+        intelligence_report=intelligence_report if isinstance(intelligence_report, dict) else {},
+        risk_report=risk_engine_report if isinstance(risk_engine_report, dict) else {},
+        stability_report=stability_report if isinstance(stability_report, dict) else {},
+    )
+
+    if isinstance(final_decision, dict):
+        final_decision["advisor_engine_module"] = "READY"
+        final_decision["advisor_report"] = advisor_report
+        # Re-sync visible compatibility variables from the single advisor.
+        final_trade = advisor_report.get("final_action", "WAIT")
+        confidence = float(advisor_report.get("confidence", 0) or 0)
+        _advisor_strategy_v214 = advisor_report.get("strategy", {}) if isinstance(advisor_report.get("strategy", {}), dict) else {}
+        selected_strike = _advisor_strategy_v214.get("sell_strike", selected_strike)
+        hedge = _advisor_strategy_v214.get("hedge_strike", hedge)
+        sl_display = _advisor_strategy_v214.get("sl", sl_display)
+        target_display = _advisor_strategy_v214.get("target", target_display)
+
+except Exception as _v214_advisor_error:
+    st.error("Single Advisor Authority failed: " + str(_v214_advisor_error))
+    st.stop()
+
+
+
 
 # =========================================================
 # V19.16 TRADER COMMAND CENTER HELPERS
@@ -4690,6 +4739,7 @@ def _v1916_build_health_snapshot():
             "stability_engine": bool(V19_STABILITY_ENGINE_READY),
             "memory_engine": bool(V19_MEMORY_ENGINE_READY),
             "oi_flow_engine": bool(V19_OI_FLOW_ENGINE_READY),
+            "advisor_engine": bool(V21_ADVISOR_ENGINE_READY),
         }
     except Exception:
         engine_flags = {}
@@ -5135,6 +5185,11 @@ try:
 except Exception:
     _v204_brain_sync = {"tick": fmt_time(), "time": fmt_time(), "fresh": False, "stale_reasons": ["Brain sync unavailable"], "snapshot_health": "NA", "snapshot_score": "NA"}
 
+_advisor_v214 = advisor_report if isinstance(globals().get("advisor_report", {}), dict) else {}
+if _advisor_v214:
+    _de_final_v197 = str(_advisor_v214.get("final_action", _de_final_v197) or _de_final_v197).upper()
+    _de_status_v197 = str(_advisor_v214.get("execution_status", _de_status_v197) or _de_status_v197).upper()
+
 st.markdown("### 🧠 AI FINAL AUTHORITY")
 _status_class = "green" if _de_status_v197 == "APPROVED" and _de_final_v197 == "SELL PE" else ("red" if _de_status_v197 == "APPROVED" and _de_final_v197 == "SELL CE" else ("red" if _de_status_v197 == "BLOCKED" else ""))
 _status_text = {
@@ -5147,10 +5202,11 @@ _proj_v201 = _v201_projection()
 _change_v201 = _v201_change_line(_proj_v201)
 _factor_list_v201 = _v201_top_factors(3)
 _reason_list_v20 = _v20_compact_reasons(_de_gate_v197, _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable."), limit=2)
-_combined_reasons_v201 = list(dict.fromkeys([str(x) for x in (_factor_list_v201 + _reason_list_v20) if x]))[:3]
+_advisor_reasons_v214 = _advisor_v214.get("reasons", []) if isinstance(_advisor_v214.get("reasons", []), list) else []
+_combined_reasons_v201 = list(dict.fromkeys([str(x) for x in (_advisor_reasons_v214 + _factor_list_v201 + _reason_list_v20) if x]))[:3]
 _reason_html_v20 = "<br>".join(["• " + str(x) for x in _combined_reasons_v201]) if _combined_reasons_v201 else "• Mixed signals — wait for confirmation."
-_action_line_v201 = "No fresh trade. Wait for stronger confirmation."
-if _de_final_v197 in ("SELL CE", "SELL PE", "IRON CONDOR") and selected_strike != "No Strike":
+_action_line_v201 = _advisor_v214.get("advice", "No fresh trade. Wait for stronger confirmation.")
+if not _advisor_v214 and _de_final_v197 in ("SELL CE", "SELL PE", "IRON CONDOR") and selected_strike != "No Strike":
     _action_line_v201 = f"{_de_final_v197}: {selected_strike} | Hedge: {hedge} | Confidence {int(_de_gate_v197.get('calibrated_confidence',0) or 0)}%"
 _news_line_v201 = f"News Risk: {news['label']} ({news['score']}/100)"
 
@@ -5163,6 +5219,7 @@ st.markdown(f"""
 <b>Change:</b> {_change_v201}<br>
 <b>Action:</b> {_action_line_v201}<br>
 <b>{_news_line_v201}</b> &nbsp; | &nbsp; <b>Last:</b> {_v204_brain_sync.get('time', fmt_time())}<br>
+<b>Advisor:</b> Single AI Brain | {_advisor_v214.get('advisor_version','V21.4')}<br>
 <b>Brain Sync:</b> SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | OI {_v204_brain_sync.get('oi_sync','NA')} | {_v204_brain_sync.get('snapshot_health','NA')} {_v204_brain_sync.get('snapshot_score','NA')}/100 | OC {_v204_brain_sync.get('oc_rows',0)} rows
 <div class='v201-reason'><b>Why:</b><br>{_reason_html_v20}</div>
 </div>
@@ -5180,7 +5237,7 @@ try:
     _v20_rel_rows = _v20_signal_reliability_rows()
     if _v20_rel_rows:
         st.dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
-        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot for top tables. Ye table batata hai kaunse signals trade ko support/oppose kar rahe hain.")
+        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot + Single Advisor. Ye table sirf evidence dikhata hai; advice AI Final Authority se aati hai.")
     else:
         st.info("Signal reliability rows abhi available nahi hain.")
 except Exception as _v20_sig_err:
@@ -5343,8 +5400,7 @@ _strategy_rows_v163 = _v202_stable_strategy_rows(_strategy_rows_v163)
 st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
 st.caption(
     f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | "
-    "Rank Score sirf strategy ordering hai; trade approval aur Decision Confidence "
-    "sirf Decision Engine + Stability Lock se aate hain."
+    "Rank Score sirf strategy ordering hai; trade approval/advice Single Advisor = Decision Engine + Stability Lock se aati hai."
 )
 _best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Rank Score": 0}
 st.markdown(
@@ -5406,7 +5462,7 @@ try:
     _cand_rows_v201 = _v201_candidate_rows()
     if _cand_rows_v201:
         st.dataframe(pd.DataFrame(_cand_rows_v201), width="stretch", hide_index=True)
-        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Best CE/PE latest option-chain row se price update karta hai. Strike small gap par stable-lock ho sakti hai, par price old nahi hota.")
+        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Best CE/PE latest option-chain row se price update karta hai. Advice Single Advisor se aati hai; yeh table sirf fresh candidates dikhata hai.")
     else:
         st.info("Best candidates ke liye live option-chain active hona zaroori hai.")
 except Exception as _cand_err_v201:
