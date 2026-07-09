@@ -2355,8 +2355,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V21.6 Stable AI")
-st.sidebar.caption("V21.6: Safe Single Refresh Authority")
+st.sidebar.title("⚙️ V22.1 AI_MASTER")
+st.sidebar.caption("V22.1: One Brain / AI_MASTER Routing")
 
 # V21.6: duplicate Quick Refresh block removed. Use single Refresh Control below.
 
@@ -4753,6 +4753,236 @@ except Exception as _v214_advisor_error:
 
 
 
+# =========================================================
+# V22.1 AI_MASTER SINGLE ROUTING AUTHORITY
+# =========================================================
+# Golden Rule 22:
+# One Snapshot -> One AI Brain/Decision -> One AI_MASTER -> UI.
+# The first visible matrices must read AI_MASTER only. They must not create
+# their own final advice, ranking authority or stale fallback decision.
+def _v221_num(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            cleaned = value.replace("₹", "").replace(",", "").replace("%", "").strip()
+            token = ""
+            started = False
+            for ch in cleaned:
+                if ch.isdigit() or ch in ".-+":
+                    token += ch
+                    started = True
+                elif started:
+                    break
+            return float(token) if token else default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _v221_int(value, default=0):
+    try:
+        return int(round(_v221_num(value, default)))
+    except Exception:
+        return default
+
+
+def _v221_signed(value):
+    return max(-100.0, min(100.0, _v221_num(value, 0.0)))
+
+
+def _v221_current_option_row(option_analysis_obj, strike_value):
+    try:
+        strike_value = int(float(strike_value or 0))
+        rows = option_analysis_obj.get("rows", []) if isinstance(option_analysis_obj, dict) else []
+        for rr in rows:
+            if int(rr.get("strike", 0) or 0) == strike_value:
+                return rr
+    except Exception:
+        pass
+    return None
+
+
+def _v221_side_plan(side, row, confidence_value):
+    side = str(side or "").upper()
+    if not isinstance(row, dict) or side not in ("CE", "PE"):
+        return {"strike": "-", "hedge": "-", "entry": 0.0, "sl": 0.0, "target": 0.0, "target2": 0.0}
+    prefix = side.lower()
+    strike = _v221_int(row.get("strike", 0), 0)
+    # Always re-read premium from current option_analysis row if available.
+    live_row = _v221_current_option_row(option_analysis if isinstance(option_analysis, dict) else {}, strike) or row
+    premium = _v221_num(live_row.get(f"{prefix}_ltp", row.get(f"{prefix}_ltp", 0)), 0.0)
+    try:
+        plan = v12_sl_target_for_seller(premium, confidence_value, gamma_score_v7, shock_score_v7) if premium > 0 else {}
+    except Exception:
+        plan = {}
+    try:
+        hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap) if strike else 0
+    except Exception:
+        hedge_strike = 0
+    return {
+        "strike": f"{strike} {side}" if strike else "-",
+        "hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
+        "entry": round(premium, 2) if premium else 0.0,
+        "sl": round(_v221_num(plan.get("sl", 0), 0), 2),
+        "target": round(_v221_num(plan.get("target1", 0), 0), 2),
+        "target2": round(_v221_num(plan.get("target2", 0), 0), 2),
+    }
+
+
+def _v221_build_projection(snapshot_obj):
+    ms = snapshot_obj if isinstance(snapshot_obj, dict) else {}
+    sig = ms.get("signals", {}) if isinstance(ms.get("signals", {}), dict) else {}
+    risk = ms.get("risk", {}) if isinstance(ms.get("risk", {}), dict) else {}
+    market = ms.get("market", {}) if isinstance(ms.get("market", {}), dict) else {}
+    pa = _v221_signed(sig.get("price_action_bias", 0))
+    ob = _v221_signed(sig.get("option_bias", 0))
+    hw = _v221_signed(sig.get("heavyweight_bias", 0))
+    sm = _v221_signed(sig.get("smart_money_bias", 0))
+    pcrb = _v221_signed(sig.get("pcr_bias", 0))
+    news_score_local = _v221_num(risk.get("news_risk", 0), 0)
+    vix_val = _v221_num(market.get("india_vix", vix if "vix" in globals() else 0), 0)
+    raw = (pa * 0.30) + (ob * 0.25) + (hw * 0.15) + (sm * 0.08) + (pcrb * 0.03)
+    risk_penalty = max(0.0, news_score_local - 45.0) * 0.08 + max(0.0, vix_val - 16.0) * 0.8
+    raw = max(-100.0, min(100.0, raw))
+    bullish = int(round(max(0, min(100, 50 + raw / 2 - risk_penalty / 2))))
+    bearish = int(round(max(0, min(100, 100 - bullish))))
+    direction = "UP" if bullish > bearish else "DOWN" if bearish > bullish else "RANGE"
+    return {"raw": raw, "bullish": bullish, "bearish": bearish, "direction": direction, "probability": max(bullish, bearish)}
+
+
+def _v221_build_evidence_rows(snapshot_obj, intelligence_obj):
+    rows = []
+    if isinstance(intelligence_obj, dict):
+        src_rows = intelligence_obj.get("reliability_rows", []) or []
+        if isinstance(src_rows, list):
+            for r in src_rows:
+                if isinstance(r, dict):
+                    rr = dict(r)
+                    rr.setdefault("Source", "AI_MASTER")
+                    rows.append(rr)
+    if not rows and isinstance(snapshot_obj, dict):
+        sig = snapshot_obj.get("signals", {}) if isinstance(snapshot_obj.get("signals", {}), dict) else {}
+        rows = [
+            {"Signal": "Price Action", "Bias": round(_v221_signed(sig.get("price_action_bias", 0)), 1), "Status": "AI_MASTER"},
+            {"Signal": "Option Chain / OI", "Bias": round(_v221_signed(sig.get("option_bias", 0)), 1), "Status": "AI_MASTER"},
+            {"Signal": "Heavyweights", "Bias": round(_v221_signed(sig.get("heavyweight_bias", 0)), 1), "Status": "AI_MASTER"},
+            {"Signal": "FII/DII", "Bias": round(_v221_signed(sig.get("smart_money_bias", 0)), 1), "Status": "AI_MASTER"},
+            {"Signal": "PCR", "Bias": round(_v221_signed(sig.get("pcr_bias", 0)), 1), "Status": "AI_MASTER"},
+            {"Signal": "Market Bias", "Bias": round(_v221_signed(sig.get("market_bias", 0)), 1), "Status": "AI_MASTER"},
+        ]
+    try:
+        oi_lock = snapshot_obj.get("oi_single_source", {}) if isinstance(snapshot_obj, dict) else {}
+        if oi_lock:
+            rows.append({
+                "Signal": "OI Sync",
+                "Bias": "OK" if oi_lock.get("sync_ok", True) else "MISMATCH",
+                "Status": str(oi_lock.get("source", "AI_MASTER")),
+            })
+    except Exception:
+        pass
+    return rows
+
+
+def _v221_strategy_rows(master):
+    action = str(master.get("final_action", "WAIT") or "WAIT").upper()
+    status = str(master.get("execution_status", "WAIT") or "WAIT").upper()
+    conf = _v221_int(master.get("confidence", 0), 0)
+    strategy = master.get("strategy", {}) if isinstance(master.get("strategy", {}), dict) else {}
+    ce_plan = master.get("ce_plan", {}) if isinstance(master.get("ce_plan", {}), dict) else {}
+    pe_plan = master.get("pe_plan", {}) if isinstance(master.get("pe_plan", {}), dict) else {}
+
+    def selected_score(name):
+        name = str(name).upper()
+        if action == name and status in ("APPROVED", "PREVIEW_ONLY"):
+            return max(conf, 70)
+        if action == "WAIT" and name == "WAIT":
+            return max(55, min(100, 100 - conf))
+        return 0
+
+    entry_status_trade = "✅ AI_MASTER Approved" if status == "APPROVED" else ("🔒 Preview / Market Closed" if status == "PREVIEW_ONLY" else "⚠️ Wait")
+    return [
+        {"Strategy": "SELL CE", "Rank Score": selected_score("SELL CE"), "Sell CE": ce_plan.get("strike", "-"), "Buy CE Hedge": ce_plan.get("hedge", "-"), "Sell PE": "-", "Buy PE Hedge": "-", "Entry/Credit": ce_plan.get("entry", 0), "SL": ce_plan.get("sl", 0), "Target": ce_plan.get("target", 0), "Entry Status": entry_status_trade if action == "SELL CE" else "Not selected by AI_MASTER"},
+        {"Strategy": "SELL PE", "Rank Score": selected_score("SELL PE"), "Sell CE": "-", "Buy CE Hedge": "-", "Sell PE": pe_plan.get("strike", "-"), "Buy PE Hedge": pe_plan.get("hedge", "-"), "Entry/Credit": pe_plan.get("entry", 0), "SL": pe_plan.get("sl", 0), "Target": pe_plan.get("target", 0), "Entry Status": entry_status_trade if action == "SELL PE" else "Not selected by AI_MASTER"},
+        {"Strategy": "IRON CONDOR", "Rank Score": selected_score("IRON CONDOR"), "Sell CE": ce_plan.get("strike", "-"), "Buy CE Hedge": ce_plan.get("hedge", "-"), "Sell PE": pe_plan.get("strike", "-"), "Buy PE Hedge": pe_plan.get("hedge", "-"), "Entry/Credit": round(_v221_num(ce_plan.get("entry", 0)) + _v221_num(pe_plan.get("entry", 0)), 2), "SL": f"CE {ce_plan.get('sl',0)} / PE {pe_plan.get('sl',0)}", "Target": f"CE {ce_plan.get('target',0)} / PE {pe_plan.get('target',0)}", "Entry Status": entry_status_trade if action == "IRON CONDOR" else "Not selected by AI_MASTER"},
+        {"Strategy": "WAIT", "Rank Score": selected_score("WAIT"), "Sell CE": "-", "Buy CE Hedge": "-", "Sell PE": "-", "Buy PE Hedge": "-", "Entry/Credit": 0, "SL": "No trade", "Target": "No trade", "Entry Status": "Capital safe / AI_MASTER Wait" if action == "WAIT" else "Backup only"},
+    ]
+
+
+def _v221_candidate_rows(master):
+    out = []
+    oc_time = ""
+    try:
+        oc_time = str((option_analysis or {}).get("fetched_at", "") or (option_chain or {}).get("fetched_at", ""))
+    except Exception:
+        oc_time = ""
+    for label, side, plan in [
+        ("Best CE", "CE", master.get("ce_plan", {})),
+        ("Best PE", "PE", master.get("pe_plan", {})),
+    ]:
+        plan = plan if isinstance(plan, dict) else {}
+        out.append({
+            "Candidate": label,
+            "Strike": plan.get("strike", "-"),
+            "Entry": plan.get("entry", 0),
+            "SL": plan.get("sl", 0),
+            "Target": plan.get("target", 0),
+            "Hedge": plan.get("hedge", "-"),
+            "OC Time": oc_time or fmt_time(),
+            "Fresh": "✅ AI_MASTER Fresh",
+        })
+    return out
+
+try:
+    _advisor_v221 = advisor_report if isinstance(advisor_report, dict) else {}
+    _snapshot_v221 = market_snapshot if isinstance(market_snapshot, dict) else {}
+    _decision_v221 = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+    _strategy_v221 = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
+    _intelligence_v221 = intelligence_report if isinstance(intelligence_report, dict) else {}
+    _risk_v221 = risk_engine_report if isinstance(risk_engine_report, dict) else {}
+
+    _final_action_v221 = str(_advisor_v221.get("final_action", _decision_v221.get("final_action", "WAIT")) or "WAIT").upper()
+    _execution_status_v221 = str(_advisor_v221.get("execution_status", _decision_v221.get("execution_status", "WAIT")) or "WAIT").upper()
+    _confidence_v221 = _v221_int(_advisor_v221.get("confidence", _decision_v221.get("calibrated_confidence", 0)), 0)
+    _strategy_dict_v221 = _advisor_v221.get("strategy", {}) if isinstance(_advisor_v221.get("strategy", {}), dict) else {}
+    _projection_v221 = _v221_build_projection(_snapshot_v221)
+    _ce_plan_v221 = _v221_side_plan("CE", best_ce if isinstance(best_ce, dict) else {}, _confidence_v221)
+    _pe_plan_v221 = _v221_side_plan("PE", best_pe if isinstance(best_pe, dict) else {}, _confidence_v221)
+    _evidence_rows_v221 = _v221_build_evidence_rows(_snapshot_v221, _intelligence_v221)
+
+    AI_MASTER = {
+        "version": "V22.1_AI_MASTER_SINGLE_ROUTING",
+        "created_at": fmt_time(),
+        "snapshot_id": _advisor_v221.get("snapshot_id", _snapshot_v221.get("snapshot_id", "SNAP-NA")),
+        "short_snapshot_id": _advisor_v221.get("short_snapshot_id", str(_snapshot_v221.get("snapshot_id", "SNAP-NA"))[-8:]),
+        "source_of_truth": "advisor_engine_after_stability_lock",
+        "final_action": _final_action_v221,
+        "execution_status": _execution_status_v221,
+        "confidence": _confidence_v221,
+        "strategy": _strategy_dict_v221,
+        "projection": _projection_v221,
+        "reasons": list(dict.fromkeys([str(x) for x in (_advisor_v221.get("reasons", []) or []) if x]))[:3] or ["Mixed evidence — wait for confirmation."],
+        "blockers": _advisor_v221.get("blockers", []) if isinstance(_advisor_v221.get("blockers", []), list) else [],
+        "warnings": _advisor_v221.get("warnings", []) if isinstance(_advisor_v221.get("warnings", []), list) else [],
+        "advice": _advisor_v221.get("advice", "WAIT — no fresh trade."),
+        "data_flow_status": _advisor_v221.get("data_flow_status", "UNKNOWN"),
+        "oi_sync_status": _advisor_v221.get("oi_sync_status", "UNKNOWN"),
+        "risk_score": _advisor_v221.get("risk_score", None),
+        "risk_label": _advisor_v221.get("risk_label", "NA"),
+        "ce_plan": _ce_plan_v221,
+        "pe_plan": _pe_plan_v221,
+        "evidence_rows": _evidence_rows_v221,
+    }
+    AI_MASTER["strategy_rows"] = _v221_strategy_rows(AI_MASTER)
+    AI_MASTER["candidate_rows"] = _v221_candidate_rows(AI_MASTER)
+    if isinstance(final_decision, dict):
+        final_decision["AI_MASTER"] = AI_MASTER
+except Exception as _v221_master_error:
+    st.error("AI_MASTER Single Routing failed: " + str(_v221_master_error))
+    st.stop()
+
+
+
 
 # =========================================================
 # V19.16 TRADER COMMAND CENTER HELPERS
@@ -4853,6 +5083,13 @@ st.markdown("""
 # V20 CLEAN UI HELPERS
 # =========================================================
 def _v20_signal_reliability_rows():
+    try:
+        _m = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}
+        _rows = _m.get("evidence_rows", []) if isinstance(_m.get("evidence_rows", []), list) else []
+        if _rows:
+            return _rows
+    except Exception:
+        pass
     """Signal table must use the final decision report first.
 
     V20.6 OI Single Source Lock: this table no longer prefers a parallel
@@ -4946,6 +5183,13 @@ def _v201_signed(x):
 
 
 def _v201_projection():
+    try:
+        _m = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}
+        _p = _m.get("projection", {}) if isinstance(_m.get("projection", {}), dict) else {}
+        if _p:
+            return _p
+    except Exception:
+        pass
     """Single compact market projection used only for top AI card.
 
     V20.4 fix: use app globals, not function locals(). Earlier this function
@@ -4992,6 +5236,13 @@ def _v201_change_line(proj):
 
 
 def _v201_top_factors(limit=3):
+    try:
+        _m = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}
+        _r = _m.get("reasons", []) if isinstance(_m.get("reasons", []), list) else []
+        if _r:
+            return [str(x) for x in _r if x][:limit]
+    except Exception:
+        pass
     factors = []
     try:
         g = globals()
@@ -5098,7 +5349,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V21.6 Safe Refresh</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.1 AI_MASTER Routing</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -5222,6 +5473,7 @@ except Exception:
     _v204_brain_sync = {"tick": fmt_time(), "time": fmt_time(), "fresh": False, "stale_reasons": ["Brain sync unavailable"], "snapshot_health": "NA", "snapshot_score": "NA"}
 
 _advisor_v214 = advisor_report if isinstance(globals().get("advisor_report", {}), dict) else {}
+_ai_master_v221 = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}
 if _advisor_v214:
     _de_final_v197 = str(_advisor_v214.get("final_action", _de_final_v197) or _de_final_v197).upper()
     _de_status_v197 = str(_advisor_v214.get("execution_status", _de_status_v197) or _de_status_v197).upper()
@@ -5238,10 +5490,10 @@ _proj_v201 = _v201_projection()
 _change_v201 = _v201_change_line(_proj_v201)
 _factor_list_v201 = _v201_top_factors(3)
 _reason_list_v20 = _v20_compact_reasons(_de_gate_v197, _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable."), limit=2)
-_advisor_reasons_v214 = _advisor_v214.get("reasons", []) if isinstance(_advisor_v214.get("reasons", []), list) else []
+_advisor_reasons_v214 = _ai_master_v221.get("reasons", []) if isinstance(_ai_master_v221.get("reasons", []), list) else (_advisor_v214.get("reasons", []) if isinstance(_advisor_v214.get("reasons", []), list) else [])
 _combined_reasons_v201 = list(dict.fromkeys([str(x) for x in (_advisor_reasons_v214 + _factor_list_v201 + _reason_list_v20) if x]))[:3]
 _reason_html_v20 = "<br>".join(["• " + str(x) for x in _combined_reasons_v201]) if _combined_reasons_v201 else "• Mixed signals — wait for confirmation."
-_action_line_v201 = _advisor_v214.get("advice", "No fresh trade. Wait for stronger confirmation.")
+_action_line_v201 = _ai_master_v221.get("advice", _advisor_v214.get("advice", "No fresh trade. Wait for stronger confirmation."))
 if not _advisor_v214 and _de_final_v197 in ("SELL CE", "SELL PE", "IRON CONDOR") and selected_strike != "No Strike":
     _action_line_v201 = f"{_de_final_v197}: {selected_strike} | Hedge: {hedge} | Confidence {int(_de_gate_v197.get('calibrated_confidence',0) or 0)}%"
 _news_line_v201 = f"News Risk: {news['label']} ({news['score']}/100)"
@@ -5255,7 +5507,7 @@ st.markdown(f"""
 <b>Change:</b> {_change_v201}<br>
 <b>Action:</b> {_action_line_v201}<br>
 <b>{_news_line_v201}</b> &nbsp; | &nbsp; <b>Last:</b> {_v204_brain_sync.get('time', fmt_time())}<br>
-<b>Advisor:</b> Single AI Brain | {_advisor_v214.get('advisor_version','V21.4')}<br>
+<b>Advisor:</b> Single AI Brain | {_ai_master_v221.get('version', _advisor_v214.get('advisor_version','V21.4'))}<br>
 <b>Brain Sync:</b> SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | OI {_v204_brain_sync.get('oi_sync','NA')} | {_v204_brain_sync.get('snapshot_health','NA')} {_v204_brain_sync.get('snapshot_score','NA')}/100 | OC {_v204_brain_sync.get('oc_rows',0)} rows
 <div class='v201-reason'><b>Why:</b><br>{_reason_html_v20}</div>
 </div>
@@ -5279,176 +5531,26 @@ try:
 except Exception as _v20_sig_err:
     st.caption("Signal reliability table unavailable: " + str(_v20_sig_err))
 
-st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
-
-def _v17_find_row(strike_value):
-    try:
-        strike_value = int(float(strike_value or 0))
-        for rr in (option_analysis.get("rows", []) if option_analysis.get("success") else []):
-            if int(rr.get("strike", 0) or 0) == strike_value:
-                return rr
-    except Exception:
-        pass
-    return None
-
-def _v163_side_plan(side, row, label=""):
-    if not row:
-        return {"Sell Strike": "-", "Entry": 0.0, "SL": 0.0, "Target 1": 0.0, "Target 2": 0.0, "Hedge": "-"}
-    prefix = side.lower()
-    sell_strike = int(row.get("strike", 0) or 0)
-    premium = float(row.get(f"{prefix}_ltp", 0) or 0)
-    plan = v12_sl_target_for_seller(premium, confidence, gamma_score_v7, shock_score_v7)
-    hedge_strike = v12_select_hedge_strike(sell_strike, side, hedge_gap)
-    return {
-        "Sell Strike": f"{sell_strike} {side}" if sell_strike else "-",
-        "Entry": round(premium, 2),
-        "SL": round(float(plan.get("sl", 0.0) or 0), 2),
-        "Target 1": round(float(plan.get("target1", 0.0) or 0), 2),
-        "Target 2": round(float(plan.get("target2", 0.0) or 0), 2),
-        "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
-    }
-
-def _v17_buy_plan(side):
-    # Buyer plan is for rare strong trend only; use ATM/near-ATM option from live chain.
-    try:
-        atm = int(option_chain.get("atm_strike", round(float(price or 0)/50)*50) or 0)
-    except Exception:
-        atm = 0
-    hedge_gap_local = int(locals().get("hedge_gap", 100) or 100)
-    buy_strike = atm
-    hedge_strike = atm + hedge_gap_local if side == "CE" else atm - hedge_gap_local
-    row = _v17_find_row(buy_strike)
-    prefix = side.lower()
-    entry = float((row or {}).get(f"{prefix}_ltp", 0) or 0)
-    sl = round(entry * 0.72, 2) if entry else "Use buyer SL"
-    target = round(entry * 1.45, 2) if entry else "Use buyer target"
-    return {
-        "Buy Strike": f"{buy_strike} {side}" if buy_strike else "-",
-        "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
-        "Entry": round(entry, 2) if entry else "Defined risk",
-        "SL": sl,
-        "Target": target,
-    }
-
-def _v163_rank_score(strategy_name):
-    """V21.2: Strategy Matrix ranking must respect the single Decision Engine authority.
-
-    The older v11 ranker remains a background signal provider only. If the
-    Decision Engine has a final non-WAIT action, that action gets authority
-    priority so the matrix does not contradict AI Final Authority.
-    """
-    name = str(strategy_name or "").upper()
-    try:
-        de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-        final_action = str(de.get("final_action", "WAIT") or "WAIT").upper()
-        status = str(de.get("execution_status", "WAIT") or "WAIT").upper()
-        conf = int(de.get("calibrated_confidence", 0) or 0)
-        if final_action != "WAIT" and name == final_action:
-            # Make the final authority visible as the matrix leader.
-            return max(conf, 75 if status in ("APPROVED", "PREVIEW_ONLY") else conf)
-    except Exception:
-        pass
-    try:
-        for r in v11_ranked_strategies:
-            if str(r.get("strategy", "")).upper() == name:
-                return int(r.get("confidence", 0) or 0)
-    except Exception:
-        pass
-    return 0
-
-_ce_plan = _v163_side_plan("CE", best_ce)
-_pe_plan = _v163_side_plan("PE", best_pe)
-_buy_call = _v17_buy_plan("CE")
-_buy_put = _v17_buy_plan("PE")
-_ic_credit = round(float(_ce_plan.get("Entry", 0) or 0) + float(_pe_plan.get("Entry", 0) or 0), 2)
-_strategy_rows_v163 = [
-    {"Strategy":"SELL CE","Rank Score":_v163_rank_score("SELL CE"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_ce_plan["Entry"],"SL":_ce_plan["SL"],"Target":_ce_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL CE" else "⚠️ Wait"},
-    {"Strategy":"SELL PE","Rank Score":_v163_rank_score("SELL PE"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_pe_plan["Entry"],"SL":_pe_plan["SL"],"Target":_pe_plan["Target 1"],"Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "SELL PE" else "⚠️ Wait"},
-    {"Strategy":"IRON CONDOR","Rank Score":_v163_rank_score("IRON CONDOR"),"Sell CE":_ce_plan["Sell Strike"],"Buy CE Hedge":_ce_plan["Hedge"],"Sell PE":_pe_plan["Sell Strike"],"Buy PE Hedge":_pe_plan["Hedge"],"Entry/Credit":_ic_credit,"SL":f"CE {_ce_plan.get('SL',0)} / PE {_pe_plan.get('SL',0)}","Target":f"CE {_ce_plan.get('Target 1',0)} / PE {_pe_plan.get('Target 1',0)}","Entry Status":"✅ Allowed" if _signal_gate_v162.get("allowed") and final_trade == "IRON CONDOR" else "⚠️ Wait"},
-    {"Strategy":"BUY PUT (Hedged)","Rank Score":_v163_rank_score("BUY PUT (Hedged)"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":_buy_put["Buy Strike"],"Buy PE Hedge":_buy_put["Hedge"],"Entry/Credit":_buy_put["Entry"],"SL":_buy_put["SL"],"Target":_buy_put["Target"],"Entry Status":"Only strong trend"},
-    {"Strategy":"BUY CALL (Hedged)","Rank Score":_v163_rank_score("BUY CALL (Hedged)"),"Sell CE":_buy_call["Buy Strike"],"Buy CE Hedge":_buy_call["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_buy_call["Entry"],"SL":_buy_call["SL"],"Target":_buy_call["Target"],"Entry Status":"Only strong trend"},
-    {"Strategy":"WAIT","Rank Score":_v163_rank_score("WAIT"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":0,"SL":"No trade","Target":"No trade","Entry Status":"Capital safe"},
-]
-
-# V20.2: Strategy Matrix Stability Lock
-# Ranking score can change by 2-8 points on every live refresh. Do not let the top
-# strategy flip between IRON CONDOR / SELL CE / SELL PE unless the new leader is
-# clearly stronger or the market has materially changed.
-def _v202_stable_strategy_rows(rows):
-    try:
-        rows = sorted(list(rows or []), key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
-        if not rows:
-            return rows
-        # V21.2: Final Decision Engine is the matrix authority. Old strategy
-        # ranker can rank alternatives, but it cannot overrule the final action.
-        try:
-            de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-            final_action = str(de.get("final_action", "WAIT") or "WAIT").upper()
-            if final_action != "WAIT":
-                authority_row = next((r for r in rows if str(r.get("Strategy", "")).upper() == final_action), None)
-                if authority_row:
-                    authority_row = dict(authority_row)
-                    authority_row["Entry Status"] = authority_row.get("Entry Status", "") or "Decision Engine Authority"
-                    rows = [authority_row] + [r for r in rows if str(r.get("Strategy", "")).upper() != final_action]
-                    st.session_state["v202_strategy_rank_lock"] = {
-                        "strategy": final_action,
-                        "score": int(authority_row.get("Rank Score", 0) or 0),
-                        "material_change": int((snapshot_delta or {}).get("material_change", 0) or 0) if isinstance(snapshot_delta, dict) else 0,
-                        "time": fmt_time(),
-                        "authority": "decision_engine",
-                    }
-                    return rows
-        except Exception:
-            pass
-        current_top = str(rows[0].get("Strategy", "WAIT"))
-        current_score = int(rows[0].get("Rank Score", 0) or 0)
-        prev = st.session_state.get("v202_strategy_rank_lock", {})
-        material = 0
-        try:
-            material = int((snapshot_delta or {}).get("material_change", 0) or 0)
-        except Exception:
-            material = 0
-
-        if prev and current_top != str(prev.get("strategy", "")):
-            prev_strategy = str(prev.get("strategy", ""))
-            prev_row = next((r for r in rows if str(r.get("Strategy", "")) == prev_strategy), None)
-            prev_score_now = int((prev_row or {}).get("Rank Score", 0) or 0)
-            score_gap = current_score - prev_score_now
-
-            # Lock previous leader when gap is small and material change is weak.
-            if prev_row and score_gap < 10 and material < 65:
-                prev_row = dict(prev_row)
-                prev_row["Entry Status"] = "🔒 Stable / Wait confirm"
-                rows = [prev_row] + [r for r in rows if str(r.get("Strategy", "")) != prev_strategy]
-                return rows
-
-        st.session_state["v202_strategy_rank_lock"] = {
-            "strategy": current_top,
-            "score": current_score,
-            "material_change": material,
-            "time": fmt_time(),
-        }
-        return rows
-    except Exception:
-        return sorted(list(rows or []), key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
-
-_strategy_rows_v163 = _v202_stable_strategy_rows(_strategy_rows_v163)
-st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
-st.caption(
-    f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | "
-    "Rank Score sirf strategy ordering hai; trade approval/advice Single Advisor = Decision Engine + Stability Lock se aati hai."
-)
-_best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Rank Score": 0}
-st.markdown(
-    f"**Best Ranked Setup:** {_best_row_v163.get('Strategy','WAIT')} "
-    f"(Rank {_best_row_v163.get('Rank Score',0)}/100)  |  "
-    f"**Decision Engine Verdict:** {_de_final_v197} "
-    f"({_de_gate_v197.get('calibrated_confidence',0)}%)"
-)
-if final_trade == "WAIT":
-    st.warning("Decision Engine abhi WAIT/BLOCK kar raha hai. Exact reason upar Final Authority section mein diya hai.")
-else:
-    st.success("Decision Engine verdict active hai. Broker price, spread, margin aur hedge confirm karo.")
+st.markdown("### 🎯 Smart Strategy Matrix — AI_MASTER Strategy Routing")
+try:
+    _strategy_rows_v221 = AI_MASTER.get("strategy_rows", []) if isinstance(AI_MASTER, dict) else []
+    if _strategy_rows_v221:
+        st.dataframe(pd.DataFrame(_strategy_rows_v221), width="stretch", hide_index=True)
+        st.caption(
+            f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
+            f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
+            "Strategy Matrix ab koi independent ranker/advice nahi banati. Ye sirf AI_MASTER output display karti hai."
+        )
+        _best_row_v221 = _strategy_rows_v221[0]
+        st.markdown(
+            f"**AI_MASTER Action:** {AI_MASTER.get('final_action','WAIT')} "
+            f"({AI_MASTER.get('confidence',0)}%) | "
+            f"**Execution:** {AI_MASTER.get('execution_status','WAIT')}"
+        )
+    else:
+        st.info("AI_MASTER strategy rows unavailable.")
+except Exception as _v221_strategy_ui_error:
+    st.caption("AI_MASTER strategy matrix unavailable: " + str(_v221_strategy_ui_error))
 
 # V20: AI Brain + Decision Authority duplicate UI removed.
 
@@ -5493,17 +5595,20 @@ if developer_mode:
 # V13: put the most actionable parts near the top for mobile trading.
 # V16.3: Strategy setup moved near top as Smart Strategy Matrix.
 
-st.markdown("### 📋 Live Best Candidates")
+st.markdown("### 📋 AI Candidate Matrix")
 try:
-    _cand_rows_v201 = _v201_candidate_rows()
-    if _cand_rows_v201:
-        st.dataframe(pd.DataFrame(_cand_rows_v201), width="stretch", hide_index=True)
-        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Best CE/PE latest option-chain row se price update karta hai. Advice Single Advisor se aati hai; yeh table sirf fresh candidates dikhata hai.")
+    _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
+    if _cand_rows_v221:
+        st.dataframe(pd.DataFrame(_cand_rows_v221), width="stretch", hide_index=True)
+        st.caption(
+            f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
+            f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
+            "Candidate Matrix fresh CE/PE rows dikhati hai; advice/ranking sirf AI_MASTER se aati hai."
+        )
     else:
-        st.info("Best candidates ke liye live option-chain active hona zaroori hai.")
-except Exception as _cand_err_v201:
-    st.caption("Live Best Candidates unavailable: " + str(_cand_err_v201))
-
+        st.info("AI Candidate Matrix ke liye live option-chain active hona zaroori hai.")
+except Exception as _cand_err_v221:
+    st.caption("AI Candidate Matrix unavailable: " + str(_cand_err_v221))
 
 
 with st.expander("💼 Active Positions + Add Position", expanded=False):
