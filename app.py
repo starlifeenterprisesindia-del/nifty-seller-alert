@@ -4750,15 +4750,6 @@ def _v1916_build_health_snapshot():
 # =========================================================
 # V19.17 PRO TRADER LAYOUT HELPERS
 # =========================================================
-def _v1917_num(x, default=0.0):
-    try:
-        if isinstance(x, str):
-            x = x.replace("₹", "").replace(",", "").replace("%", "").strip()
-        return float(x)
-    except Exception:
-        return default
-
-
 
 
 
@@ -4804,6 +4795,8 @@ def _v20_signal_reliability_rows():
                     {"Signal": "Price Action", "Bias": round(float(sig.get("price_action_bias", 0) or 0), 1), "Status": "Snapshot"},
                     {"Signal": "Option Chain / OI", "Bias": round(float(sig.get("option_bias", 0) or 0), 1), "Status": "Snapshot OI-Lock"},
                     {"Signal": "Heavyweights", "Bias": round(float(sig.get("heavyweight_bias", 0) or 0), 1), "Status": "Snapshot"},
+                    {"Signal": "FII/DII", "Bias": round(float(sig.get("smart_money_bias", 0) or 0), 1), "Status": "Snapshot"},
+                    {"Signal": "PCR", "Bias": round(float(sig.get("pcr_bias", 0) or 0), 1), "Status": "Snapshot"},
                     {"Signal": "Market Bias", "Bias": round(float(sig.get("market_bias", 0) or 0), 1), "Status": "Snapshot"},
                 ]
         except Exception:
@@ -4884,11 +4877,11 @@ def _v201_projection():
     sig = ms.get("signals", {}) if isinstance(ms.get("signals", {}), dict) else {}
     risk = ms.get("risk", {}) if isinstance(ms.get("risk", {}), dict) else {}
     market = ms.get("market", {}) if isinstance(ms.get("market", {}), dict) else {}
-    pa = _v201_signed(sig.get("price_action_bias", g.get("price_action_bias", 0)))
-    ob = _v201_signed(sig.get("option_bias", g.get("option_bias", 0)))
-    hw = _v201_signed(sig.get("heavyweight_bias", g.get("heavy_bias", 0)))
-    sm = _v201_signed(g.get("smart_money_bias", 0))
-    pcrb = _v201_signed(g.get("pcr_bias", 0))
+    pa = _v201_signed(sig.get("price_action_bias", 0))
+    ob = _v201_signed(sig.get("option_bias", 0))
+    hw = _v201_signed(sig.get("heavyweight_bias", 0))
+    sm = _v201_signed(sig.get("smart_money_bias", 0))
+    pcrb = _v201_signed(sig.get("pcr_bias", 0))
     news_score_local = float(risk.get("news_risk", 0) or 0)
     vix_val = float(market.get("india_vix", g.get("vix", 0)) or 0)
     # VIX/news reduce confidence; direction comes from PA + OI + HW + FII/DII.
@@ -4925,11 +4918,11 @@ def _v201_top_factors(limit=3):
         ms = g.get("market_snapshot", {}) if isinstance(g.get("market_snapshot", {}), dict) else {}
         sig = ms.get("signals", {}) if isinstance(ms.get("signals", {}), dict) else {}
         data = [
-            ("Price Action", _v201_signed(sig.get("price_action_bias", g.get("price_action_bias", 0)))),
-            ("Option Chain/OI", _v201_signed(sig.get("option_bias", g.get("option_bias", 0)))),
-            ("Heavyweights", _v201_signed(sig.get("heavyweight_bias", g.get("heavy_bias", 0)))),
-            ("FII/DII", _v201_signed(g.get("smart_money_bias", 0))),
-            ("PCR", _v201_signed(g.get("pcr_bias", 0))),
+            ("Price Action", _v201_signed(sig.get("price_action_bias", 0))),
+            ("Option Chain/OI", _v201_signed(sig.get("option_bias", 0))),
+            ("Heavyweights", _v201_signed(sig.get("heavyweight_bias", 0))),
+            ("FII/DII", _v201_signed(sig.get("smart_money_bias", 0))),
+            ("PCR", _v201_signed(sig.get("pcr_bias", 0))),
         ]
         data.sort(key=lambda x: abs(x[1]), reverse=True)
         for name, val in data[:limit]:
@@ -5245,9 +5238,26 @@ def _v17_buy_plan(side):
     }
 
 def _v163_rank_score(strategy_name):
+    """V21.2: Strategy Matrix ranking must respect the single Decision Engine authority.
+
+    The older v11 ranker remains a background signal provider only. If the
+    Decision Engine has a final non-WAIT action, that action gets authority
+    priority so the matrix does not contradict AI Final Authority.
+    """
+    name = str(strategy_name or "").upper()
+    try:
+        de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+        final_action = str(de.get("final_action", "WAIT") or "WAIT").upper()
+        status = str(de.get("execution_status", "WAIT") or "WAIT").upper()
+        conf = int(de.get("calibrated_confidence", 0) or 0)
+        if final_action != "WAIT" and name == final_action:
+            # Make the final authority visible as the matrix leader.
+            return max(conf, 75 if status in ("APPROVED", "PREVIEW_ONLY") else conf)
+    except Exception:
+        pass
     try:
         for r in v11_ranked_strategies:
-            if str(r.get("strategy", "")).upper() == strategy_name.upper():
+            if str(r.get("strategy", "")).upper() == name:
                 return int(r.get("confidence", 0) or 0)
     except Exception:
         pass
@@ -5276,6 +5286,27 @@ def _v202_stable_strategy_rows(rows):
         rows = sorted(list(rows or []), key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
         if not rows:
             return rows
+        # V21.2: Final Decision Engine is the matrix authority. Old strategy
+        # ranker can rank alternatives, but it cannot overrule the final action.
+        try:
+            de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+            final_action = str(de.get("final_action", "WAIT") or "WAIT").upper()
+            if final_action != "WAIT":
+                authority_row = next((r for r in rows if str(r.get("Strategy", "")).upper() == final_action), None)
+                if authority_row:
+                    authority_row = dict(authority_row)
+                    authority_row["Entry Status"] = authority_row.get("Entry Status", "") or "Decision Engine Authority"
+                    rows = [authority_row] + [r for r in rows if str(r.get("Strategy", "")).upper() != final_action]
+                    st.session_state["v202_strategy_rank_lock"] = {
+                        "strategy": final_action,
+                        "score": int(authority_row.get("Rank Score", 0) or 0),
+                        "material_change": int((snapshot_delta or {}).get("material_change", 0) or 0) if isinstance(snapshot_delta, dict) else 0,
+                        "time": fmt_time(),
+                        "authority": "decision_engine",
+                    }
+                    return rows
+        except Exception:
+            pass
         current_top = str(rows[0].get("Strategy", "WAIT"))
         current_score = int(rows[0].get("Rank Score", 0) or 0)
         prev = st.session_state.get("v202_strategy_rank_lock", {})

@@ -209,6 +209,8 @@ def build_market_snapshot(ctx, fmt_time_func=None):
             "option_bias": _safe_float(option_analysis.get("bias", _option_bias_from_oi(auth_call_oi_change, auth_put_oi_change)), 0),
             "price_action_bias": _safe_float(ctx.get("price_action_bias", 0), 0),
             "heavyweight_bias": _safe_float(heavyweight_analysis.get("pressure", ctx.get("heavy_bias", 0)), 0),
+            "smart_money_bias": _safe_float(ctx.get("smart_money_bias", 0), 0),
+            "pcr_bias": _safe_float(ctx.get("pcr_bias", 0), 0),
             "market_bias": _safe_float(ctx.get("market_bias", 0), 0),
             "conflict_mode": bool(ctx.get("conflict_mode", False)),
         },
