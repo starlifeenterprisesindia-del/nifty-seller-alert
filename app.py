@@ -117,7 +117,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.15 Dead Code Cleanup",
+    page_title="Nifty Seller AI Dashboard V19.16 Trader Command Center",
     page_icon="🧠",
     layout="wide",
 )
@@ -2412,8 +2412,19 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.15 Modular AI")
-st.sidebar.caption("V19.15: Dead Code Cleanup")
+st.sidebar.title("⚙️ V19.16 Modular AI")
+st.sidebar.caption("V19.16: Trader Command Center")
+
+# V19.16 QUICK REFRESH CONTROL — TOP SIDEBAR
+try:
+    st.sidebar.markdown("### 🔄 Quick Refresh")
+    if st.sidebar.button("🔄 Refresh Live Data", key="v1916_top_sidebar_refresh", use_container_width=True):
+        st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
+        st.rerun()
+except Exception:
+    pass
+
+
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -4594,6 +4605,136 @@ except Exception as _v1914_oi_error:
 
 
 
+
+# =========================================================
+# V19.16 TRADER COMMAND CENTER HELPERS
+# =========================================================
+def _v1916_build_health_snapshot():
+    try:
+        engine_flags = {
+            "v19_utils": True,
+            "snapshot_engine": bool(V19_SNAPSHOT_ENGINE_READY),
+            "ai_brain": bool(V19_AI_BRAIN_READY),
+            "risk_engine": bool(V19_RISK_ENGINE_READY),
+            "decision_engine": bool(V19_DECISION_ENGINE_READY),
+            "strategy_engine": bool(V19_STRATEGY_ENGINE_READY),
+            "intelligence_engine": bool(V19_INTELLIGENCE_ENGINE_READY),
+            "stability_engine": bool(V19_STABILITY_ENGINE_READY),
+            "memory_engine": bool(V19_MEMORY_ENGINE_READY),
+            "oi_flow_engine": bool(V19_OI_FLOW_ENGINE_READY),
+        }
+    except Exception:
+        engine_flags = {}
+
+    ready_count = sum(1 for v in engine_flags.values() if v)
+    total_count = len(engine_flags)
+
+    try:
+        oc_rows = len(option_chain.get("rows", []) or []) if isinstance(option_chain, dict) else 0
+    except Exception:
+        oc_rows = 0
+
+    try:
+        dhan_ok = bool(dhan_ready)
+    except Exception:
+        dhan_ok = False
+
+    try:
+        data_source = option_chain.get("source", "UNKNOWN") if isinstance(option_chain, dict) else "UNKNOWN"
+    except Exception:
+        data_source = "UNKNOWN"
+
+    try:
+        market_txt = market_text
+    except Exception:
+        try:
+            market_txt, _ = market_status()
+        except Exception:
+            market_txt = "UNKNOWN"
+
+    if oc_rows > 0 and dhan_ok:
+        freshness = "LIVE"
+        note = "DhanHQ quote and option-chain rows available."
+    elif oc_rows > 0:
+        freshness = "PARTIAL"
+        note = "Option-chain rows available, but Dhan heartbeat not fully confirmed."
+    else:
+        freshness = "STALE"
+        note = "Option-chain rows missing or not loaded."
+
+    return {
+        "engines_ready": ready_count,
+        "engines_total": total_count,
+        "engine_flags": engine_flags,
+        "dhan_ok": dhan_ok,
+        "option_rows": oc_rows,
+        "data_source": data_source,
+        "market_status": market_txt,
+        "freshness": freshness,
+        "freshness_note": note,
+        "last_refresh": fmt_time() if "fmt_time" in globals() else "",
+    }
+
+def _v1916_single_brain_audit():
+    try:
+        de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+    except Exception:
+        de = {}
+    try:
+        brain = ai_brain_report if isinstance(ai_brain_report, dict) else {}
+    except Exception:
+        brain = {}
+    try:
+        oi = oi_flow_report if isinstance(oi_flow_report, dict) else {}
+    except Exception:
+        oi = {}
+    try:
+        strat = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
+    except Exception:
+        strat = {}
+    try:
+        stab = stability_report if isinstance(stability_report, dict) else {}
+    except Exception:
+        stab = {}
+
+    final_decision_txt = de.get("final_action", "WAIT")
+    analysis_action = de.get("analysis_action", "WAIT")
+    ai_bias = "WAIT"
+    try:
+        if isinstance(brain.get("snapshot_bias", {}), dict):
+            ai_bias = brain.get("snapshot_bias", {}).get("proposed_action", "WAIT")
+    except Exception:
+        pass
+
+    oi_bias = oi.get("bias", "WAIT")
+    strategy_action = strat.get("action", "WAIT")
+    stability_status = stab.get("status", "NA")
+
+    conflicts = []
+    for name, val in [("AI Brain", ai_bias), ("OI Flow", oi_bias), ("Strategy Engine", strategy_action)]:
+        if str(val).upper() not in {"WAIT", "NA", ""} and str(analysis_action).upper() not in {"WAIT", "NA", ""}:
+            if str(val).upper() != str(analysis_action).upper():
+                conflicts.append(f"{name} evidence {val}, analysis bias {analysis_action}")
+
+    return {
+        "authority": "Decision Engine + Stability Lock",
+        "final_decision": final_decision_txt,
+        "analysis_bias": analysis_action,
+        "ai_brain_bias": ai_bias,
+        "oi_flow_bias": oi_bias,
+        "strategy_action": strategy_action,
+        "stability_status": stability_status,
+        "conflicts": conflicts,
+    }
+
+def _v1916_strategy_rows_for_top():
+    try:
+        rows = _strategy_rows_v163 if isinstance(_strategy_rows_v163, list) else []
+    except Exception:
+        rows = []
+    return [r for r in rows[:6] if isinstance(r, dict)]
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -4602,7 +4743,82 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.15 Dead Code Cleanup</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.16 Trader Command Center</div>", unsafe_allow_html=True)
+
+
+# =========================================================
+# V19.16 TRADER COMMAND CENTER — TOP PRIORITY VIEW
+# =========================================================
+try:
+    _v1916_health = _v1916_build_health_snapshot()
+    _v1916_audit = _v1916_single_brain_audit()
+
+    st.markdown("### 🚦 Live System Health — Data + Engines")
+    h1, h2, h3, h4 = st.columns(4)
+    h1.metric("System", _v1916_health.get("freshness", "NA"))
+    h2.metric("Engines", f"{_v1916_health.get('engines_ready',0)}/{_v1916_health.get('engines_total',0)} READY")
+    h3.metric("OC Rows", _v1916_health.get("option_rows", 0))
+    h4.metric("Last Refresh", _v1916_health.get("last_refresh", "NA"))
+
+    if _v1916_health.get("freshness") == "LIVE":
+        st.success("🟢 LIVE: " + _v1916_health.get("freshness_note", ""))
+    elif _v1916_health.get("freshness") == "PARTIAL":
+        st.warning("🟡 PARTIAL: " + _v1916_health.get("freshness_note", ""))
+    else:
+        st.error("🔴 STALE: " + _v1916_health.get("freshness_note", "") + " Fresh trade avoid karo.")
+
+    with st.expander("🧪 Engine Readiness Details", expanded=False):
+        st.json(_v1916_health.get("engine_flags", {}))
+
+    st.markdown("### 🧠 Single Brain Audit")
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Final Authority", "Decision + Stability")
+    a2.metric("Final Decision", _v1916_audit.get("final_decision", "WAIT"))
+    a3.metric("AI Bias", _v1916_audit.get("analysis_bias", "WAIT"))
+    a4.metric("Stability", _v1916_audit.get("stability_status", "NA"))
+
+    if _v1916_audit.get("conflicts"):
+        st.warning("Evidence conflict hai, lekin final authority ab bhi Decision Engine + Stability Lock hai.")
+        for _c in _v1916_audit.get("conflicts", [])[:5]:
+            st.write("⚠️", _c)
+    else:
+        st.success("Single-brain clear: final trade sirf Decision Engine + Stability Lock se aa raha hai.")
+
+    st.markdown("### 🎯 Trader Quick View — Decision + Strategy")
+    q1, q2, q3, q4 = st.columns(4)
+    _fd_quick = final_decision if isinstance(final_decision, dict) else {}
+    _de_quick = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+    _strat_quick = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
+    _intel_quick = intelligence_report if isinstance(intelligence_report, dict) else {}
+
+    q1.metric("Verdict", _de_quick.get("final_action", _fd_quick.get("action", "WAIT")))
+    q2.metric("Status", _de_quick.get("execution_status", _fd_quick.get("execution_status", "WAIT")))
+    q3.metric("Decision Conf.", f"{_de_quick.get('calibrated_confidence', _fd_quick.get('confidence',0))}%")
+    q4.metric("Intel Score", f"{_intel_quick.get('intelligence_score',0)}/100")
+
+    _top_plan_rows = [
+        {"Field": "Action", "Value": _strat_quick.get("action", _de_quick.get("analysis_action", "WAIT"))},
+        {"Field": "Plan Status", "Value": _strat_quick.get("status", "NA")},
+        {"Field": "Sell Strike", "Value": _strat_quick.get("sell_strike", "No Strike")},
+        {"Field": "Hedge", "Value": _strat_quick.get("hedge_strike", "No Hedge")},
+        {"Field": "Entry", "Value": _strat_quick.get("entry", "No Trade")},
+        {"Field": "SL", "Value": _strat_quick.get("sl", "No Trade")},
+        {"Field": "Target", "Value": _strat_quick.get("target", "No Trade")},
+        {"Field": "Lots", "Value": _de_quick.get("approved_lots", 0)},
+    ]
+    st.dataframe(pd.DataFrame(_top_plan_rows), use_container_width=True, hide_index=True)
+
+    _top_matrix_rows = _v1916_strategy_rows_for_top()
+    if _top_matrix_rows:
+        st.markdown("### 🎯 Smart Strategy Matrix — Top View")
+        st.dataframe(pd.DataFrame(_top_matrix_rows), use_container_width=True, hide_index=True)
+        st.caption("Rank Score sirf ordering hai. Final trade Decision Engine + Stability Lock se aata hai.")
+
+    st.divider()
+except Exception as _v1916_top_error:
+    st.warning("Trader Command Center load issue: " + str(_v1916_top_error))
+
+
 
 # V18.2 Main Decision Object Card
 try:
@@ -4615,7 +4831,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.15 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.16 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -5013,6 +5229,7 @@ try:
             st.write("Memory Engine:", "READY" if V19_MEMORY_ENGINE_READY else "MISSING")
             st.write("OI Flow Engine:", "READY" if V19_OI_FLOW_ENGINE_READY else "MISSING")
             st.write("Dead Code Cleanup:", "V19.15 ACTIVE")
+            st.write("Trader Command Center:", "V19.16 ACTIVE")
             st.write("Cleanup policy:", "Only unused/legacy code removed; engines untouched")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
@@ -5217,6 +5434,7 @@ else:
 
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
+st.caption("Top copy upar Trader Quick View me bhi available hai, live trading ke liye.")
 
 def _v17_find_row(strike_value):
     try:
@@ -5864,6 +6082,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.15 build: dead-code cleanup active; module authorities remain unchanged. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.16 build: Trader Command Center shows live health, single-brain authority and trade plan at top. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
