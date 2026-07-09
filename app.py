@@ -96,7 +96,7 @@ except Exception:
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.14 - OI FLOW ENGINE
+# NIFTY SELLER AI DASHBOARD V19.15 - DEAD CODE CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -117,7 +117,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.14 OI Flow Engine",
+    page_title="Nifty Seller AI Dashboard V19.15 Dead Code Cleanup",
     page_icon="🧠",
     layout="wide",
 )
@@ -2412,8 +2412,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.14 Modular AI")
-st.sidebar.caption("V19.14: OI Flow Engine")
+st.sidebar.title("⚙️ V19.15 Modular AI")
+st.sidebar.caption("V19.15: Dead Code Cleanup")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -4602,7 +4602,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.14 OI Flow Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.15 Dead Code Cleanup</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4615,7 +4615,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.14 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.15 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -5012,6 +5012,8 @@ try:
             st.write("Stability Engine:", "READY" if V19_STABILITY_ENGINE_READY else "MISSING")
             st.write("Memory Engine:", "READY" if V19_MEMORY_ENGINE_READY else "MISSING")
             st.write("OI Flow Engine:", "READY" if V19_OI_FLOW_ENGINE_READY else "MISSING")
+            st.write("Dead Code Cleanup:", "V19.15 ACTIVE")
+            st.write("Cleanup policy:", "Only unused/legacy code removed; engines untouched")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
@@ -5862,6 +5864,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.14 build: oi_flow_engine.py tracks OI writing, unwinding, flow and strike migration. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.15 build: dead-code cleanup active; module authorities remain unchanged. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
