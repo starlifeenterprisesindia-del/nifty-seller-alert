@@ -117,7 +117,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.17 Pro Trader Layout",
+    page_title="Nifty Seller AI Dashboard V20 Clean Edition",
     page_icon="🧠",
     layout="wide",
 )
@@ -2412,13 +2412,13 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.17 Modular AI")
-st.sidebar.caption("V19.17: Pro Trader Layout")
+st.sidebar.title("⚙️ V20 Clean AI")
+st.sidebar.caption("V20: Clean Trading UI")
 
-# V19.17 QUICK REFRESH CONTROL — TOP SIDEBAR
+# V20 QUICK REFRESH CONTROL — TOP SIDEBAR
 try:
     st.sidebar.markdown("### 🔄 Quick Refresh")
-    if st.sidebar.button("🔄 Refresh Live Data", key="v1917_top_sidebar_refresh", use_container_width=True):
+    if st.sidebar.button("🔄 Refresh Live Data", key="v20_top_sidebar_refresh", use_container_width=True):
         st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
         st.rerun()
 except Exception:
@@ -4867,6 +4867,74 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
+
+# =========================================================
+# V20 CLEAN UI HELPERS
+# =========================================================
+def _v20_signal_reliability_rows():
+    candidates = []
+    try:
+        if isinstance(intelligence_report, dict):
+            candidates.append(intelligence_report)
+    except Exception:
+        pass
+    try:
+        if isinstance(final_decision, dict):
+            ir = final_decision.get("intelligence_report", {})
+            if isinstance(ir, dict):
+                candidates.append(ir)
+    except Exception:
+        pass
+    for src in candidates:
+        rows = src.get("reliability_rows", []) if isinstance(src, dict) else []
+        if isinstance(rows, list) and rows:
+            return rows
+    return []
+
+def _v20_compact_reasons(report, fallback=None, limit=4):
+    reasons=[]
+    try:
+        if isinstance(report, dict):
+            for key in ("blockers", "warnings", "reasons"):
+                vals=report.get(key, []) or []
+                if isinstance(vals, list):
+                    reasons.extend([str(x) for x in vals if x])
+    except Exception:
+        pass
+    if not reasons and fallback:
+        reasons=[str(fallback)]
+    return list(dict.fromkeys(reasons))[:limit]
+
+def _v20_risk_summary():
+    try:
+        fd = final_decision if isinstance(final_decision, dict) else {}
+        rr = fd.get("risk_report", {}) if isinstance(fd.get("risk_report", {}), dict) else {}
+        if rr:
+            return rr
+    except Exception:
+        pass
+    try:
+        if isinstance(risk_engine_report, dict):
+            return risk_engine_report
+    except Exception:
+        pass
+    return {}
+
+def _v20_oi_report():
+    try:
+        fd = final_decision if isinstance(final_decision, dict) else {}
+        oi = fd.get("oi_flow_report", {}) if isinstance(fd.get("oi_flow_report", {}), dict) else {}
+        if oi:
+            return oi
+    except Exception:
+        pass
+    try:
+        if isinstance(oi_flow_report, dict):
+            return oi_flow_report
+    except Exception:
+        pass
+    return {}
+
 # =========================================================
 # UI
 # =========================================================
@@ -4875,620 +4943,52 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.17 Pro Trader Layout</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V20 Clean Edition</div>", unsafe_allow_html=True)
 
 
 # =========================================================
-# V19.17 PRO TRADER COMMAND CENTER — REAL TOP LAYOUT
+# V20 CLEAN TOP CONTROL
 # =========================================================
 try:
-    _v1916_health = _v1916_build_health_snapshot()
-    _v1916_audit = _v1916_single_brain_audit()
-
-    st.markdown("### 🔄 Refresh + Live System Health")
-    if st.button("🔄 Refresh Live Data Now", key="v1917_main_top_refresh", use_container_width=True):
+    st.markdown("### 🔄 Live Refresh + Status")
+    if st.button("🔄 Refresh Live Data Now", key="v20_main_top_refresh", use_container_width=True):
         st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
         st.rerun()
-
-    h1, h2, h3, h4 = st.columns(4)
-    h1.metric("System", _v1916_health.get("freshness", "NA"))
-    h2.metric("Engines", f"{_v1916_health.get('engines_ready',0)}/{_v1916_health.get('engines_total',0)}")
-    h3.metric("OC Rows", _v1916_health.get("option_rows", 0))
-    h4.metric("Last Refresh", _v1916_health.get("last_refresh", "NA"))
-
-    if _v1916_health.get("freshness") == "LIVE":
-        st.success("🟢 LIVE DATA OK — " + _v1916_health.get("freshness_note", ""))
-    elif _v1916_health.get("freshness") == "PARTIAL":
-        st.warning("🟡 PARTIAL DATA — " + _v1916_health.get("freshness_note", ""))
-    else:
-        st.error("🔴 DATA STALE — fresh trade avoid karo. " + _v1916_health.get("freshness_note", ""))
-
-    st.markdown("### 📊 Live Market Snapshot — Trading First")
-    st.dataframe(pd.DataFrame(_v1917_market_snapshot_rows()), use_container_width=True, hide_index=True)
-
-    try:
-        _mode_txt = str(market_mode_v7 if "market_mode_v7" in globals() else "UNKNOWN")
-    except Exception:
-        _mode_txt = "UNKNOWN"
-    try:
-        _last_pts = float(last_refresh_points if "last_refresh_points" in globals() else 0)
-    except Exception:
-        _last_pts = 0
-    try:
-        _today_pct = float(today_pct if "today_pct" in globals() else 0)
-    except Exception:
-        _today_pct = 0
-
-    if "RISE" in _mode_txt.upper():
-        st.success(f"🟢 MARKET MODE: {_mode_txt} | Last: {_last_pts:+.1f} pts | Today: {_today_pct:+.2f}%")
-    elif "FALL" in _mode_txt.upper():
-        st.error(f"🔴 MARKET MODE: {_mode_txt} | Last: {_last_pts:+.1f} pts | Today: {_today_pct:+.2f}%")
-    else:
-        st.info(f"🟡 MARKET MODE: {_mode_txt} | Last: {_last_pts:+.1f} pts | Today: {_today_pct:+.2f}%")
-
-    st.markdown("### 🏋️ Top-5 Heavyweight Driver — Top View")
-    try:
-        hw1, hw2, hw3, hw4 = st.columns(4)
-        hw1.metric("Weighted Pressure", str(weighted_pressure) if "weighted_pressure" in globals() else "NA")
-        hw2.metric("Top-5 Points", str(estimated_top5_points) if "estimated_top5_points" in globals() else "NA")
-        hw3.metric("HDFC+ICICI", str(hdfc_icici_bias) if "hdfc_icici_bias" in globals() else "NA")
-        hw4.metric("Divergence", str(heavy_divergence) if "heavy_divergence" in globals() else "NA")
-    except Exception:
-        pass
-    _hw_rows = _v1917_heavyweight_rows()
-    if _hw_rows:
-        st.dataframe(pd.DataFrame(_hw_rows), use_container_width=True, hide_index=True)
-    else:
-        st.caption("Heavyweight detail table neeche original section me available hai.")
-
-    st.markdown("### 🧠 Single Brain Audit — No Confusion")
-    a1, a2, a3, a4 = st.columns(4)
-    a1.metric("Final Authority", "Decision + Stability")
-    a2.metric("Final Decision", _v1916_audit.get("final_decision", "WAIT"))
-    a3.metric("AI Bias", _v1916_audit.get("analysis_bias", "WAIT"))
-    a4.metric("Stability", _v1916_audit.get("stability_status", "NA"))
-
-    if _v1916_audit.get("conflicts"):
-        st.warning("Evidence conflict hai. Final trade sirf Decision Engine + Stability Lock se follow karo.")
-        for _c in _v1916_audit.get("conflicts", [])[:5]:
-            st.write("⚠️", _c)
-    else:
-        st.success("Single-brain clear: final trade sirf Decision Engine + Stability Lock se aa raha hai.")
-
-    st.markdown("### 🎯 Smart Strategy Matrix — TOP")
-    _top_matrix_rows = _v1916_strategy_rows_for_top()
-    if _top_matrix_rows:
-        st.dataframe(pd.DataFrame(_top_matrix_rows), use_container_width=True, hide_index=True)
-        st.caption("Rank Score sirf ordering hai. Final trade Decision Engine + Stability Lock se aata hai.")
-
-    st.markdown("### 📋 Trade Plan + Premium Quality")
-    _fd_quick = final_decision if isinstance(final_decision, dict) else {}
-    _de_quick = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-    _strat_quick = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
-    _intel_quick = intelligence_report if isinstance(intelligence_report, dict) else {}
-
-    q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Verdict", _de_quick.get("final_action", _fd_quick.get("action", "WAIT")))
-    q2.metric("Status", _de_quick.get("execution_status", _fd_quick.get("execution_status", "WAIT")))
-    q3.metric("Decision Conf.", f"{_de_quick.get('calibrated_confidence', _fd_quick.get('confidence',0))}%")
-    q4.metric("Intel Score", f"{_intel_quick.get('intelligence_score',0)}/100")
-
-    _top_plan_rows = [
-        {"Field": "Action", "Value": _strat_quick.get("action", _de_quick.get("analysis_action", "WAIT"))},
-        {"Field": "Plan Status", "Value": _strat_quick.get("status", "NA")},
-        {"Field": "Sell Strike", "Value": _strat_quick.get("sell_strike", "No Strike")},
-        {"Field": "Hedge", "Value": _strat_quick.get("hedge_strike", "No Hedge")},
-        {"Field": "Entry", "Value": _strat_quick.get("entry", "No Trade")},
-        {"Field": "SL", "Value": _strat_quick.get("sl", "No Trade")},
-        {"Field": "Target", "Value": _strat_quick.get("target", "No Trade")},
-        {"Field": "Lots", "Value": _de_quick.get("approved_lots", 0)},
-    ]
-    st.dataframe(pd.DataFrame(_top_plan_rows), use_container_width=True, hide_index=True)
-
-    _pq_rows, _pq_label, _pq_color, _pq_note = _v1917_plan_quality_rows()
-    if _pq_color == "green":
-        st.success(f"Premium Quality: {_pq_label} — {_pq_note}")
-    elif _pq_color == "orange":
-        st.warning(f"Premium Quality: {_pq_label} — {_pq_note}")
-    else:
-        st.error(f"Premium Quality: {_pq_label} — {_pq_note}")
-    st.dataframe(pd.DataFrame(_pq_rows), use_container_width=True, hide_index=True)
-
-    st.divider()
-except Exception as _v1917_top_error:
-    st.warning("Pro Trader Command Center load issue: " + str(_v1917_top_error))
+    _v20_health = _v1916_build_health_snapshot()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Data", _v20_health.get("freshness", "NA"))
+    c2.metric("Engines", f"{_v20_health.get('engines_ready',0)}/{_v20_health.get('engines_total',0)}")
+    c3.metric("OC Rows", _v20_health.get("option_rows", 0))
+    c4.metric("Last", _v20_health.get("last_refresh", "NA"))
+except Exception as _v20_status_err:
+    st.caption("Top status unavailable: " + str(_v20_status_err))
 
 
-
-# V18.2 Main Decision Object Card
+# V20 CLEAN: old V18/V19 debug decision bundle removed from normal UI.
+# Engines still run; only noisy repeated UI is removed.
 try:
-    _fd = final_decision if isinstance(final_decision, dict) else {}
-    _quality = _fd.get("quality", "NA")
-    _class = "green" if _quality == "OK" else ("red" if _quality in ("BLOCKED", "ERROR", "DATA_WEAK", "RISK_HIGH") else "")
-    _strategy = _fd.get("strategy", {}) if isinstance(_fd.get("strategy", {}), dict) else {}
-    _market_open_card = (market_text == "Market Open")
-    _de_card = _fd.get("decision_engine", {}) if isinstance(_fd.get("decision_engine", {}), dict) else {}
-    _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
-    _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
-    _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.17 Decision Engine — {_exec_status_card}"
-    _action_label = "Final Verdict"
-    # V19.17: duplicate decision summary card hidden from normal trader view.
-    # Top Trade Plan + Final Authority card are the user-facing decision views.
-    if developer_mode:
-        with st.expander("Developer: Legacy duplicate Decision Summary Card", expanded=False):
-            st.markdown(f"""
-            <div class='v17-final {_class}'>
-            <h3>{_card_heading}</h3>
-            <b>{_action_label}:</b> {_final_action_card} &nbsp; | &nbsp;
-            <b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
-            <b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
-            <b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')} &nbsp; | &nbsp;
-            <b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')} &nbsp; | &nbsp;
-            <b>Memory:</b> {(_fd.get('memory_report',{}) or {}).get('memory_status','NA')} &nbsp; | &nbsp;
-            <b>OI Flow:</b> {(_fd.get('oi_flow_report',{}) or {}).get('bias','NA')}<br>
-            <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
-            <b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
-            <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
-            <b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
-            <b>Entry:</b> {_strategy.get('entry','No Trade')} &nbsp; | &nbsp;
-            <b>SL:</b> {_strategy.get('sl','No Trade')} &nbsp; | &nbsp;
-            <b>Target:</b> {_strategy.get('target','No Trade')} &nbsp; | &nbsp;
-            <b>Approved Lots:</b> {_de_card.get('approved_lots',0)} &nbsp; | &nbsp;
-            <b>Preview Lots:</b> {_de_card.get('preview_lots',0)}
-            </div>
-            """, unsafe_allow_html=True)
+    _v20_rr = _v20_risk_summary()
+    if _v20_rr:
+        st.markdown("### 🛡️ Risk Summary")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Safety", f"{_v20_rr.get('safety_score', 100 - int(_v20_rr.get('risk_score',0) or 0))}/100")
+        r2.metric("Risk Grade", _v20_rr.get("risk_grade", "NA"))
+        r3.metric("Guidance", _v20_rr.get("guidance", "NA"))
+except Exception:
+    pass
 
-    
-    try:
-        _oi_report_ui = (
-            _fd.get("oi_flow_report", {})
-            if isinstance(_fd.get("oi_flow_report", {}), dict)
-            else {}
-        )
-        if _oi_report_ui:
-            with st.expander("📊 OI Flow Engine — Writing / Unwinding / Migration", expanded=True):
-                oi1, oi2, oi3, oi4 = st.columns(4)
-                oi1.metric("OI Flow Bias", _oi_report_ui.get("bias", "NA"))
-                oi2.metric("Flow Confidence", f"{_oi_report_ui.get('confidence',0)}/100")
-                oi3.metric("Support", f"{_oi_report_ui.get('support_strength',0)}/100")
-                oi4.metric("Resistance", f"{_oi_report_ui.get('resistance_strength',0)}/100")
-
-                st.info(_oi_report_ui.get("summary", "No OI flow summary."))
-
-                oc1, oc2 = st.columns(2)
-                with oc1:
-                    st.write("**Top Call Writing / Unwinding:**")
-                    try:
-                        st.dataframe(
-                            pd.DataFrame(_oi_report_ui.get("call_writing", [])),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    except Exception:
-                        st.json(_oi_report_ui.get("call_writing", []))
-                with oc2:
-                    st.write("**Top Put Writing / Unwinding:**")
-                    try:
-                        st.dataframe(
-                            pd.DataFrame(_oi_report_ui.get("put_writing", [])),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    except Exception:
-                        st.json(_oi_report_ui.get("put_writing", []))
-
-                if _oi_report_ui.get("migration_notes"):
-                    st.write("**Strike Migration:**")
-                    for _m in _oi_report_ui.get("migration_notes", [])[:6]:
-                        st.write("🔄", _m)
-
-                if _oi_report_ui.get("warnings"):
-                    st.write("**OI Flow Warnings:**")
-                    for _w in _oi_report_ui.get("warnings", [])[:8]:
-                        st.write("⚠️", _w)
-
-                with st.expander("Top OI Flow Rows", expanded=False):
-                    try:
-                        st.dataframe(
-                            pd.DataFrame(_oi_report_ui.get("top_flows", [])),
-                            use_container_width=True,
-                            hide_index=True,
-                        )
-                    except Exception:
-                        st.json(_oi_report_ui.get("top_flows", []))
-    except Exception:
-        pass
-
-    try:
-        _memory_report_ui = (
-            _fd.get("memory_report", {})
-            if isinstance(_fd.get("memory_report", {}), dict)
-            else {}
-        )
-        if _memory_report_ui:
-            with st.expander("🧠 Market Memory — Last Refresh Behaviour", expanded=False):
-                mm1, mm2, mm3, mm4 = st.columns(4)
-                mm1.metric("Memory Status", _memory_report_ui.get("memory_status", "NA"))
-                mm2.metric("Memory Score", f"{_memory_report_ui.get('memory_score',0)}/100")
-                mm3.metric("Action Stability", f"{_memory_report_ui.get('action_stability',0)}%")
-                mm4.metric("History Count", _memory_report_ui.get("history_count", 0))
-
-                st.info(_memory_report_ui.get("summary", "No memory summary."))
-
-                st.write("**Positive Memory Signals:**")
-                if _memory_report_ui.get("positives"):
-                    for _p in _memory_report_ui.get("positives", [])[:8]:
-                        st.write("✅", _p)
-                else:
-                    st.write("• Memory warming up.")
-
-                st.write("**Memory Warnings:**")
-                if _memory_report_ui.get("warnings"):
-                    for _w in _memory_report_ui.get("warnings", [])[:8]:
-                        st.write("⚠️", _w)
-                else:
-                    st.write("• No major memory warning.")
-
-                try:
-                    st.dataframe(
-                        pd.DataFrame(_memory_report_ui.get("recent_rows", [])),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                except Exception:
-                    st.json(_memory_report_ui.get("recent_rows", []))
-    except Exception:
-        pass
-
-    try:
-        _stab_report_ui = (
-            _fd.get("stability_report", {})
-            if isinstance(_fd.get("stability_report", {}), dict)
-            else {}
-        )
-        if _stab_report_ui:
-            with st.expander("🔒 Decision Stability Lock — Refresh Jump Protection", expanded=False):
-                st1, st2, st3, st4 = st.columns(4)
-                st1.metric("Stability Status", _stab_report_ui.get("status", "NA"))
-                st2.metric("Locked", "YES" if _stab_report_ui.get("locked") else "NO")
-                st3.metric("Material Change", f"{_stab_report_ui.get('material_change',0)}/100")
-                st4.metric("Strike Jump", f"{_stab_report_ui.get('strike_jump',0):.0f} pts")
-                st.write("**Reason:**", _stab_report_ui.get("reason", "NA"))
-                st.caption(
-                    "Rule: Strike/direction change tabhi accept hoga jab material change strong ho "
-                    "ya risk safety override ho. Isse refresh par 102 CE → 78 CE type jump block hoga."
-                )
-    except Exception:
-        pass
-
-    try:
-        _intel_report_ui = (
-            _fd.get("intelligence_report", {})
-            if isinstance(_fd.get("intelligence_report", {}), dict)
-            else {}
-        )
-        if _intel_report_ui:
-            with st.expander("🧠 AI Intelligence Explanation — Why / Why Not", expanded=True):
-                ix1, ix2, ix3, ix4 = st.columns(4)
-                ix1.metric("Market Context", _intel_report_ui.get("market_context", "NA"))
-                ix2.metric("Intelligence Score", f"{_intel_report_ui.get('intelligence_score',0)}/100")
-                ix3.metric("Fake Move Risk", f"{_intel_report_ui.get('fake_move_risk',0)}/100")
-                ix4.metric("Conflict Score", f"{_intel_report_ui.get('conflict_score',0)}/100")
-
-                st.info(_intel_report_ui.get("verdict_summary", "No intelligence summary."))
-
-                st.write("**Positive Factors:**")
-                if _intel_report_ui.get("positives"):
-                    for _p in _intel_report_ui.get("positives", [])[:8]:
-                        st.write("✅", _p)
-                else:
-                    st.write("• No strong positive factor.")
-
-                st.write("**Negative / Caution Factors:**")
-                if _intel_report_ui.get("negatives"):
-                    for _n in _intel_report_ui.get("negatives", [])[:8]:
-                        st.write("⚠️", _n)
-                else:
-                    st.write("• No major negative factor.")
-
-                st.write("**Signal Reliability Table:**")
-                try:
-                    st.dataframe(
-                        pd.DataFrame(_intel_report_ui.get("reliability_rows", [])),
-                        use_container_width=True,
-                        hide_index=True,
-                    )
-                except Exception:
-                    st.json(_intel_report_ui.get("reliability_rows", []))
-
-    except Exception:
-        pass
-
-    try:
-        _strategy_report_ui = (
-            _fd.get("strategy_engine_report", {})
-            if isinstance(_fd.get("strategy_engine_report", {}), dict)
-            else {}
-        )
-        if _strategy_report_ui:
-            with st.expander(
-                "🎯 Strategy Engine Plan — Strike + Hedge + Entry + SL + Target",
-                expanded=False,
-            ):
-                s1, s2, s3, s4 = st.columns(4)
-                s1.metric("Plan Status", _strategy_report_ui.get("status", "NA"))
-                s2.metric("Plan Source", _strategy_report_ui.get("source", "NA"))
-                s3.metric("Side", _strategy_report_ui.get("side", "NA"))
-                s4.metric("Lots", _strategy_report_ui.get("lots", 0))
-
-                _strategy_rows_ui = [
-                    {"Field": "Sell Strike", "Value": _strategy_report_ui.get("sell_strike", "No Strike")},
-                    {"Field": "Hedge Strike", "Value": _strategy_report_ui.get("hedge_strike", "No Hedge")},
-                    {"Field": "Entry", "Value": _strategy_report_ui.get("entry", "No Trade")},
-                    {"Field": "Stop Loss", "Value": _strategy_report_ui.get("sl", "No Trade")},
-                    {"Field": "Target 1", "Value": _strategy_report_ui.get("target", "No Trade")},
-                    {"Field": "Target 2", "Value": _strategy_report_ui.get("target2", "No Trade")},
-                    {"Field": "Trail After", "Value": _strategy_report_ui.get("trail_after", "No Trade")},
-                ]
-                st.dataframe(
-                    pd.DataFrame(_strategy_rows_ui),
-                    use_container_width=True,
-                    hide_index=True,
-                )
-
-                if _strategy_report_ui.get("issues"):
-                    st.write("**Plan Issues:**")
-                    for _issue in _strategy_report_ui.get("issues", [])[:8]:
-                        st.write("•", _issue)
-                elif _strategy_report_ui.get("valid"):
-                    st.success("Strategy plan validated.")
-
-    except Exception:
-        pass
-
-    try:
-        if _de_card:
-            with st.expander("⚖️ Decision Engine Verdict — Why Approved / Blocked", expanded=False):
-                d1, d2, d3, d4 = st.columns(4)
-                d1.metric("Final Verdict", _de_card.get("final_action", "WAIT"))
-                d2.metric("Execution Status", _de_card.get("execution_status", "WAIT"))
-                d3.metric("Decision Confidence", f"{_de_card.get('calibrated_confidence',0)}%")
-                d4.metric("Approved Lots", _de_card.get("approved_lots", 0))
-
-                st.write("**Analysis Bias:**", _de_card.get("analysis_action", "WAIT"))
-                st.write("**Consensus:**", _de_card.get("consensus", "NA"))
-                st.write("**Execution Reason:**", _de_card.get("execution_reason", "NA"))
-
-                if _de_card.get("blockers"):
-                    st.write("**Blockers:**")
-                    for _x in _de_card.get("blockers", [])[:10]:
-                        st.write("•", _x)
-
-                if _de_card.get("warnings"):
-                    st.write("**Warnings:**")
-                    for _x in _de_card.get("warnings", [])[:8]:
-                        st.write("•", _x)
-
-                if _de_card.get("reasons"):
-                    st.write("**Positive Reasons:**")
-                    for _x in _de_card.get("reasons", [])[:10]:
-                        st.write("•", _x)
-
-                st.write("**Validated Trade Plan:**")
-                st.json(_de_card.get("plan_validation", {}))
-    except Exception:
-        pass
-
-    try:
-        _brain_top = ai_brain_report if isinstance(ai_brain_report, dict) else {}
-        if _brain_top:
-            m1, m2, m3, m4 = st.columns(4)
-            m1.metric("Regime", _brain_top.get("regime", "NA"))
-            m2.metric("Alignment", f"{_brain_top.get('alignment_score', 0)}/100")
-            m3.metric("Trade Quality", f"{_brain_top.get('trade_quality_score', 0)}/100")
-            m4.metric("AI Evidence Score", f"{_brain_top.get('smart_confidence', 0)}%")
-
-            st.caption(
-                "Score meaning: Decision Confidence = execution authority | "
-                "AI Evidence Score = advisory evidence | Rank Score = strategy ordering only."
-            )
-
-            st.caption(
-                f"Snapshot: {snapshot_delta.get('status','NA')} | "
-                f"Material Change: {snapshot_delta.get('material_change',0)}/100"
-            )
-
-            _sai = _brain_top.get("snapshot_bias", {}) if isinstance(_brain_top.get("snapshot_bias", {}), dict) else {}
-            if _sai:
-                st.caption(
-                    f"AI Brain Snapshot Bias: {_sai.get('proposed_action','WAIT')} | "
-                    f"Net Bias: {_sai.get('net_bias',0)} | "
-                    f"Bull Power: {_sai.get('bullish_power',0)} | "
-                    f"Bear Power: {_sai.get('bearish_power',0)}"
-                )
-
-            _health = _fd.get("snapshot_health", {}) if isinstance(_fd.get("snapshot_health", {}), dict) else {}
-            if _health:
-                st.caption(
-                    f"Snapshot Health: {_health.get('score',0)}/100 "
-                    f"({_health.get('label','NA')})"
-                )
-    except Exception:
-        pass
-
-
-    
-    try:
-        _brain = _fd.get("ai_explanation", {}) if isinstance(_fd.get("ai_explanation", {}), dict) else {}
-        if _brain:
-            with st.expander("🧠 AI Brain Explanation / Scorecard", expanded=False):
-                st.write("**Decision ID:**", _brain.get("decision_id", "NA"))
-                st.write("**Regime:**", _brain.get("regime", "NA"))
-                st.write("**AI Evidence Score (Advisory):**", str(_brain.get("smart_confidence", 0)) + "%")
-                st.write("**Top Reasons:**")
-                for _r in _brain.get("reasons", [])[:5]:
-                    st.write("•", _r)
-                st.write("**Scorecard:**")
-                try:
-                    st.dataframe(pd.DataFrame(_brain.get("scorecard", [])), use_container_width=True)
-                except Exception:
-                    st.json(_brain.get("scorecard", []))
-    except Exception:
-        pass
-
-
-    
-    try:
-        _risk_report = _fd.get("risk_report", {}) if isinstance(_fd.get("risk_report", {}), dict) else {}
-        if _risk_report:
-            _risk_score = _risk_report.get("risk_score", 0)
-            _safety_score = _risk_report.get("safety_score", 0)
-            _risk_grade = _risk_report.get("risk_grade", "NA")
-            _guidance = _risk_report.get("guidance", "NA")
-
-            r1, r2, r3, r4 = st.columns(4)
-            r1.metric("Risk Score", f"{_risk_score}/100")
-            r2.metric("Safety Score", f"{_safety_score}/100")
-            r3.metric("Risk Grade", _risk_grade)
-            r4.metric("Risk Guidance", _guidance)
-
-            with st.expander("🛡️ Risk Engine Explanation", expanded=False):
-                st.write("**Hard Blockers:**")
-                if _risk_report.get("hard_blockers"):
-                    for _b in _risk_report.get("hard_blockers", [])[:8]:
-                        st.write("•", _b)
-                else:
-                    st.write("• No hard blocker from V19.5 Risk Engine.")
-
-                st.write("**Warnings:**")
-                if _risk_report.get("warnings"):
-                    for _w in _risk_report.get("warnings", [])[:8]:
-                        st.write("•", _w)
-                else:
-                    st.write("• No major warning.")
-
-                st.write("**Positive Risk Reasons:**")
-                if _risk_report.get("reasons"):
-                    for _r in _risk_report.get("reasons", [])[:8]:
-                        st.write("•", _r)
-                else:
-                    st.write("• No positive risk reason available.")
-
-                st.write("**Risk Components:**")
-                try:
-                    _risk_df = pd.DataFrame([
-                        {"Component": k, "Risk": v}
-                        for k, v in (_risk_report.get("components", {}) or {}).items()
-                    ])
-                    st.dataframe(_risk_df, use_container_width=True)
-                except Exception:
-                    st.json(_risk_report.get("components", {}))
-    except Exception:
-        pass
-
-
-    if _fd.get("blockers"):
-        with st.expander("🛑 Why WAIT / Blockers", expanded=False):
-            for _b in _fd.get("blockers", [])[:8]:
-                st.write("•", _b)
-    else:
-        with st.expander("✅ V18.2 Reasons", expanded=False):
-            for _r in _fd.get("reasons", [])[:6]:
-                st.write("•", _r)
-
-    if developer_mode:
-        with st.expander("🧹 Developer: V18.4 Cleanup Summary", expanded=False):
-            st.write("V18.4 safe cleanup active.")
-            st.write("Removed unused old helper functions: v9_action_plan, v9_data_quality_score")
-            st.write("Core engines untouched: DhanHQ, refresh, option-chain, portfolio, FII/DII.")
-            st.write("V19.5.1 App:", "READY")
-            st.write("Snapshot Engine Authority:", "READY" if V19_SNAPSHOT_ENGINE_READY else "MISSING")
-            st.write("AI Brain Module:", "READY" if V19_AI_BRAIN_READY else "FALLBACK")
-            st.write("Risk Engine Module:", "READY" if V19_RISK_ENGINE_READY else "FALLBACK")
-            st.write("Decision Engine Module:", "READY" if V19_DECISION_ENGINE_READY else "FALLBACK")
-            st.write("Strategy Engine Authority:", "READY" if V19_STRATEGY_ENGINE_READY else "MISSING")
-            st.write("Intelligence Engine:", "READY" if V19_INTELLIGENCE_ENGINE_READY else "MISSING")
-            st.write("Stability Engine:", "READY" if V19_STABILITY_ENGINE_READY else "MISSING")
-            st.write("Memory Engine:", "READY" if V19_MEMORY_ENGINE_READY else "MISSING")
-            st.write("OI Flow Engine:", "READY" if V19_OI_FLOW_ENGINE_READY else "MISSING")
-            st.write("Dead Code Cleanup:", "V19.15 ACTIVE")
-            st.write("Trader Command Center:", "V19.17 ACTIVE")
-            st.write("Duplicate Decision Card:", "Hidden from normal view")
-            st.write("Premium Quality Filter:", "Visible in top plan")
-            st.write("Cleanup policy:", "Only unused/legacy code removed; engines untouched")
-            st.write("V19.7 cleanup:", "ACTIVE")
-            st.write("Removed old execution gate:", "v162_signal_gate")
-            st.write("Removed old mutating Snapshot AI:", "V18.7")
-            st.write("Removed duplicate Snapshot Health:", "V18.8 internal scorer")
-            st.write("Removed internal Snapshot Builder:", "V18.6")
-            st.write("Single snapshot authority:", "snapshot_engine.py")
-            st.write("Single strategy-plan authority:", "strategy_engine.py")
-            st.write("Removed old consistency guard:", "V18.5")
-            st.write("Single execution authority:", "decision_engine.py")
-            st.write("Decision Confidence:", "decision_engine.py only")
-            st.write("AI Evidence Score:", "ai_brain.py advisory only")
-            st.write("Rank Score:", "strategy ordering only")
-            st.write("Removed old confidence rewriter:", "V18.3")
-            st.write("Removed stale trade-ticket confidence:", "V12 ticket")
-            st.write(
-                "Next cleanup target:",
-                "legacy confidence / ranking overlap after live-market validation",
-            )
-
-        with st.expander("🧪 Developer: final_decision object", expanded=False):
-            st.json(_fd)
-            try:
-                st.markdown("#### V18.6 Market Snapshot")
-                st.json(market_snapshot)
-                st.markdown("#### Snapshot Delta")
-                st.json(snapshot_delta)
-
-                st.markdown("#### V19.9 Snapshot Authority")
-                st.json({
-                    "ready": V19_SNAPSHOT_ENGINE_READY,
-                    "snapshot": market_snapshot_external if "market_snapshot_external" in globals() else {},
-                    "delta": snapshot_delta_external if "snapshot_delta_external" in globals() else {},
-                    "health": snapshot_health_external if "snapshot_health_external" in globals() else {},
-                })
-
-                st.markdown("#### AI Brain Snapshot Bias")
-                st.json(
-                    ai_brain_report.get("snapshot_bias", {})
-                    if isinstance(ai_brain_report, dict)
-                    else {}
-                )
-
-                st.markdown("#### Snapshot Engine Health")
-                st.json(_fd.get("snapshot_health", {}) if isinstance(_fd, dict) else {})
-
-                st.markdown("#### V19.4 AI Brain Report")
-                st.json(ai_brain_report if "ai_brain_report" in globals() else {})
-
-                st.markdown("#### V19.5 Risk Engine Report")
-                st.json(risk_engine_report if "risk_engine_report" in globals() else {})
-                st.markdown("#### V19.6 Decision Engine Report")
-                st.json(decision_engine_report if "decision_engine_report" in globals() else {})
-
-                st.markdown("#### V19.10 Strategy Engine Report")
-                st.json(strategy_engine_report if "strategy_engine_report" in globals() else {})
-
-                st.markdown("#### V19.11 Intelligence Engine Report")
-                st.json(intelligence_report if "intelligence_report" in globals() else {})
-
-                st.markdown("#### V19.12 Stability Engine Report")
-                st.json(stability_report if "stability_report" in globals() else {})
-
-                st.markdown("#### V19.13 Memory Engine Report")
-                st.json(memory_report if "memory_report" in globals() else {})
-
-                st.markdown("#### V19.14 OI Flow Engine Report")
-                st.json(oi_flow_report if "oi_flow_report" in globals() else {})
-            except Exception:
-                pass
-except Exception as _fd_ui_error:
-    st.warning(f"V18.2 decision card unavailable: {_fd_ui_error}")
-
+try:
+    _v20_oi = _v20_oi_report()
+    if _v20_oi:
+        with st.expander("📊 OI Flow Engine — Writing / Unwinding / Migration", expanded=False):
+            o1, o2, o3, o4 = st.columns(4)
+            o1.metric("OI Bias", _v20_oi.get("bias", "NA"))
+            o2.metric("Flow Confidence", f"{_v20_oi.get('confidence',0)}/100")
+            o3.metric("Support", f"{_v20_oi.get('support_strength',0)}/100")
+            o4.metric("Resistance", f"{_v20_oi.get('resistance_strength',0)}/100")
+            st.info(_v20_oi.get("summary", "No OI flow summary."))
+except Exception:
+    pass
 
 st.markdown(
     "<div class='sub-title'>Smart Seller Terminal: Snapshot Authority + AI Brain + Risk + Decision Engine</div>",
@@ -5589,7 +5089,7 @@ _signal_gate_v162 = {
     )[:16],
 }
 
-st.markdown("### ⚖️ Decision Engine Final Authority — Fresh Entry Only If Approved")
+st.markdown("### ⚖️ Final AI Decision")
 _status_class = "green" if _de_status_v197 == "APPROVED" else ("red" if _de_status_v197 == "BLOCKED" else "")
 _status_text = {
     "APPROVED": "ENTRY APPROVED ✅",
@@ -5597,30 +5097,33 @@ _status_text = {
     "PREVIEW_ONLY": "MARKET CLOSED — PLAN PREVIEW 🔒",
     "WAIT": "WAIT — NO FRESH TRADE",
 }.get(_de_status_v197, "WAIT — NO FRESH TRADE")
+_reason_list_v20 = _v20_compact_reasons(_de_gate_v197, _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable."), limit=4)
+_reason_html_v20 = "<br>".join(["• " + str(x) for x in _reason_list_v20]) if _reason_list_v20 else "• No fresh trade reason available."
 st.markdown(f"""
 <div class='v17-final {_status_class}'>
 <h2>{_status_text}</h2>
-<b>Decision Verdict:</b> {_de_final_v197} &nbsp; | &nbsp;
-<b>AI Bias:</b> {_de_gate_v197.get('analysis_action','WAIT')} &nbsp; | &nbsp;
-<b>Status:</b> {_de_status_v197}<br>
-<b>Calibrated Confidence:</b> {_de_gate_v197.get('calibrated_confidence',0)}% &nbsp; | &nbsp;
-<b>Freeze:</b> {_signal_gate_v162['count']}/{_signal_gate_v162.get('required',3)}<br>
-<b>Strike:</b> {selected_strike} &nbsp; | &nbsp; <b>Hedge:</b> {hedge} &nbsp; | &nbsp; <b>Seller Risk:</b> {seller_risk:.0f}%<br>
-<b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)
+<b>Verdict:</b> {_de_final_v197} &nbsp; | &nbsp;
+<b>Confidence:</b> {_de_gate_v197.get('calibrated_confidence',0)}% &nbsp; | &nbsp;
+<b>Seller Risk:</b> {seller_risk:.0f}%<br>
+<b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)<br><br>
+<b>Reason:</b><br>{_reason_html_v20}
 </div>
 """, unsafe_allow_html=True)
-if not _signal_gate_v162["allowed"]:
-    st.write("**Decision Engine reasons:**")
-    for _r in _signal_gate_v162["reasons"]:
-        st.write("•", _r)
-else:
-    st.success(
-        "Decision Engine APPROVED. Broker price, spread, margin, hedge aur SL confirm karke hi order lagao."
-    )
+
 
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
+st.markdown("### 📶 Signal Reliability Table")
+try:
+    _v20_rel_rows = _v20_signal_reliability_rows()
+    if _v20_rel_rows:
+        st.dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
+        st.caption("Ye table batata hai kaunse signals trade ko support/oppose kar rahe hain.")
+    else:
+        st.info("Signal reliability rows abhi available nahi hain.")
+except Exception as _v20_sig_err:
+    st.caption("Signal reliability table unavailable: " + str(_v20_sig_err))
+
 st.markdown("### 🎯 Smart Strategy Matrix — Exact Strikes + Entry + SL + Target")
-st.caption("Top copy upar Trader Quick View me bhi available hai, live trading ke liye.")
 
 def _v17_find_row(strike_value):
     try:
@@ -5711,29 +5214,8 @@ if final_trade == "WAIT":
 else:
     st.success("Decision Engine verdict active hai. Broker price, spread, margin aur hedge confirm karo.")
 
-# V17 Compact AI Brain - details only in Developer Mode.
-st.markdown("### 🧠 AI Brain + ⚖️ Decision Authority")
-ai1, ai2, ai3, ai4, ai5 = st.columns(5)
-_de_ai = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-ai1.metric("AI Bias", _de_ai.get("analysis_action", "WAIT"))
-ai2.metric("Final Verdict", final_trade)
-ai3.metric("Decision Confidence", f"{confidence:.0f}%")
-ai4.metric("Stability", f"{v14_stability['score']}/100", v14_stability["label"])
-ai5.metric("Entry", "OPEN" if _signal_gate_v162.get("allowed") else ("CLOSED/PREVIEW" if market_text != "Market Open" else "WAIT"))
-_reason_line = _de_ai.get("execution_reason", "Decision Engine report unavailable.")
-st.caption("Decision Engine: " + _reason_line)
-with st.expander("🔎 AI Brain Details — Developer Reasoning", expanded=False):
-    st.write("**Memory:**", v14_stability["note"])
-    st.write(f"**Freeze:** {v14_freeze['status']} | {v14_freeze['reason']}")
-    st.write(f"**15m Candle:** {candle15['pattern']} | Score {candle15['score']} | {candle15['note']}")
-    s1, s2, s3 = st.columns(3)
-    s1.metric("CE Seller Strength", f"{v14_seller_strength['ce']}/100")
-    s2.metric("PE Seller Strength", f"{v14_seller_strength['pe']}/100")
-    s3.metric("Winner", v14_seller_strength["winner"])
-    st.write("**AI Reason Breakdown:**")
-    for name, pts in v14_reason_items:
-        sign = "+" if pts >= 0 else ""
-        st.write(f"• {name}: {sign}{pts}")
+# V20: AI Brain + Decision Authority duplicate UI removed.
+
 
 # VIX range is useful, but not required in default trading flow.
 with st.expander("📊 India VIX Range Engine — Expected Move", expanded=False):
@@ -5861,112 +5343,12 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
             else:
                 st.error("Position save failed.")
 
-with st.expander("⚖️ Decision Engine Action Plan — Trade / No Trade", expanded=True):
-    _de_plan = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-    q1, q2, q3, q4 = st.columns(4)
-    q1.metric("Execution Status", _de_plan.get("execution_status", "WAIT"))
-    q2.metric("Consensus", _de_plan.get("consensus", "NA"))
-    q3.metric("Decision Confidence", f"{_de_plan.get('calibrated_confidence',0)}%")
-    q4.metric(
-        "Approved / Preview Lots",
-        f"{_de_plan.get('approved_lots',0)} / {_de_plan.get('preview_lots',0)}",
-    )
-
-    st.write("**Final Verdict:**", _de_plan.get("final_action", "WAIT"))
-    st.write("**AI Bias:**", _de_plan.get("analysis_action", "WAIT"))
-    st.write("**Execution Reason:**", _de_plan.get("execution_reason", "NA"))
-
-    if _de_plan.get("blockers"):
-        st.write("**Blockers:**")
-        for _item in _de_plan.get("blockers", [])[:10]:
-            st.write("•", _item)
-
-    if _de_plan.get("warnings"):
-        st.write("**Warnings:**")
-        for _item in _de_plan.get("warnings", [])[:8]:
-            st.write("•", _item)
-
-    if _de_plan.get("reasons"):
-        st.write("**Positive Reasons:**")
-        for _item in _de_plan.get("reasons", [])[:10]:
-            st.write("•", _item)
-
-    with st.expander("Data quality details", expanded=False):
-        for reason in data_quality_reasons:
-            st.write("•", reason)
+# V20: duplicate Decision Engine Action Plan removed from normal UI.
 
 
 # V19.5.1: duplicate VIX range UI removed; primary VIX range panel retained above.
 
-with st.expander(
-    "🎟️ Decision Engine Ticket — Strike + Price + SL + Target",
-    expanded=not trading_mode_clean,
-):
-    _de_ticket = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-    _fd_ticket = final_decision if isinstance(final_decision, dict) else {}
-    _strategy_ticket = (
-        _fd_ticket.get("strategy", {})
-        if isinstance(_fd_ticket.get("strategy", {}), dict)
-        else {}
-    )
-
-    _ticket_status = _de_ticket.get("execution_status", "WAIT")
-    _ticket_bias = _de_ticket.get("analysis_action", "WAIT")
-    _ticket_final = _de_ticket.get("final_action", "WAIT")
-    _ticket_conf = int(_de_ticket.get("calibrated_confidence", 0) or 0)
-    _ticket_lots = int(
-        _de_ticket.get("approved_lots", 0)
-        or _de_ticket.get("preview_lots", 0)
-        or 0
-    )
-
-    t1, t2, t3, t4, t5 = st.columns(5)
-    t1.metric("Status", _ticket_status)
-    t2.metric("AI Bias", _ticket_bias)
-    t3.metric("Decision Confidence", f"{_ticket_conf}%")
-    t4.metric("Ticket Lots", _ticket_lots)
-    t5.metric("Final Verdict", _ticket_final)
-
-    _ticket_rows = [
-        {"Field": "Sell Strike", "Value": _strategy_ticket.get("sell_strike", "No Strike")},
-        {"Field": "Hedge Strike", "Value": _strategy_ticket.get("hedge_strike", "No Hedge")},
-        {"Field": "Entry", "Value": _strategy_ticket.get("entry", "No Trade")},
-        {"Field": "Stop Loss", "Value": _strategy_ticket.get("sl", "No Trade")},
-        {"Field": "Target", "Value": _strategy_ticket.get("target", "No Trade")},
-    ]
-    st.dataframe(pd.DataFrame(_ticket_rows), use_container_width=True, hide_index=True)
-
-    _plan_check = (
-        _de_ticket.get("plan_validation", {})
-        if isinstance(_de_ticket.get("plan_validation", {}), dict)
-        else {}
-    )
-    if _plan_check.get("valid"):
-        st.success("Decision Engine trade plan validated hai.")
-    else:
-        st.warning("Trade plan validation incomplete/blocked hai.")
-        for _issue in _plan_check.get("issues", [])[:8]:
-            st.write("•", _issue)
-
-    if _ticket_status == "APPROVED":
-        st.success(
-            "Fresh entry approved hai. Broker price, spread, margin, hedge aur SL confirm karo."
-        )
-    elif _ticket_status == "PREVIEW_ONLY":
-        st.info("Market closed/preview mode: plan reference ke liye hai, fresh entry nahi.")
-    elif _ticket_status == "BLOCKED":
-        st.error("Decision Engine ne fresh entry block ki hai.")
-    else:
-        st.info("No approved fresh trade.")
-
-    st.caption(
-        "Decision Confidence execution authority hai. Rank Score aur AI Evidence Score "
-        "is ticket ko independently approve nahi kar sakte."
-    )
-    st.error(
-        "Important: Ye decision-support ticket hai, auto execution nahi. "
-        "Final order price broker screen par confirm karo."
-    )
+# V20: duplicate Decision Engine Ticket removed from normal UI.
 
 
 # V12 Position Manager + Expiry/Shock/Discipline panels
@@ -6024,41 +5406,10 @@ st.markdown(
 )
 
 
-with st.expander("✅ Trade Checklist — Entry Allowed Only If Green", expanded=False):
-    checks = [
-        ("Dhan credentials detected", bool(dhan_ready)),
-        ("Live or fallback market price available", price > 0),
-        ("Market open for fresh entry", market_text == "Market Open"),
-        ("Freeze confirmation complete", final_trade == "WAIT" or bool((v14_freeze or {}).get("confirmed", False))),
-        ("Option-chain edge not opposite", abs(option_bias) >= 8),
-        ("Seller risk acceptable", seller_risk < 65),
-        ("News risk not high", news["score"] < 60),
-        ("VIX risk acceptable", vix_risk < 65),
-        ("AI confidence acceptable", confidence >= 58),
-        ("Risk Engine no hard blocker", not bool((risk_engine_report or {}).get("hard_blockers", [])) if isinstance(risk_engine_report, dict) else True),
-        ("No legacy hard block", not hard_block),
-    ]
-    passed = sum(1 for _, ok in checks if ok)
-    checklist_score = int((passed / len(checks)) * 100)
-    st.metric("Checklist Score", f"{checklist_score}/100", f"{passed}/{len(checks)} green")
-    for label, ok in checks:
-        st.write(("✅" if ok else "❌"), label)
-    if checklist_score < 75:
-        st.warning("NO TRADE / SMALL SIZE: checklist fully green nahi hai. Capital protection priority.")
-    else:
-        st.success("Checklist strong hai. Still hedge + SL mandatory.")
+# V20: Trade Checklist debug panel removed from normal UI.
 
 
-st.markdown("## 📡 Seller AI Radar")
-a1, a2, a3, a4 = st.columns(4)
-with a1:
-    st.metric("Price Action", f"{price_action_bias:+.0f}", bias_label(price_action_bias))
-with a2:
-    st.metric("OI + Price", f"{option_bias:+.0f}", bias_label(option_bias))
-with a3:
-    st.metric("Heavyweights", f"{heavy_bias:+.0f}", bias_label(heavy_bias))
-with a4:
-    st.metric("News Risk", f"{news['score']}/100", news["label"])
+# V20: lower duplicate Seller AI Radar removed; signal reliability table retained.
 
 
 with st.expander("📊 Market Snapshot", expanded=False):
@@ -6268,6 +5619,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.17 build: Pro Trader Layout; key trading sections are top-first, duplicate decision card hidden, premium filter visible. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V20 Clean Edition: duplicate/debug UI removed; trading screen is focused and mobile friendly. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
