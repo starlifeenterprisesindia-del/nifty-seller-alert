@@ -1,12 +1,13 @@
 import os
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 import requests
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 
 
@@ -107,7 +108,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V20 Clean Edition",
+    page_title="Nifty Seller AI V21.6 Safe Refresh",
     page_icon="🧠",
     layout="wide",
 )
@@ -128,22 +129,34 @@ if "auto_refresh_interval" not in st.session_state:
 if "last_manual_refresh" not in st.session_state:
     st.session_state["last_manual_refresh"] = ""
 
-# V20.1: floating manual refresh trigger. This is independent of auto-refresh.
-try:
-    if str(st.query_params.get("manual_refresh", "")).lower() in ("1", "true", "yes"):
-        st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
-        st.session_state["last_manual_refresh"] = datetime.now().strftime("%H:%M:%S")
-        # V20.2: Floating refresh must behave like sidebar refresh.
-        # Clear Streamlit cache so option-chain / best CE-PE / matrix do not reuse old TTL data.
-        try:
-            st.cache_data.clear()
-        except Exception:
-            pass
-        try:
-            del st.query_params["manual_refresh"]
-        except Exception:
-            pass
+# V21.6: ONE SAFE REFRESH CONTROLLER
+# Manual button, floating button and auto-refresh all come through this same function.
+def v215_unified_refresh(source="manual", do_rerun=True):
+    st.session_state["refresh_master_tick"] = st.session_state.get("refresh_master_tick", 0) + 1
+    st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
+    st.session_state["last_manual_refresh"] = datetime.now(IST).strftime("%H:%M:%S")
+    st.session_state["last_refresh_source"] = str(source)
+    # Single cache clear path: prevents old OC / CE-PE / matrix data from staying in one route.
+    try:
+        st.cache_data.clear()
+    except Exception:
+        pass
+    if do_rerun:
         st.rerun()
+
+# Query-param refresh trigger used only by fixed/floating HTML button and auto-refresh JS.
+try:
+    _manual_qp = str(st.query_params.get("manual_refresh", "")).lower() in ("1", "true", "yes")
+    _auto_qp = bool(st.query_params.get("auto_refresh_tick", ""))
+    if _manual_qp or _auto_qp:
+        _src = "floating" if _manual_qp else "auto"
+        for _k in ("manual_refresh", "auto_refresh_tick"):
+            try:
+                if _k in st.query_params:
+                    del st.query_params[_k]
+            except Exception:
+                pass
+        v215_unified_refresh(_src, do_rerun=True)
 except Exception:
     pass
 
@@ -182,7 +195,7 @@ st.markdown(
 .v201-ai-card.red{border-left-color:#ef4444;background:rgba(170,38,38,.23);}
 .v201-ai-card h2{margin:0 0 8px 0;font-size:1.6rem;}
 .v201-reason{margin-top:8px;line-height:1.42;}
-.floating-refresh{position:fixed;right:18px;bottom:22px;z-index:999999;background:#2563eb;color:white!important;padding:12px 16px;border-radius:999px;text-decoration:none!important;font-weight:850;box-shadow:0 8px 24px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.25);}
+.floating-refresh{position:fixed;right:18px;bottom:22px;z-index:999999;background:#2563eb;color:white!important;padding:12px 16px;border-radius:999px;text-decoration:none!important;font-weight:850;box-shadow:0 8px 24px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.25);cursor:pointer;}
 .floating-refresh:hover{background:#1d4ed8;color:white!important;}
 @media(max-width:700px){.floating-refresh{right:12px;bottom:16px;padding:11px 14px;font-size:.92rem}.main-title{font-size:1.35rem}.v201-ai-card h2{font-size:1.25rem}}
 </style>
@@ -2342,18 +2355,10 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V20 Clean AI")
-st.sidebar.caption("V20: Clean Trading UI")
+st.sidebar.title("⚙️ V21.6 Stable AI")
+st.sidebar.caption("V21.6: Safe Single Refresh Authority")
 
-# V20 QUICK REFRESH CONTROL — TOP SIDEBAR
-try:
-    st.sidebar.markdown("### 🔄 Quick Refresh")
-    if st.sidebar.button("🔄 Refresh Live Data", key="v20_top_sidebar_refresh", use_container_width=True):
-        st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
-        st.rerun()
-except Exception:
-    pass
-
+# V21.6: duplicate Quick Refresh block removed. Use single Refresh Control below.
 
 try:
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -2373,12 +2378,7 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Refresh Control")
 st.sidebar.markdown("<div class='sidebar-refresh-note'>Primary refresh control. Use this when scrolled down.</div>", unsafe_allow_html=True)
 if st.sidebar.button("🔄 Refresh Live Data", key="v191_sidebar_refresh_btn", use_container_width=True):
-    st.session_state["last_manual_refresh"] = fmt_time()
-    try:
-        st.cache_data.clear()
-    except Exception:
-        pass
-    st.rerun()
+    v215_unified_refresh("sidebar_control", do_rerun=True)
 
 _interval_options_v191 = ["10 sec", "20 sec", "30 sec", "60 sec"]
 if st.session_state.get("auto_refresh_interval") not in _interval_options_v191:
@@ -2404,6 +2404,36 @@ st.sidebar.caption(
 )
 st.sidebar.caption("State lock: Developer/Trading mode preserved")
 st.sidebar.caption("Top duplicate removed: YES | Snapshot module: " + ("READY" if V19_SNAPSHOT_ENGINE_READY else "FALLBACK") + "")
+
+# V21.5: Auto-refresh uses the same master refresh controller via query param.
+try:
+    if st.session_state.get("auto_refresh_enabled", False):
+        if not st.session_state.get("auto_refresh_until"):
+            st.session_state["auto_refresh_until"] = (datetime.now(IST) + timedelta(minutes=30)).isoformat()
+        _until = datetime.fromisoformat(st.session_state.get("auto_refresh_until"))
+        if datetime.now(IST) <= _until:
+            _sec = int(str(st.session_state.get("auto_refresh_interval", "20 sec")).split()[0])
+            _sec = max(10, min(300, _sec))
+            components.html(
+                f"""
+                <script>
+                setTimeout(function() {{
+                    const base = window.parent.location.pathname;
+                    window.parent.location.replace(base + '?auto_refresh_tick=' + Date.now());
+                }}, {_sec * 1000});
+                </script>
+                """,
+                height=0,
+            )
+            st.sidebar.caption(f"Auto refresh active: every {_sec}s until {_until.strftime('%H:%M:%S')}")
+        else:
+            st.session_state["auto_refresh_enabled"] = False
+            st.session_state["auto_refresh_until"] = ""
+            st.sidebar.warning("Auto refresh 30 min complete. Manual refresh still active.")
+    else:
+        st.session_state["auto_refresh_until"] = ""
+except Exception as _auto_exc:
+    st.sidebar.warning(f"Auto refresh controller issue: {_auto_exc}")
 
 
 # V17: one main refresh button remains in the top header. Sidebar is only for settings.
@@ -5068,13 +5098,19 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V20 Clean Edition</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V21.6 Safe Refresh</div>", unsafe_allow_html=True)
 
 
 # =========================================================
-# V20.1 CLEAN TOP CONTROL — floating manual refresh + compact status
+# V21.6 SAFE TOP REFRESH — native Streamlit button, no browser/tab JS
 # =========================================================
-st.markdown("<a class='floating-refresh' href='?manual_refresh=1'>🔄 Refresh</a>", unsafe_allow_html=True)
+try:
+    _rcol1, _rcol2 = st.columns([1, 5])
+    with _rcol1:
+        if st.button("🔄 Refresh", key="v216_top_safe_refresh", use_container_width=True):
+            v215_unified_refresh("top_safe", do_rerun=True)
+except Exception:
+    pass
 
 try:
     _v20_health = _v1916_build_health_snapshot()
