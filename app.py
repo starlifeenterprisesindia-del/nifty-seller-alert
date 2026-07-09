@@ -1796,43 +1796,8 @@ def v13_trend(key, value, decimals=2):
     return "↓", "v13-red", f"{diff:.{decimals}f} from last refresh"
 
 
-def v13_candidate_card(title, side, row, final_trade, hedge_gap, confidence, gamma_score, shock_score):
-    if not row:
-        st.info(f"{title}: live option-chain unavailable.")
-        return
-    prefix = side.lower()
-    strike = int(row.get("strike", 0))
-    premium = float(row.get(f"{prefix}_ltp", 0) or 0)
-    st_data = v12_sl_target_for_seller(premium, confidence, gamma_score, shock_score) if "v12_sl_target_for_seller" in globals() else {"sl":0,"target1":0,"target2":0,"trail_after":0}
-    hedge_strike = v12_select_hedge_strike(strike, side, hedge_gap) if "v12_select_hedge_strike" in globals() else 0
-    arrow, cls, delta = v13_trend(f"cand_{side}_{strike}_premium", premium, 2)
-    agree = (final_trade == f"SELL {side}")
-    badge = "✅ Final AI agrees" if agree else "⚠️ Candidate only — final AI does not agree"
-    st.markdown(f"""
-<div class='v13-card'>
-<h3>{title}: {strike} {side}</h3>
-<div class='v13-badge'>{badge}</div>
-<p><b>{("Live Premium" if market_status()[0] == "Market Open" else "Last Premium (Market Closed)")}:</b> ₹{premium:.2f} <span class='{cls}'>{arrow} {delta}</span></p>
-<p><b>Suggested Entry:</b> ₹{premium:.2f} &nbsp; | &nbsp; <b>SL:</b> ₹{st_data.get('sl',0):.2f} &nbsp; | &nbsp; <b>Target 1:</b> ₹{st_data.get('target1',0):.2f} &nbsp; | &nbsp; <b>Target 2:</b> ₹{st_data.get('target2',0):.2f}</p>
-<p><b>Hedge:</b> {hedge_strike} {side} &nbsp; | &nbsp; <b>OI:</b> {int(row.get(f'{prefix}_oi',0) or 0):,} &nbsp; | &nbsp; <b>OI Δ:</b> {int(row.get(f'{prefix}_oi_change',0) or 0):,} &nbsp; | &nbsp; <b>Volume:</b> {int(row.get(f'{prefix}_volume',0) or 0):,}</p>
-<p><b>Delta:</b> {float(row.get(f'{prefix}_delta',0) or 0):.3f} &nbsp; | &nbsp; <b>IV:</b> {float(row.get(f'{prefix}_iv',0) or 0):.2f} &nbsp; | &nbsp; <b>Sell Score:</b> {int(row.get(f'{prefix}_sell_score',0) or 0)}/98</p>
-<p><b>Last Updated:</b> {fmt_time()}</p>
-</div>
-""", unsafe_allow_html=True)
 
 
-def v13_today_journal_row(df):
-    try:
-        if df is None or df.empty:
-            return None
-        d = df.copy()
-        d["Date"] = pd.to_datetime(d["Date"], errors="coerce").dt.date
-        rows = d[d["Date"] == now_ist().date()]
-        if rows.empty:
-            return None
-        return rows.iloc[-1].to_dict()
-    except Exception:
-        return None
 
 
 def v134_journal_row_by_date(df, target_date):
@@ -1935,17 +1900,6 @@ def v132_vix_range_engine(nifty_price, india_vix):
     }
 
 
-def v132_vix_trade_note(final_trade, price, vix_range):
-    if not vix_range.get("ok"):
-        return "VIX range unavailable."
-    move_points = vix_range.get("move_points", 0)
-    if final_trade == "WAIT":
-        return "Final AI WAIT hai; VIX range sirf observation ke liye use karo."
-    if move_points <= 120:
-        return "Expected range tight hai; premium selling ke liye theta support ho sakta hai, par breakout SL zaroor rakho."
-    if move_points >= 250:
-        return "Expected range wide hai; seller risk high ho sakta hai. Lot size reduce/tight SL better."
-    return "Expected range normal hai; entry tabhi jab OI + price action + heavyweight agree kare."
 
 
 def v133_fake_move_engine(price_action_bias, option_bias, heavy_bias, pcr, vix, gamma_score, shock_score, news_score, conflict_mode, final_trade, vix_range=None):
@@ -2353,18 +2307,6 @@ def v15_safe_expiry_for_leg(side, row, spot, vix, minutes_left, gamma_score, sho
     }
 
 
-def v15_safe_expiry_watchlist(option_rows, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label, top_n=3):
-    """Build top CE/PE Safe Expiry watchlist from already fetched option-chain rows. No extra API calls."""
-    results = []
-    for row in option_rows or []:
-        ce = v15_safe_expiry_for_leg("CE", row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label)
-        pe = v15_safe_expiry_for_leg("PE", row, spot, vix, minutes_left, gamma_score, shock_score, fake_move_score, regime_label)
-        if ce: results.append(ce)
-        if pe: results.append(pe)
-    # Prefer liquid, OTM, high safe score. Keep list small.
-    results = [x for x in results if x.get("distance", -1) > 0]
-    results.sort(key=lambda x: (x["safe_score"], x["worthless_probability"], -x["premium_explosion_risk"]), reverse=True)
-    return results[:int(top_n)]
 
 
 # =========================================================
@@ -2405,35 +2347,8 @@ def v161_init_refresh_state():
         st.session_state["v161_auto_until"] = v161_qp_get("auto_until", "")
 
 
-def v161_auto_remaining_seconds():
-    try:
-        raw = st.session_state.get("v161_auto_until", "")
-        if not raw:
-            return 0
-        until = pd.to_datetime(raw).to_pydatetime()
-        if until.tzinfo is None:
-            until = until.replace(tzinfo=IST)
-        return int((until - now_ist()).total_seconds())
-    except Exception:
-        return 0
 
 
-def v161_set_auto_refresh(enabled, interval=20):
-    enabled = bool(enabled)
-    interval = int(max(20, min(300, int(interval or 20))))
-    st.session_state["v161_auto_refresh"] = enabled
-    st.session_state["v161_refresh_interval"] = interval
-    if enabled:
-        until = now_ist() + timedelta(minutes=30)
-        st.session_state["v161_auto_until"] = until.isoformat()
-        v161_qp_set("auto_refresh", "1")
-        v161_qp_set("refresh_interval", str(interval))
-        v161_qp_set("auto_until", until.isoformat())
-    else:
-        st.session_state["v161_auto_until"] = ""
-        v161_qp_set("auto_refresh", "0")
-        v161_qp_set("refresh_interval", str(interval))
-        v161_qp_set("auto_until", "")
 
 v161_init_refresh_state()
 
@@ -3238,41 +3153,6 @@ def v10_interpret_conflict(price_action_bias, option_bias, heavy_bias, pcr):
         notes.append("PCR high hai: bullish sentiment strong but overcrowding risk.")
     return notes
 
-def v10_candidate_verdict(side, strike, score, signal, delta=None, iv=None, spread=None, final_trade="WAIT", conflict_mode=False):
-    """
-    Converts best CE/PE candidate into safe actionable wording.
-    """
-    score = v91_safe_num(score)
-    delta = v91_safe_num(delta)
-    iv = v91_safe_num(iv)
-    spread = v91_safe_num(spread)
-    reasons = []
-    action_ok = (final_trade == f"SELL {side}") and not conflict_mode and score >= 70
-
-    if score >= 80:
-        reasons.append("Candidate score strong.")
-    elif score >= 60:
-        reasons.append("Candidate score medium.")
-    else:
-        reasons.append("Candidate score weak.")
-
-    if abs(delta) <= 0.35:
-        reasons.append("Delta seller-friendly zone mein hai.")
-    elif abs(delta) >= 0.55:
-        reasons.append("Delta high risk hai.")
-    if spread and spread <= 1.0:
-        reasons.append("Spread acceptable hai.")
-    elif spread and spread > 2.0:
-        reasons.append("Spread wide hai; execution risk.")
-    if iv:
-        reasons.append(f"IV approx {iv:.2f}.")
-
-    if action_ok:
-        verdict = f"SELL {strike} {side} allowed only with SL + hedge."
-    else:
-        verdict = f"{strike} {side} candidate hai, automatic trade nahi."
-
-    return {"ok": action_ok, "verdict": verdict, "reasons": reasons[:4], "signal": signal}
 
 def v10_sl_target(entry_premium, gamma_score, shock_score, confidence):
     """
@@ -3475,14 +3355,6 @@ def v11_strategy_ranker(
     strategies = sorted(strategies, key=lambda x: x["confidence"], reverse=True)
     return strategies
 
-def v11_strategy_text(strategy, confidence):
-    if strategy == "WAIT":
-        return "No trade. Capital protection priority."
-    if "BUY" in strategy:
-        return "Buy strategy sirf hedged/defined-risk mode mein consider karo."
-    if strategy == "IRON CONDOR":
-        return "Range setup. Dono sides hedge ke saath, shock/gamma low hona chahiye."
-    return "Seller setup. Hedge + SL mandatory."
 
 
 
@@ -3865,34 +3737,8 @@ else:
 # =========================================================
 # V12 AI TRADE TICKET ENGINE
 # =========================================================
-def v12_round_strike(x, step=50):
-    try:
-        return int(round(float(x) / step) * step)
-    except Exception:
-        return 0
 
-def v12_option_row_by_strike(option_analysis, strike):
-    try:
-        rows = option_analysis.get("rows", [])
-        s = int(strike)
-        for r in rows:
-            if int(r.get("strike", 0)) == s:
-                return r
-    except Exception:
-        pass
-    return None
 
-def v12_premium_from_row(row, side):
-    if not row:
-        return 0.0
-    try:
-        if side == "CE":
-            return float(row.get("ce_ltp", 0) or 0)
-        if side == "PE":
-            return float(row.get("pe_ltp", 0) or 0)
-    except Exception:
-        return 0.0
-    return 0.0
 
 def v12_select_hedge_strike(sell_strike, side, hedge_gap=100):
     try:
@@ -3928,17 +3774,6 @@ def v12_sl_target_for_seller(premium, confidence=0, gamma_score=0, shock_score=0
         "trail_after": round(max(0.05, premium * 0.75), 2),
     }
 
-def v12_sl_target_for_buyer(premium, confidence=0):
-    premium = v91_safe_num(premium)
-    conf = v91_safe_num(confidence)
-    if premium <= 0:
-        return {"sl": 0.0, "target1": 0.0, "target2": 0.0}
-    sl_pct = 0.28 if conf >= 85 else 0.22
-    return {
-        "sl": round(max(0.05, premium * (1 - sl_pct)), 2),
-        "target1": round(premium * 1.35, 2),
-        "target2": round(premium * 1.70, 2),
-    }
 
 # V19.8 CLEANUP: removed old v12_build_trade_ticket().
 # Decision Engine Ticket below is built from final authority output.
@@ -4933,64 +4768,7 @@ def _v1916_build_health_snapshot():
         "last_refresh": fmt_time() if "fmt_time" in globals() else "",
     }
 
-def _v1916_single_brain_audit():
-    try:
-        de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-    except Exception:
-        de = {}
-    try:
-        brain = ai_brain_report if isinstance(ai_brain_report, dict) else {}
-    except Exception:
-        brain = {}
-    try:
-        oi = oi_flow_report if isinstance(oi_flow_report, dict) else {}
-    except Exception:
-        oi = {}
-    try:
-        strat = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
-    except Exception:
-        strat = {}
-    try:
-        stab = stability_report if isinstance(stability_report, dict) else {}
-    except Exception:
-        stab = {}
 
-    final_decision_txt = de.get("final_action", "WAIT")
-    analysis_action = de.get("analysis_action", "WAIT")
-    ai_bias = "WAIT"
-    try:
-        if isinstance(brain.get("snapshot_bias", {}), dict):
-            ai_bias = brain.get("snapshot_bias", {}).get("proposed_action", "WAIT")
-    except Exception:
-        pass
-
-    oi_bias = oi.get("bias", "WAIT")
-    strategy_action = strat.get("action", "WAIT")
-    stability_status = stab.get("status", "NA")
-
-    conflicts = []
-    for name, val in [("AI Brain", ai_bias), ("OI Flow", oi_bias), ("Strategy Engine", strategy_action)]:
-        if str(val).upper() not in {"WAIT", "NA", ""} and str(analysis_action).upper() not in {"WAIT", "NA", ""}:
-            if str(val).upper() != str(analysis_action).upper():
-                conflicts.append(f"{name} evidence {val}, analysis bias {analysis_action}")
-
-    return {
-        "authority": "Decision Engine + Stability Lock",
-        "final_decision": final_decision_txt,
-        "analysis_bias": analysis_action,
-        "ai_brain_bias": ai_bias,
-        "oi_flow_bias": oi_bias,
-        "strategy_action": strategy_action,
-        "stability_status": stability_status,
-        "conflicts": conflicts,
-    }
-
-def _v1916_strategy_rows_for_top():
-    try:
-        rows = _strategy_rows_v163 if isinstance(_strategy_rows_v163, list) else []
-    except Exception:
-        rows = []
-    return [r for r in rows[:6] if isinstance(r, dict)]
 
 
 
@@ -5020,95 +4798,8 @@ def _v1917_premium_quality(premium, confidence=0):
         return "GOOD PREMIUM ZONE", "green", "Premium zone practical for seller."
     return "HIGH PREMIUM / HIGH RISK", "orange", "Premium high; verify volatility and SL."
 
-def _v1917_plan_quality_rows():
-    try:
-        de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
-    except Exception:
-        de = {}
-    try:
-        se = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
-    except Exception:
-        se = {}
-    conf = de.get("calibrated_confidence", 0)
-    entry_val = se.get("entry_value", 0)
-    if not entry_val:
-        entry_val = _v1917_num(se.get("entry", 0), 0)
-    sl_val = se.get("sl_value", 0)
-    if not sl_val:
-        sl_val = _v1917_num(se.get("sl", 0), 0)
-    target_val = se.get("target_value", 0)
-    if not target_val:
-        target_val = _v1917_num(se.get("target", 0), 0)
-    lots = int(_v1917_num(de.get("approved_lots", se.get("lots", 0)), 0))
-    lot_size = 65
-    try:
-        lot_size = int(_v1917_num(st.session_state.get("lot_size", 65), 65))
-    except Exception:
-        lot_size = 65
-    q_label, q_color, q_note = _v1917_premium_quality(entry_val, conf)
-    risk_pts = max(0, sl_val - entry_val) if entry_val and sl_val else 0
-    reward_pts = max(0, entry_val - target_val) if entry_val and target_val else 0
-    return [
-        {"Metric": "Premium Quality", "Value": q_label},
-        {"Metric": "Premium Note", "Value": q_note},
-        {"Metric": "Entry Premium", "Value": f"₹{entry_val:.2f}" if entry_val else "No Trade"},
-        {"Metric": "Risk / lot", "Value": f"₹{risk_pts*lot_size:.0f}" if risk_pts else "NA"},
-        {"Metric": "Target profit / lot", "Value": f"₹{reward_pts*lot_size:.0f}" if reward_pts else "NA"},
-        {"Metric": "Lots", "Value": lots},
-    ], q_label, q_color, q_note
 
-def _v1917_market_snapshot_rows():
-    rows = []
-    try:
-        rows.append({"Item": "Market", "Value": market_text})
-    except Exception:
-        rows.append({"Item": "Market", "Value": "UNKNOWN"})
-    try:
-        rows.append({"Item": "Nifty", "Value": f"{price:,.2f}"})
-    except Exception:
-        rows.append({"Item": "Nifty", "Value": "NA"})
-    try:
-        rows.append({"Item": "India VIX", "Value": f"{vix:.2f}"})
-    except Exception:
-        rows.append({"Item": "India VIX", "Value": "NA"})
-    try:
-        rows.append({"Item": "PCR", "Value": f"{pcr:.2f}"})
-    except Exception:
-        rows.append({"Item": "PCR", "Value": "NA"})
-    try:
-        rows.append({"Item": "News", "Value": f"{news_risk_label} {news_score}/100"})
-    except Exception:
-        rows.append({"Item": "News", "Value": "NA"})
-    try:
-        rows.append({"Item": "Heavyweights", "Value": str(heavyweight_label)})
-    except Exception:
-        rows.append({"Item": "Heavyweights", "Value": "NA"})
-    try:
-        rows.append({"Item": "Shock", "Value": f"{shock_score_v7}/100"})
-    except Exception:
-        rows.append({"Item": "Shock", "Value": "NA"})
-    try:
-        rows.append({"Item": "Discipline", "Value": f"{discipline_score_v7}/100"})
-    except Exception:
-        rows.append({"Item": "Discipline", "Value": "NA"})
-    return rows
 
-def _v1917_heavyweight_rows():
-    for _name in ["heavyweight_table", "top5_rows", "heavy_rows"]:
-        try:
-            _obj = globals().get(_name)
-            if isinstance(_obj, list) and _obj:
-                return _obj[:5]
-        except Exception:
-            pass
-    for _name in ["heavy_df", "top5_df", "hw_df"]:
-        try:
-            _obj = globals().get(_name)
-            if hasattr(_obj, "to_dict"):
-                return _obj.to_dict("records")[:5]
-        except Exception:
-            pass
-    return []
 
 
 
@@ -5915,8 +5606,6 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         _oc_df = pd.DataFrame(table_rows)
         try:
             _atm_strike = int(round(float(price) / 50.0) * 50)
-            def _highlight_atm(row):
-                return ["background-color: rgba(37, 99, 235, 0.35); border-top: 1px solid #60a5fa; border-bottom: 1px solid #60a5fa;" if int(row.get("Strike", 0)) == _atm_strike else "" for _ in row]
             st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
             st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), width="stretch", hide_index=True)
         except Exception:
