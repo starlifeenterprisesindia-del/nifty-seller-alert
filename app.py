@@ -87,9 +87,16 @@ try:
 except Exception:
     V19_MEMORY_ENGINE_READY = False
 
+# V19.14 OI Flow Engine module import.
+try:
+    from oi_flow_engine import update_oi_flow as v19_update_oi_flow
+    V19_OI_FLOW_ENGINE_READY = True
+except Exception:
+    V19_OI_FLOW_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.13 - MEMORY ENGINE
+# NIFTY SELLER AI DASHBOARD V19.14 - OI FLOW ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -110,7 +117,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.13 Memory Engine",
+    page_title="Nifty Seller AI Dashboard V19.14 OI Flow Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2405,8 +2412,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.13 Modular AI")
-st.sidebar.caption("V19.13: Market Memory Engine")
+st.sidebar.title("⚙️ V19.14 Modular AI")
+st.sidebar.caption("V19.14: OI Flow Engine")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -2417,6 +2424,7 @@ try:
     st.sidebar.caption("intelligence_engine: " + ("READY / EXPLAINER" if V19_INTELLIGENCE_ENGINE_READY else "MISSING"))
     st.sidebar.caption("stability_engine: " + ("READY / LOCK" if V19_STABILITY_ENGINE_READY else "MISSING"))
     st.sidebar.caption("memory_engine: " + ("READY / MEMORY" if V19_MEMORY_ENGINE_READY else "MISSING"))
+    st.sidebar.caption("oi_flow_engine: " + ("READY / OI FLOW" if V19_OI_FLOW_ENGINE_READY else "MISSING"))
 except Exception:
     pass
 
@@ -4552,6 +4560,41 @@ except Exception as _v1913_memory_error:
 
 
 # =========================================================
+# V19.14 OI FLOW ENGINE — WRITING / UNWINDING / MIGRATION
+# =========================================================
+# Tracks OI movement across refreshes using session_state.
+# It is evidence for AI; Decision Engine remains final authority.
+if not V19_OI_FLOW_ENGINE_READY:
+    st.error(
+        "V19.14 requires oi_flow_engine.py. "
+        "OI Flow module is missing or failed to import."
+    )
+    st.stop()
+
+try:
+    _oi_flow_state_v1914 = st.session_state.get("v1914_oi_flow_state", {})
+
+    _oi_flow_state_v1914, oi_flow_report = v19_update_oi_flow(
+        _oi_flow_state_v1914,
+        option_chain if isinstance(option_chain, dict) else {},
+        timestamp=fmt_time(),
+        max_history=20,
+    )
+
+    st.session_state["v1914_oi_flow_state"] = _oi_flow_state_v1914
+
+    if isinstance(final_decision, dict):
+        final_decision["oi_flow_engine_module"] = "READY"
+        final_decision["oi_flow_report"] = oi_flow_report
+
+except Exception as _v1914_oi_error:
+    st.error("OI Flow Engine failed: " + str(_v1914_oi_error))
+    st.stop()
+
+
+
+
+# =========================================================
 # UI
 # =========================================================
 market_text, day_name = market_status()
@@ -4559,7 +4602,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.13 Memory Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.14 OI Flow Engine</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4572,7 +4615,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.13 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.14 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -4582,7 +4625,8 @@ try:
 <b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
 <b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')} &nbsp; | &nbsp;
 <b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')} &nbsp; | &nbsp;
-<b>Memory:</b> {(_fd.get('memory_report',{}) or {}).get('memory_status','NA')}<br>
+<b>Memory:</b> {(_fd.get('memory_report',{}) or {}).get('memory_status','NA')} &nbsp; | &nbsp;
+<b>OI Flow:</b> {(_fd.get('oi_flow_report',{}) or {}).get('bias','NA')}<br>
 <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4596,6 +4640,66 @@ try:
 """, unsafe_allow_html=True)
 
     
+    try:
+        _oi_report_ui = (
+            _fd.get("oi_flow_report", {})
+            if isinstance(_fd.get("oi_flow_report", {}), dict)
+            else {}
+        )
+        if _oi_report_ui:
+            with st.expander("📊 OI Flow Engine — Writing / Unwinding / Migration", expanded=True):
+                oi1, oi2, oi3, oi4 = st.columns(4)
+                oi1.metric("OI Flow Bias", _oi_report_ui.get("bias", "NA"))
+                oi2.metric("Flow Confidence", f"{_oi_report_ui.get('confidence',0)}/100")
+                oi3.metric("Support", f"{_oi_report_ui.get('support_strength',0)}/100")
+                oi4.metric("Resistance", f"{_oi_report_ui.get('resistance_strength',0)}/100")
+
+                st.info(_oi_report_ui.get("summary", "No OI flow summary."))
+
+                oc1, oc2 = st.columns(2)
+                with oc1:
+                    st.write("**Top Call Writing / Unwinding:**")
+                    try:
+                        st.dataframe(
+                            pd.DataFrame(_oi_report_ui.get("call_writing", [])),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    except Exception:
+                        st.json(_oi_report_ui.get("call_writing", []))
+                with oc2:
+                    st.write("**Top Put Writing / Unwinding:**")
+                    try:
+                        st.dataframe(
+                            pd.DataFrame(_oi_report_ui.get("put_writing", [])),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    except Exception:
+                        st.json(_oi_report_ui.get("put_writing", []))
+
+                if _oi_report_ui.get("migration_notes"):
+                    st.write("**Strike Migration:**")
+                    for _m in _oi_report_ui.get("migration_notes", [])[:6]:
+                        st.write("🔄", _m)
+
+                if _oi_report_ui.get("warnings"):
+                    st.write("**OI Flow Warnings:**")
+                    for _w in _oi_report_ui.get("warnings", [])[:8]:
+                        st.write("⚠️", _w)
+
+                with st.expander("Top OI Flow Rows", expanded=False):
+                    try:
+                        st.dataframe(
+                            pd.DataFrame(_oi_report_ui.get("top_flows", [])),
+                            use_container_width=True,
+                            hide_index=True,
+                        )
+                    except Exception:
+                        st.json(_oi_report_ui.get("top_flows", []))
+    except Exception:
+        pass
+
     try:
         _memory_report_ui = (
             _fd.get("memory_report", {})
@@ -4907,6 +5011,7 @@ try:
             st.write("Intelligence Engine:", "READY" if V19_INTELLIGENCE_ENGINE_READY else "MISSING")
             st.write("Stability Engine:", "READY" if V19_STABILITY_ENGINE_READY else "MISSING")
             st.write("Memory Engine:", "READY" if V19_MEMORY_ENGINE_READY else "MISSING")
+            st.write("OI Flow Engine:", "READY" if V19_OI_FLOW_ENGINE_READY else "MISSING")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
@@ -4971,6 +5076,9 @@ try:
 
                 st.markdown("#### V19.13 Memory Engine Report")
                 st.json(memory_report if "memory_report" in globals() else {})
+
+                st.markdown("#### V19.14 OI Flow Engine Report")
+                st.json(oi_flow_report if "oi_flow_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5754,6 +5862,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.13 build: memory_engine.py tracks short-term market behaviour across refreshes. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.14 build: oi_flow_engine.py tracks OI writing, unwinding, flow and strike migration. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
