@@ -4325,6 +4325,199 @@ except Exception as _v195_error:
 
 
 
+
+# =========================================================
+# V22.3 PROFESSIONAL CANDIDATE AUTHORITY
+# =========================================================
+# Golden Rule 22 + Rule 23:
+# Candidate selection is NOT a separate brain. It is a professional-style
+# filter that runs only after AI/Decision has selected an allowed strategy.
+# Output is passed into Strategy Engine and then AI_MASTER. UI must not read
+# this as independent advice.
+def _v223_to_float(value, default=0.0):
+    try:
+        if value is None:
+            return default
+        if isinstance(value, str):
+            cleaned = value.replace("₹", "").replace(",", "").replace("%", "").strip()
+            token = ""
+            started = False
+            for ch in cleaned:
+                if ch.isdigit() or ch in ".-+":
+                    token += ch
+                    started = True
+                elif started:
+                    break
+            return float(token) if token else default
+        return float(value)
+    except Exception:
+        return default
+
+
+def _v223_to_int(value, default=0):
+    try:
+        return int(round(_v223_to_float(value, default)))
+    except Exception:
+        return default
+
+
+def _v223_professional_score_row(side, row, spot, nearest_support_value=None, nearest_resistance_value=None, vix_value=0):
+    """Professional option-seller candidate score.
+
+    This is not final advice. It answers only: "If AI_MASTER has already
+    approved this side, which strike is professionally cleaner?"
+    """
+    side = str(side or "").upper()
+    if side not in ("CE", "PE") or not isinstance(row, dict):
+        return None
+
+    prefix = side.lower()
+    strike = _v223_to_float(row.get("strike", 0), 0)
+    spot = _v223_to_float(spot, 0)
+    premium = _v223_to_float(row.get(f"{prefix}_ltp", 0), 0)
+    delta_abs = abs(_v223_to_float(row.get(f"{prefix}_delta", 0), 0))
+    spread_pct = _v223_to_float(row.get(f"{prefix}_spread_pct", 99), 99)
+    volume_ratio = _v223_to_float(row.get(f"{prefix}_volume_ratio", 0), 0)
+    oi_change_pct = _v223_to_float(row.get(f"{prefix}_oi_change_pct", 0), 0)
+    iv = _v223_to_float(row.get(f"{prefix}_iv", 0), 0)
+    signal = str(row.get(f"{prefix}_signal", "") or "")
+    score = 0.0
+    reasons = []
+
+    if strike <= 0 or spot <= 0 or premium <= 0:
+        return None
+
+    is_otm = strike >= spot if side == "CE" else strike <= spot
+    if not is_otm:
+        return None
+    score += 10
+
+    # 1) Professional location: sell call above resistance, sell put below support.
+    ns = _v223_to_float(nearest_support_value, 0)
+    nr = _v223_to_float(nearest_resistance_value, 0)
+    if side == "CE":
+        distance = strike - spot
+        if nr > 0 and strike >= nr:
+            score += 15; reasons.append("above resistance")
+        elif nr > 0 and strike < nr:
+            score -= 12; reasons.append("below resistance")
+    else:
+        distance = spot - strike
+        if ns > 0 and strike <= ns:
+            score += 15; reasons.append("below support")
+        elif ns > 0 and strike > ns:
+            score -= 12; reasons.append("above support")
+
+    # 2) Distance from spot: avoid too near / too far.
+    if 40 <= distance <= 350:
+        score += 12; reasons.append("clean OTM distance")
+    elif 20 <= distance < 40:
+        score += 2; reasons.append("near spot risk")
+    elif distance > 350:
+        score += 4; reasons.append("far OTM")
+    else:
+        score -= 15; reasons.append("too close")
+
+    # 3) Premium: enough reward, not excessive risk.
+    if 30 <= premium <= 150:
+        score += 18; reasons.append("seller premium zone")
+    elif 15 <= premium < 30 or 150 < premium <= 220:
+        score += 8; reasons.append("acceptable premium")
+    else:
+        score -= 10; reasons.append("premium not ideal")
+
+    # 4) Delta: seller-friendly probability zone.
+    if 0.15 <= delta_abs <= 0.30:
+        score += 18; reasons.append("seller delta")
+    elif 0.10 <= delta_abs < 0.15 or 0.30 < delta_abs <= 0.38:
+        score += 8; reasons.append("acceptable delta")
+    elif delta_abs >= 0.45:
+        score -= 22; reasons.append("high delta risk")
+
+    # 5) OI/writing and flow quality.
+    if "Writing" in signal:
+        score += 18; reasons.append("fresh writing")
+    elif "Short Covering" in signal or "Buying" in signal:
+        score -= 18; reasons.append("flow risk")
+    if oi_change_pct > 0:
+        score += min(10, oi_change_pct * 0.35)
+
+    # 6) Liquidity / spread.
+    if 0 < spread_pct <= 0.6:
+        score += 12; reasons.append("tight spread")
+    elif 0.6 < spread_pct <= 1.2:
+        score += 6; reasons.append("ok spread")
+    elif spread_pct > 2.0:
+        score -= 16; reasons.append("wide spread")
+    if volume_ratio >= 1.5:
+        score += 8; reasons.append("good volume")
+    elif volume_ratio >= 0.75:
+        score += 4
+
+    # 7) Volatility sanity check.
+    vix_value = _v223_to_float(vix_value, 0)
+    if 8 <= iv <= 28:
+        score += 5
+    elif iv > 38:
+        score -= 6; reasons.append("high IV risk")
+    if vix_value >= 18 and distance < 80:
+        score -= 8; reasons.append("high VIX near strike")
+
+    row2 = dict(row)
+    row2[f"{prefix}_professional_score"] = int(round(max(0, min(100, score))))
+    row2[f"{prefix}_professional_reason"] = ", ".join(reasons[:5])
+    row2["candidate_source"] = "V22.3_PROFESSIONAL_CANDIDATE_AUTHORITY"
+    return row2
+
+
+def _v223_select_professional_candidate(side, option_analysis_obj, spot, nearest_support_value=None, nearest_resistance_value=None, vix_value=0):
+    rows = option_analysis_obj.get("rows", []) if isinstance(option_analysis_obj, dict) else []
+    scored = []
+    for rr in rows:
+        scored_row = _v223_professional_score_row(side, rr, spot, nearest_support_value, nearest_resistance_value, vix_value)
+        if scored_row:
+            prefix = str(side).lower()
+            score = _v223_to_float(scored_row.get(f"{prefix}_professional_score", 0), 0)
+            if score >= 45:
+                scored.append(scored_row)
+    if not scored:
+        return None
+    prefix = str(side).lower()
+    return max(scored, key=lambda r: _v223_to_float(r.get(f"{prefix}_professional_score", 0), 0))
+
+
+def _v223_professional_candidate_authority(action, option_analysis_obj, spot, nearest_support_value=None, nearest_resistance_value=None, vix_value=0):
+    """Run candidate selection in professional order.
+
+    1. Trade/strategy must be decided first by AI/Decision.
+    2. Candidate is selected only for the approved side(s).
+    3. WAIT means no active candidate.
+    """
+    action = str(action or "WAIT").upper()
+    result = {
+        "version": "V22.3_PROFESSIONAL_CANDIDATE_AUTHORITY",
+        "action": action,
+        "ce": None,
+        "pe": None,
+        "status": "LOCKED_WAIT",
+        "rule": "Strategy first, candidate second",
+    }
+    if not isinstance(option_analysis_obj, dict) or not option_analysis_obj.get("success"):
+        result["status"] = "NO_OPTION_DATA"
+        return result
+    if action == "SELL CE":
+        result["ce"] = _v223_select_professional_candidate("CE", option_analysis_obj, spot, nearest_support_value, nearest_resistance_value, vix_value)
+        result["status"] = "CE_APPROVED" if result["ce"] else "CE_NO_CLEAN_CANDIDATE"
+    elif action == "SELL PE":
+        result["pe"] = _v223_select_professional_candidate("PE", option_analysis_obj, spot, nearest_support_value, nearest_resistance_value, vix_value)
+        result["status"] = "PE_APPROVED" if result["pe"] else "PE_NO_CLEAN_CANDIDATE"
+    elif action == "IRON CONDOR":
+        result["ce"] = _v223_select_professional_candidate("CE", option_analysis_obj, spot, nearest_support_value, nearest_resistance_value, vix_value)
+        result["pe"] = _v223_select_professional_candidate("PE", option_analysis_obj, spot, nearest_support_value, nearest_resistance_value, vix_value)
+        result["status"] = "CONDOR_APPROVED" if result["ce"] and result["pe"] else "CONDOR_INCOMPLETE"
+    return result
+
+
 # =========================================================
 # V19.10 STRATEGY ENGINE — SINGLE FINAL PLAN AUTHORITY
 # =========================================================
@@ -4365,10 +4558,24 @@ try:
         else float(confidence or 0)
     )
 
+    # V22.3: Professional Candidate Authority.
+    # Candidate is selected only after the AI/Decision action is known.
+    # Old best_ce/best_pe remain raw evidence and do not directly drive strategy.
+    professional_candidate_report_v223 = _v223_professional_candidate_authority(
+        _strategy_action_v1910,
+        option_analysis if isinstance(option_analysis, dict) else {},
+        price,
+        nearest_support if "nearest_support" in globals() else None,
+        nearest_resistance if "nearest_resistance" in globals() else None,
+        vix if "vix" in globals() else 0,
+    )
+    professional_best_ce_v223 = professional_candidate_report_v223.get("ce") if isinstance(professional_candidate_report_v223, dict) else None
+    professional_best_pe_v223 = professional_candidate_report_v223.get("pe") if isinstance(professional_candidate_report_v223, dict) else None
+
     strategy_engine_report = v19_build_strategy_plan(
         action=_strategy_action_v1910,
-        best_ce=best_ce if isinstance(best_ce, dict) else None,
-        best_pe=best_pe if isinstance(best_pe, dict) else None,
+        best_ce=professional_best_ce_v223 if isinstance(professional_best_ce_v223, dict) else None,
+        best_pe=professional_best_pe_v223 if isinstance(professional_best_pe_v223, dict) else None,
         hedge_gap=hedge_gap,
         confidence=_strategy_conf_v1910,
         gamma_score=gamma_score_v7,
@@ -4384,6 +4591,7 @@ try:
     if isinstance(final_decision, dict):
         final_decision["strategy_engine_module"] = "READY"
         final_decision["strategy_engine_report"] = strategy_engine_report
+        final_decision["professional_candidate_authority"] = professional_candidate_report_v223
 
         final_decision["strategy"] = {
             "type": strategy_engine_report.get(
@@ -5006,17 +5214,21 @@ def _v222_authority_plans(action, strategy_obj, confidence_value):
     if action == "SELL CE":
         ce_plan = _v222_plan_from_strategy_report(strategy_obj, action, "CE" if active_side != "PE" else active_side)
         if "CE" not in str(ce_plan.get("strike", "")).upper():
-            ce_plan = _v221_side_plan("CE", best_ce if isinstance(best_ce, dict) else {}, confidence_value)
-            ce_plan["source"] = "AI_MASTER_APPROVED_LIVE_EVIDENCE"
+            _ce_raw = professional_best_ce_v223 if isinstance(globals().get("professional_best_ce_v223"), dict) else (best_ce if isinstance(best_ce, dict) else {})
+            ce_plan = _v221_side_plan("CE", _ce_raw, confidence_value)
+            ce_plan["source"] = "AI_MASTER_APPROVED_PROFESSIONAL_CANDIDATE"
     elif action == "SELL PE":
         pe_plan = _v222_plan_from_strategy_report(strategy_obj, action, "PE" if active_side != "CE" else active_side)
         if "PE" not in str(pe_plan.get("strike", "")).upper():
-            pe_plan = _v221_side_plan("PE", best_pe if isinstance(best_pe, dict) else {}, confidence_value)
-            pe_plan["source"] = "AI_MASTER_APPROVED_LIVE_EVIDENCE"
+            _pe_raw = professional_best_pe_v223 if isinstance(globals().get("professional_best_pe_v223"), dict) else (best_pe if isinstance(best_pe, dict) else {})
+            pe_plan = _v221_side_plan("PE", _pe_raw, confidence_value)
+            pe_plan["source"] = "AI_MASTER_APPROVED_PROFESSIONAL_CANDIDATE"
     elif action == "IRON CONDOR":
         # Iron Condor requires both live sides; still one AI_MASTER-approved strategy.
-        ce_plan = _v221_side_plan("CE", best_ce if isinstance(best_ce, dict) else {}, confidence_value); ce_plan["source"] = "AI_MASTER_IRON_CONDOR_APPROVED"
-        pe_plan = _v221_side_plan("PE", best_pe if isinstance(best_pe, dict) else {}, confidence_value); pe_plan["source"] = "AI_MASTER_IRON_CONDOR_APPROVED"
+        _ce_raw = professional_best_ce_v223 if isinstance(globals().get("professional_best_ce_v223"), dict) else (best_ce if isinstance(best_ce, dict) else {})
+        _pe_raw = professional_best_pe_v223 if isinstance(globals().get("professional_best_pe_v223"), dict) else (best_pe if isinstance(best_pe, dict) else {})
+        ce_plan = _v221_side_plan("CE", _ce_raw, confidence_value); ce_plan["source"] = "AI_MASTER_IRON_CONDOR_PROFESSIONAL_APPROVED"
+        pe_plan = _v221_side_plan("PE", _pe_raw, confidence_value); pe_plan["source"] = "AI_MASTER_IRON_CONDOR_PROFESSIONAL_APPROVED"
     return ce_plan, pe_plan
 
 
@@ -5068,7 +5280,7 @@ try:
     _evidence_rows_v221 = _v221_build_evidence_rows(_snapshot_v221, _intelligence_v221)
 
     AI_MASTER = {
-        "version": "V22.2_ONE_BRAIN_AUTHORITY_LOCK",
+        "version": "V22.3_PROFESSIONAL_CANDIDATE_LOCK",
         "created_at": fmt_time(),
         "snapshot_id": _advisor_v221.get("snapshot_id", _snapshot_v221.get("snapshot_id", "SNAP-NA")),
         "short_snapshot_id": _advisor_v221.get("short_snapshot_id", str(_snapshot_v221.get("snapshot_id", "SNAP-NA"))[-8:]),
@@ -5088,6 +5300,7 @@ try:
         "risk_label": _advisor_v221.get("risk_label", "NA"),
         "ce_plan": _ce_plan_v221,
         "pe_plan": _pe_plan_v221,
+        "professional_candidate_authority": professional_candidate_report_v223 if isinstance(globals().get("professional_candidate_report_v223"), dict) else {},
         "evidence_rows": _evidence_rows_v221,
     }
     AI_MASTER["strategy_rows"] = _v221_strategy_rows(AI_MASTER)
