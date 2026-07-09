@@ -1,6 +1,6 @@
 import os
 from io import StringIO
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
@@ -9,23 +9,6 @@ import requests
 import streamlit as st
 import yfinance as yf
 
-# V19.0 Modular foundation.
-# Safe optional import: app keeps original helpers in this release for compatibility.
-try:
-    from v19_utils import (
-        safe_float as v19_safe_float,
-        safe_int as v19_safe_int,
-        safe_text as v19_safe_text,
-        clamp as v19_clamp,
-        signed_clamp as v19_signed_clamp,
-        safe_divide as v19_safe_divide,
-        pct_change as v19_pct_change,
-        fmt_time as v19_fmt_time,
-        now_ist as v19_now_ist,
-    )
-    V19_UTILS_READY = True
-except Exception:
-    V19_UTILS_READY = False
 
 # V19.5.1 Full Audit Fix module import.
 try:
@@ -96,7 +79,7 @@ except Exception:
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.15 - DEAD CODE CLEANUP
+# NIFTY SELLER AI DASHBOARD V21.1 - DEEP ARCHITECTURE CLEANUP
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -2322,12 +2305,6 @@ def v161_qp_get(name, default=""):
         return default
 
 
-def v161_qp_set(name, value):
-    try:
-        if str(st.query_params.get(name, "")) != str(value):
-            st.query_params[name] = str(value)
-    except Exception:
-        pass
 
 
 def v161_init_refresh_state():
@@ -2372,7 +2349,6 @@ except Exception:
 
 
 try:
-    st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
     st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
     st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
@@ -4705,7 +4681,6 @@ except Exception as _v1914_oi_error:
 def _v1916_build_health_snapshot():
     try:
         engine_flags = {
-            "v19_utils": True,
             "snapshot_engine": bool(V19_SNAPSHOT_ENGINE_READY),
             "ai_brain": bool(V19_AI_BRAIN_READY),
             "risk_engine": bool(V19_RISK_ENGINE_READY),
@@ -4783,20 +4758,6 @@ def _v1917_num(x, default=0.0):
     except Exception:
         return default
 
-def _v1917_premium_quality(premium, confidence=0):
-    p = _v1917_num(premium, 0)
-    c = _v1917_num(confidence, 0)
-    if p <= 0:
-        return "NO PREMIUM", "red", "Premium missing."
-    if p < 45:
-        return "AVOID LOW PREMIUM", "red", "Fresh selling avoid: premium too low."
-    if p < 60:
-        if c >= 85:
-            return "LOW BUT ACCEPTABLE", "orange", "Only if final decision is very strong."
-        return "LOW PREMIUM", "orange", "Risk-reward weak; wait for better premium."
-    if p <= 120:
-        return "GOOD PREMIUM ZONE", "green", "Premium zone practical for seller."
-    return "HIGH PREMIUM / HIGH RISK", "orange", "Premium high; verify volatility and SL."
 
 
 
