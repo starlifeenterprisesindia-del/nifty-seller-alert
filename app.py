@@ -80,9 +80,16 @@ try:
 except Exception:
     V19_STABILITY_ENGINE_READY = False
 
+# V19.13 Memory Engine module import.
+try:
+    from memory_engine import update_memory as v19_update_memory
+    V19_MEMORY_ENGINE_READY = True
+except Exception:
+    V19_MEMORY_ENGINE_READY = False
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V19.12 - DECISION STABILITY ENGINE
+# NIFTY SELLER AI DASHBOARD V19.13 - MEMORY ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -103,7 +110,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.12 Decision Stability Engine",
+    page_title="Nifty Seller AI Dashboard V19.13 Memory Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2398,8 +2405,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.12 Modular AI")
-st.sidebar.caption("V19.12: Decision Stability Engine")
+st.sidebar.title("⚙️ V19.13 Modular AI")
+st.sidebar.caption("V19.13: Market Memory Engine")
 try:
     st.sidebar.caption("v19_utils: " + ("READY" if V19_UTILS_READY else "FALLBACK"))
     st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
@@ -2409,6 +2416,7 @@ try:
     st.sidebar.caption("strategy_engine: " + ("READY / PLAN AUTHORITY" if V19_STRATEGY_ENGINE_READY else "MISSING"))
     st.sidebar.caption("intelligence_engine: " + ("READY / EXPLAINER" if V19_INTELLIGENCE_ENGINE_READY else "MISSING"))
     st.sidebar.caption("stability_engine: " + ("READY / LOCK" if V19_STABILITY_ENGINE_READY else "MISSING"))
+    st.sidebar.caption("memory_engine: " + ("READY / MEMORY" if V19_MEMORY_ENGINE_READY else "MISSING"))
 except Exception:
     pass
 
@@ -4503,6 +4511,47 @@ except Exception as _v1912_stability_error:
 
 
 # =========================================================
+# V19.13 MEMORY ENGINE — SHORT TERM MARKET MEMORY
+# =========================================================
+# Stores recent snapshots/decisions in session_state.
+# It tracks stability over time; no disk write and no broker action.
+if not V19_MEMORY_ENGINE_READY:
+    st.error(
+        "V19.13 requires memory_engine.py. "
+        "Market memory module is missing or failed to import."
+    )
+    st.stop()
+
+try:
+    _memory_history_v1913 = st.session_state.get("v1913_market_memory", [])
+
+    _memory_history_v1913, memory_report = v19_update_memory(
+        _memory_history_v1913,
+        snapshot=market_snapshot,
+        decision_report=decision_engine_report if isinstance(decision_engine_report, dict) else {},
+        intelligence_report=intelligence_report if isinstance(intelligence_report, dict) else {},
+        stability_report=stability_report if isinstance(stability_report, dict) else {},
+        strategy_report=strategy_engine_report if isinstance(strategy_engine_report, dict) else {},
+        max_items=20,
+    )
+
+    st.session_state["v1913_market_memory"] = _memory_history_v1913
+
+    if isinstance(final_decision, dict):
+        final_decision["memory_engine_module"] = "READY"
+        final_decision["memory_report"] = memory_report
+
+except Exception as _v1913_memory_error:
+    st.error(
+        "Memory Engine failed: "
+        + str(_v1913_memory_error)
+    )
+    st.stop()
+
+
+
+
+# =========================================================
 # UI
 # =========================================================
 market_text, day_name = market_status()
@@ -4510,7 +4559,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.12 Decision Stability Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.13 Memory Engine</div>", unsafe_allow_html=True)
 
 # V18.2 Main Decision Object Card
 try:
@@ -4523,7 +4572,7 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.12 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.13 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
     st.markdown(f"""
 <div class='v17-final {_class}'>
@@ -4532,7 +4581,8 @@ try:
 <b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
 <b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
 <b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')} &nbsp; | &nbsp;
-<b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')}<br>
+<b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')} &nbsp; | &nbsp;
+<b>Memory:</b> {(_fd.get('memory_report',{}) or {}).get('memory_status','NA')}<br>
 <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
 <b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
 <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
@@ -4546,6 +4596,47 @@ try:
 """, unsafe_allow_html=True)
 
     
+    try:
+        _memory_report_ui = (
+            _fd.get("memory_report", {})
+            if isinstance(_fd.get("memory_report", {}), dict)
+            else {}
+        )
+        if _memory_report_ui:
+            with st.expander("🧠 Market Memory — Last Refresh Behaviour", expanded=False):
+                mm1, mm2, mm3, mm4 = st.columns(4)
+                mm1.metric("Memory Status", _memory_report_ui.get("memory_status", "NA"))
+                mm2.metric("Memory Score", f"{_memory_report_ui.get('memory_score',0)}/100")
+                mm3.metric("Action Stability", f"{_memory_report_ui.get('action_stability',0)}%")
+                mm4.metric("History Count", _memory_report_ui.get("history_count", 0))
+
+                st.info(_memory_report_ui.get("summary", "No memory summary."))
+
+                st.write("**Positive Memory Signals:**")
+                if _memory_report_ui.get("positives"):
+                    for _p in _memory_report_ui.get("positives", [])[:8]:
+                        st.write("✅", _p)
+                else:
+                    st.write("• Memory warming up.")
+
+                st.write("**Memory Warnings:**")
+                if _memory_report_ui.get("warnings"):
+                    for _w in _memory_report_ui.get("warnings", [])[:8]:
+                        st.write("⚠️", _w)
+                else:
+                    st.write("• No major memory warning.")
+
+                try:
+                    st.dataframe(
+                        pd.DataFrame(_memory_report_ui.get("recent_rows", [])),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                except Exception:
+                    st.json(_memory_report_ui.get("recent_rows", []))
+    except Exception:
+        pass
+
     try:
         _stab_report_ui = (
             _fd.get("stability_report", {})
@@ -4815,6 +4906,7 @@ try:
             st.write("Strategy Engine Authority:", "READY" if V19_STRATEGY_ENGINE_READY else "MISSING")
             st.write("Intelligence Engine:", "READY" if V19_INTELLIGENCE_ENGINE_READY else "MISSING")
             st.write("Stability Engine:", "READY" if V19_STABILITY_ENGINE_READY else "MISSING")
+            st.write("Memory Engine:", "READY" if V19_MEMORY_ENGINE_READY else "MISSING")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
             st.write("Removed old mutating Snapshot AI:", "V18.7")
@@ -4876,6 +4968,9 @@ try:
 
                 st.markdown("#### V19.12 Stability Engine Report")
                 st.json(stability_report if "stability_report" in globals() else {})
+
+                st.markdown("#### V19.13 Memory Engine Report")
+                st.json(memory_report if "memory_report" in globals() else {})
             except Exception:
                 pass
 except Exception as _fd_ui_error:
@@ -5659,6 +5754,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.12 build: stability_engine.py prevents one-refresh decision and strike jumps. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.13 build: memory_engine.py tracks short-term market behaviour across refreshes. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
