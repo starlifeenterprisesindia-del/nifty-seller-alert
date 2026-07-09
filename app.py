@@ -117,7 +117,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI Dashboard V19.16 Trader Command Center",
+    page_title="Nifty Seller AI Dashboard V19.17 Pro Trader Layout",
     page_icon="🧠",
     layout="wide",
 )
@@ -2412,13 +2412,13 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V19.16 Modular AI")
-st.sidebar.caption("V19.16: Trader Command Center")
+st.sidebar.title("⚙️ V19.17 Modular AI")
+st.sidebar.caption("V19.17: Pro Trader Layout")
 
-# V19.16 QUICK REFRESH CONTROL — TOP SIDEBAR
+# V19.17 QUICK REFRESH CONTROL — TOP SIDEBAR
 try:
     st.sidebar.markdown("### 🔄 Quick Refresh")
-    if st.sidebar.button("🔄 Refresh Live Data", key="v1916_top_sidebar_refresh", use_container_width=True):
+    if st.sidebar.button("🔄 Refresh Live Data", key="v1917_top_sidebar_refresh", use_container_width=True):
         st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
         st.rerun()
 except Exception:
@@ -4735,6 +4735,138 @@ def _v1916_strategy_rows_for_top():
     return [r for r in rows[:6] if isinstance(r, dict)]
 
 
+
+# =========================================================
+# V19.17 PRO TRADER LAYOUT HELPERS
+# =========================================================
+def _v1917_num(x, default=0.0):
+    try:
+        if isinstance(x, str):
+            x = x.replace("₹", "").replace(",", "").replace("%", "").strip()
+        return float(x)
+    except Exception:
+        return default
+
+def _v1917_premium_quality(premium, confidence=0):
+    p = _v1917_num(premium, 0)
+    c = _v1917_num(confidence, 0)
+    if p <= 0:
+        return "NO PREMIUM", "red", "Premium missing."
+    if p < 45:
+        return "AVOID LOW PREMIUM", "red", "Fresh selling avoid: premium too low."
+    if p < 60:
+        if c >= 85:
+            return "LOW BUT ACCEPTABLE", "orange", "Only if final decision is very strong."
+        return "LOW PREMIUM", "orange", "Risk-reward weak; wait for better premium."
+    if p <= 120:
+        return "GOOD PREMIUM ZONE", "green", "Premium zone practical for seller."
+    return "HIGH PREMIUM / HIGH RISK", "orange", "Premium high; verify volatility and SL."
+
+def _v1917_plan_quality_rows():
+    try:
+        de = decision_engine_report if isinstance(decision_engine_report, dict) else {}
+    except Exception:
+        de = {}
+    try:
+        se = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
+    except Exception:
+        se = {}
+    conf = de.get("calibrated_confidence", 0)
+    entry_val = se.get("entry_value", 0)
+    if not entry_val:
+        entry_val = _v1917_num(se.get("entry", 0), 0)
+    sl_val = se.get("sl_value", 0)
+    if not sl_val:
+        sl_val = _v1917_num(se.get("sl", 0), 0)
+    target_val = se.get("target_value", 0)
+    if not target_val:
+        target_val = _v1917_num(se.get("target", 0), 0)
+    lots = int(_v1917_num(de.get("approved_lots", se.get("lots", 0)), 0))
+    lot_size = 65
+    try:
+        lot_size = int(_v1917_num(st.session_state.get("lot_size", 65), 65))
+    except Exception:
+        lot_size = 65
+    q_label, q_color, q_note = _v1917_premium_quality(entry_val, conf)
+    risk_pts = max(0, sl_val - entry_val) if entry_val and sl_val else 0
+    reward_pts = max(0, entry_val - target_val) if entry_val and target_val else 0
+    return [
+        {"Metric": "Premium Quality", "Value": q_label},
+        {"Metric": "Premium Note", "Value": q_note},
+        {"Metric": "Entry Premium", "Value": f"₹{entry_val:.2f}" if entry_val else "No Trade"},
+        {"Metric": "Risk / lot", "Value": f"₹{risk_pts*lot_size:.0f}" if risk_pts else "NA"},
+        {"Metric": "Target profit / lot", "Value": f"₹{reward_pts*lot_size:.0f}" if reward_pts else "NA"},
+        {"Metric": "Lots", "Value": lots},
+    ], q_label, q_color, q_note
+
+def _v1917_market_snapshot_rows():
+    rows = []
+    try:
+        rows.append({"Item": "Market", "Value": market_text})
+    except Exception:
+        rows.append({"Item": "Market", "Value": "UNKNOWN"})
+    try:
+        rows.append({"Item": "Nifty", "Value": f"{price:,.2f}"})
+    except Exception:
+        rows.append({"Item": "Nifty", "Value": "NA"})
+    try:
+        rows.append({"Item": "India VIX", "Value": f"{vix:.2f}"})
+    except Exception:
+        rows.append({"Item": "India VIX", "Value": "NA"})
+    try:
+        rows.append({"Item": "PCR", "Value": f"{pcr:.2f}"})
+    except Exception:
+        rows.append({"Item": "PCR", "Value": "NA"})
+    try:
+        rows.append({"Item": "News", "Value": f"{news_risk_label} {news_score}/100"})
+    except Exception:
+        rows.append({"Item": "News", "Value": "NA"})
+    try:
+        rows.append({"Item": "Heavyweights", "Value": str(heavyweight_label)})
+    except Exception:
+        rows.append({"Item": "Heavyweights", "Value": "NA"})
+    try:
+        rows.append({"Item": "Shock", "Value": f"{shock_score_v7}/100"})
+    except Exception:
+        rows.append({"Item": "Shock", "Value": "NA"})
+    try:
+        rows.append({"Item": "Discipline", "Value": f"{discipline_score_v7}/100"})
+    except Exception:
+        rows.append({"Item": "Discipline", "Value": "NA"})
+    return rows
+
+def _v1917_heavyweight_rows():
+    for _name in ["heavyweight_table", "top5_rows", "heavy_rows"]:
+        try:
+            _obj = globals().get(_name)
+            if isinstance(_obj, list) and _obj:
+                return _obj[:5]
+        except Exception:
+            pass
+    for _name in ["heavy_df", "top5_df", "hw_df"]:
+        try:
+            _obj = globals().get(_name)
+            if hasattr(_obj, "to_dict"):
+                return _obj.to_dict("records")[:5]
+        except Exception:
+            pass
+    return []
+
+
+
+st.markdown("""
+<style>
+/* V19.17 readable market/status cards */
+.v17-final, .v17-final *, .v1917-readable-card, .market-mode-card, .status-card {
+    color: #1f2937 !important;
+    font-weight: 800 !important;
+    opacity: 1 !important;
+    text-shadow: none !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # =========================================================
 # UI
 # =========================================================
@@ -4743,34 +4875,73 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.16 Trader Command Center</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V19.17 Pro Trader Layout</div>", unsafe_allow_html=True)
 
 
 # =========================================================
-# V19.16 TRADER COMMAND CENTER — TOP PRIORITY VIEW
+# V19.17 PRO TRADER COMMAND CENTER — REAL TOP LAYOUT
 # =========================================================
 try:
     _v1916_health = _v1916_build_health_snapshot()
     _v1916_audit = _v1916_single_brain_audit()
 
-    st.markdown("### 🚦 Live System Health — Data + Engines")
+    st.markdown("### 🔄 Refresh + Live System Health")
+    if st.button("🔄 Refresh Live Data Now", key="v1917_main_top_refresh", use_container_width=True):
+        st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
+        st.rerun()
+
     h1, h2, h3, h4 = st.columns(4)
     h1.metric("System", _v1916_health.get("freshness", "NA"))
-    h2.metric("Engines", f"{_v1916_health.get('engines_ready',0)}/{_v1916_health.get('engines_total',0)} READY")
+    h2.metric("Engines", f"{_v1916_health.get('engines_ready',0)}/{_v1916_health.get('engines_total',0)}")
     h3.metric("OC Rows", _v1916_health.get("option_rows", 0))
     h4.metric("Last Refresh", _v1916_health.get("last_refresh", "NA"))
 
     if _v1916_health.get("freshness") == "LIVE":
-        st.success("🟢 LIVE: " + _v1916_health.get("freshness_note", ""))
+        st.success("🟢 LIVE DATA OK — " + _v1916_health.get("freshness_note", ""))
     elif _v1916_health.get("freshness") == "PARTIAL":
-        st.warning("🟡 PARTIAL: " + _v1916_health.get("freshness_note", ""))
+        st.warning("🟡 PARTIAL DATA — " + _v1916_health.get("freshness_note", ""))
     else:
-        st.error("🔴 STALE: " + _v1916_health.get("freshness_note", "") + " Fresh trade avoid karo.")
+        st.error("🔴 DATA STALE — fresh trade avoid karo. " + _v1916_health.get("freshness_note", ""))
 
-    with st.expander("🧪 Engine Readiness Details", expanded=False):
-        st.json(_v1916_health.get("engine_flags", {}))
+    st.markdown("### 📊 Live Market Snapshot — Trading First")
+    st.dataframe(pd.DataFrame(_v1917_market_snapshot_rows()), use_container_width=True, hide_index=True)
 
-    st.markdown("### 🧠 Single Brain Audit")
+    try:
+        _mode_txt = str(market_mode_v7 if "market_mode_v7" in globals() else "UNKNOWN")
+    except Exception:
+        _mode_txt = "UNKNOWN"
+    try:
+        _last_pts = float(last_refresh_points if "last_refresh_points" in globals() else 0)
+    except Exception:
+        _last_pts = 0
+    try:
+        _today_pct = float(today_pct if "today_pct" in globals() else 0)
+    except Exception:
+        _today_pct = 0
+
+    if "RISE" in _mode_txt.upper():
+        st.success(f"🟢 MARKET MODE: {_mode_txt} | Last: {_last_pts:+.1f} pts | Today: {_today_pct:+.2f}%")
+    elif "FALL" in _mode_txt.upper():
+        st.error(f"🔴 MARKET MODE: {_mode_txt} | Last: {_last_pts:+.1f} pts | Today: {_today_pct:+.2f}%")
+    else:
+        st.info(f"🟡 MARKET MODE: {_mode_txt} | Last: {_last_pts:+.1f} pts | Today: {_today_pct:+.2f}%")
+
+    st.markdown("### 🏋️ Top-5 Heavyweight Driver — Top View")
+    try:
+        hw1, hw2, hw3, hw4 = st.columns(4)
+        hw1.metric("Weighted Pressure", str(weighted_pressure) if "weighted_pressure" in globals() else "NA")
+        hw2.metric("Top-5 Points", str(estimated_top5_points) if "estimated_top5_points" in globals() else "NA")
+        hw3.metric("HDFC+ICICI", str(hdfc_icici_bias) if "hdfc_icici_bias" in globals() else "NA")
+        hw4.metric("Divergence", str(heavy_divergence) if "heavy_divergence" in globals() else "NA")
+    except Exception:
+        pass
+    _hw_rows = _v1917_heavyweight_rows()
+    if _hw_rows:
+        st.dataframe(pd.DataFrame(_hw_rows), use_container_width=True, hide_index=True)
+    else:
+        st.caption("Heavyweight detail table neeche original section me available hai.")
+
+    st.markdown("### 🧠 Single Brain Audit — No Confusion")
     a1, a2, a3, a4 = st.columns(4)
     a1.metric("Final Authority", "Decision + Stability")
     a2.metric("Final Decision", _v1916_audit.get("final_decision", "WAIT"))
@@ -4778,19 +4949,25 @@ try:
     a4.metric("Stability", _v1916_audit.get("stability_status", "NA"))
 
     if _v1916_audit.get("conflicts"):
-        st.warning("Evidence conflict hai, lekin final authority ab bhi Decision Engine + Stability Lock hai.")
+        st.warning("Evidence conflict hai. Final trade sirf Decision Engine + Stability Lock se follow karo.")
         for _c in _v1916_audit.get("conflicts", [])[:5]:
             st.write("⚠️", _c)
     else:
         st.success("Single-brain clear: final trade sirf Decision Engine + Stability Lock se aa raha hai.")
 
-    st.markdown("### 🎯 Trader Quick View — Decision + Strategy")
-    q1, q2, q3, q4 = st.columns(4)
+    st.markdown("### 🎯 Smart Strategy Matrix — TOP")
+    _top_matrix_rows = _v1916_strategy_rows_for_top()
+    if _top_matrix_rows:
+        st.dataframe(pd.DataFrame(_top_matrix_rows), use_container_width=True, hide_index=True)
+        st.caption("Rank Score sirf ordering hai. Final trade Decision Engine + Stability Lock se aata hai.")
+
+    st.markdown("### 📋 Trade Plan + Premium Quality")
     _fd_quick = final_decision if isinstance(final_decision, dict) else {}
     _de_quick = decision_engine_report if isinstance(decision_engine_report, dict) else {}
     _strat_quick = strategy_engine_report if isinstance(strategy_engine_report, dict) else {}
     _intel_quick = intelligence_report if isinstance(intelligence_report, dict) else {}
 
+    q1, q2, q3, q4 = st.columns(4)
     q1.metric("Verdict", _de_quick.get("final_action", _fd_quick.get("action", "WAIT")))
     q2.metric("Status", _de_quick.get("execution_status", _fd_quick.get("execution_status", "WAIT")))
     q3.metric("Decision Conf.", f"{_de_quick.get('calibrated_confidence', _fd_quick.get('confidence',0))}%")
@@ -4808,15 +4985,18 @@ try:
     ]
     st.dataframe(pd.DataFrame(_top_plan_rows), use_container_width=True, hide_index=True)
 
-    _top_matrix_rows = _v1916_strategy_rows_for_top()
-    if _top_matrix_rows:
-        st.markdown("### 🎯 Smart Strategy Matrix — Top View")
-        st.dataframe(pd.DataFrame(_top_matrix_rows), use_container_width=True, hide_index=True)
-        st.caption("Rank Score sirf ordering hai. Final trade Decision Engine + Stability Lock se aata hai.")
+    _pq_rows, _pq_label, _pq_color, _pq_note = _v1917_plan_quality_rows()
+    if _pq_color == "green":
+        st.success(f"Premium Quality: {_pq_label} — {_pq_note}")
+    elif _pq_color == "orange":
+        st.warning(f"Premium Quality: {_pq_label} — {_pq_note}")
+    else:
+        st.error(f"Premium Quality: {_pq_label} — {_pq_note}")
+    st.dataframe(pd.DataFrame(_pq_rows), use_container_width=True, hide_index=True)
 
     st.divider()
-except Exception as _v1916_top_error:
-    st.warning("Trader Command Center load issue: " + str(_v1916_top_error))
+except Exception as _v1917_top_error:
+    st.warning("Pro Trader Command Center load issue: " + str(_v1917_top_error))
 
 
 
@@ -4831,29 +5011,33 @@ try:
     _exec_status_card = _de_card.get("execution_status", _fd.get("execution_status", "WAIT"))
     _analysis_action_card = _de_card.get("analysis_action", _fd.get("analysis_action", _fd.get("action", "WAIT")))
     _final_action_card = _de_card.get("final_action", _fd.get("action", "WAIT"))
-    _card_heading = f"🧠 V19.16 Decision Engine — {_exec_status_card}"
+    _card_heading = f"🧠 V19.17 Decision Engine — {_exec_status_card}"
     _action_label = "Final Verdict"
-    st.markdown(f"""
-<div class='v17-final {_class}'>
-<h3>{_card_heading}</h3>
-<b>{_action_label}:</b> {_final_action_card} &nbsp; | &nbsp;
-<b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
-<b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
-<b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')} &nbsp; | &nbsp;
-<b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')} &nbsp; | &nbsp;
-<b>Memory:</b> {(_fd.get('memory_report',{}) or {}).get('memory_status','NA')} &nbsp; | &nbsp;
-<b>OI Flow:</b> {(_fd.get('oi_flow_report',{}) or {}).get('bias','NA')}<br>
-<b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
-<b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
-<b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
-<b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
-<b>Entry:</b> {_strategy.get('entry','No Trade')} &nbsp; | &nbsp;
-<b>SL:</b> {_strategy.get('sl','No Trade')} &nbsp; | &nbsp;
-<b>Target:</b> {_strategy.get('target','No Trade')} &nbsp; | &nbsp;
-<b>Approved Lots:</b> {_de_card.get('approved_lots',0)} &nbsp; | &nbsp;
-<b>Preview Lots:</b> {_de_card.get('preview_lots',0)}
-</div>
-""", unsafe_allow_html=True)
+    # V19.17: duplicate decision summary card hidden from normal trader view.
+    # Top Trade Plan + Final Authority card are the user-facing decision views.
+    if developer_mode:
+        with st.expander("Developer: Legacy duplicate Decision Summary Card", expanded=False):
+            st.markdown(f"""
+            <div class='v17-final {_class}'>
+            <h3>{_card_heading}</h3>
+            <b>{_action_label}:</b> {_final_action_card} &nbsp; | &nbsp;
+            <b>Analysis Bias:</b> {_analysis_action_card} &nbsp; | &nbsp;
+            <b>Status:</b> {_exec_status_card} &nbsp; | &nbsp;
+            <b>Plan:</b> {_strategy.get('plan_status','NA')} / {_strategy.get('plan_source','NA')} &nbsp; | &nbsp;
+            <b>Stability:</b> {(_fd.get('stability_report',{}) or {}).get('status','NA')} &nbsp; | &nbsp;
+            <b>Memory:</b> {(_fd.get('memory_report',{}) or {}).get('memory_status','NA')} &nbsp; | &nbsp;
+            <b>OI Flow:</b> {(_fd.get('oi_flow_report',{}) or {}).get('bias','NA')}<br>
+            <b>Decision Confidence:</b> {_fd.get('confidence',0)}% &nbsp; | &nbsp;
+            <b>Intelligence Score:</b> {(_fd.get('intelligence_report',{}) or {}).get('intelligence_score',0)}/100<br>
+            <b>Strike:</b> {_strategy.get('sell_strike','No Strike')} &nbsp; | &nbsp;
+            <b>Hedge:</b> {_strategy.get('hedge_strike','No Hedge')}<br>
+            <b>Entry:</b> {_strategy.get('entry','No Trade')} &nbsp; | &nbsp;
+            <b>SL:</b> {_strategy.get('sl','No Trade')} &nbsp; | &nbsp;
+            <b>Target:</b> {_strategy.get('target','No Trade')} &nbsp; | &nbsp;
+            <b>Approved Lots:</b> {_de_card.get('approved_lots',0)} &nbsp; | &nbsp;
+            <b>Preview Lots:</b> {_de_card.get('preview_lots',0)}
+            </div>
+            """, unsafe_allow_html=True)
 
     
     try:
@@ -5229,7 +5413,9 @@ try:
             st.write("Memory Engine:", "READY" if V19_MEMORY_ENGINE_READY else "MISSING")
             st.write("OI Flow Engine:", "READY" if V19_OI_FLOW_ENGINE_READY else "MISSING")
             st.write("Dead Code Cleanup:", "V19.15 ACTIVE")
-            st.write("Trader Command Center:", "V19.16 ACTIVE")
+            st.write("Trader Command Center:", "V19.17 ACTIVE")
+            st.write("Duplicate Decision Card:", "Hidden from normal view")
+            st.write("Premium Quality Filter:", "Visible in top plan")
             st.write("Cleanup policy:", "Only unused/legacy code removed; engines untouched")
             st.write("V19.7 cleanup:", "ACTIVE")
             st.write("Removed old execution gate:", "v162_signal_gate")
@@ -6082,6 +6268,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V19.16 build: Trader Command Center shows live health, single-brain authority and trade plan at top. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V19.17 build: Pro Trader Layout; key trading sections are top-first, duplicate decision card hidden, premium filter visible. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
