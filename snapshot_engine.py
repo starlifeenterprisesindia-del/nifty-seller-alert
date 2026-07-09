@@ -1,9 +1,15 @@
 """
-Nifty Seller AI — Snapshot Engine v19.3
+Nifty Seller AI — Snapshot Engine v20.5
 
-This module builds and validates the single market snapshot.
-It does not fetch data. It only organizes already-calculated app values.
+Single Snapshot Authority.
+It does not fetch data. It only organizes one explicit app context into one
+refresh snapshot used by AI Final, Signal Reliability, Strategy Matrix and
+Live Best Candidates.
 """
+
+from datetime import datetime
+import hashlib
+import json
 
 
 def _safe_float(value, default=0.0):
@@ -22,6 +28,102 @@ def _safe_int(value, default=0):
         return default
 
 
+
+
+def _get_row_value(row, *keys, default=0):
+    for key in keys:
+        try:
+            if key in row and row.get(key) is not None:
+                return _safe_float(row.get(key), default)
+        except Exception:
+            pass
+    return default
+
+
+def _aggregate_option_rows(option_chain, option_analysis):
+    """Build the only authoritative OI aggregate from the current OC rows.
+
+    Dhan/other sources may expose both top-level totals and row-level values.
+    V20.6 uses the current row payload as source-of-truth whenever rows exist,
+    then compares top-level totals against it. This prevents one table using
+    old totals while another table uses fresh rows.
+    """
+    rows = []
+    try:
+        rows = option_analysis.get("rows", []) or option_chain.get("rows", []) or []
+    except Exception:
+        rows = []
+    total_call_oi = 0.0
+    total_put_oi = 0.0
+    call_oi_change = 0.0
+    put_oi_change = 0.0
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        total_call_oi += _get_row_value(r, "ce_oi", "call_oi", "CE_OI")
+        total_put_oi += _get_row_value(r, "pe_oi", "put_oi", "PE_OI")
+        call_oi_change += _get_row_value(r, "ce_oi_change", "ce_change_oi", "call_oi_change", "CE_CHG_OI")
+        put_oi_change += _get_row_value(r, "pe_oi_change", "pe_change_oi", "put_oi_change", "PE_CHG_OI")
+    pcr = (total_put_oi / total_call_oi) if total_call_oi else 0.0
+    return {
+        "rows_count": len(rows),
+        "total_call_oi": int(round(total_call_oi)),
+        "total_put_oi": int(round(total_put_oi)),
+        "call_oi_change": int(round(call_oi_change)),
+        "put_oi_change": int(round(put_oi_change)),
+        "pcr": float(pcr),
+        "has_rows": bool(rows),
+    }
+
+
+def _pct_gap(a, b):
+    base = max(abs(_safe_float(a, 0)), abs(_safe_float(b, 0)), 1.0)
+    return abs(_safe_float(a, 0) - _safe_float(b, 0)) / base * 100.0
+
+
+def _option_bias_from_oi(call_oi_change, put_oi_change):
+    base = max(abs(_safe_float(call_oi_change, 0)), abs(_safe_float(put_oi_change, 0)), 1.0)
+    raw = ((_safe_float(put_oi_change, 0) - _safe_float(call_oi_change, 0)) / base) * 65.0
+    return max(-100.0, min(100.0, raw))
+
+
+def _compact_signature(value, length=12):
+    try:
+        raw = json.dumps(value, sort_keys=True, default=str, separators=(",", ":"))
+    except Exception:
+        raw = str(value)
+    return hashlib.md5(raw.encode("utf-8", errors="ignore")).hexdigest()[:length]
+
+
+def _option_chain_signature(option_chain, option_analysis):
+    rows = []
+    source_rows = []
+    try:
+        source_rows = option_analysis.get("rows", []) or option_chain.get("rows", []) or []
+    except Exception:
+        source_rows = []
+    for r in list(source_rows)[:80]:
+        if not isinstance(r, dict):
+            continue
+        rows.append({
+            "strike": r.get("strike"),
+            "ce_ltp": r.get("ce_ltp"),
+            "pe_ltp": r.get("pe_ltp"),
+            "ce_oi": r.get("ce_oi"),
+            "pe_oi": r.get("pe_oi"),
+            "ce_chg": r.get("ce_oi_change", r.get("ce_change_oi")),
+            "pe_chg": r.get("pe_oi_change", r.get("pe_change_oi")),
+        })
+    payload = {
+        "source_id": option_chain.get("snapshot_id") or option_analysis.get("snapshot_id") or "",
+        "fetched_at": option_analysis.get("fetched_at") or option_chain.get("fetched_at") or "",
+        "expiry": option_chain.get("expiry") or option_analysis.get("expiry") or "",
+        "atm": option_chain.get("atm_strike") or option_analysis.get("atm_strike") or "",
+        "pcr": option_chain.get("pcr") or option_analysis.get("pcr") or "",
+        "rows": rows,
+    }
+    return _compact_signature(payload, 14), payload
+
 def build_market_snapshot(ctx, fmt_time_func=None):
     option_chain = ctx.get("option_chain", {}) if isinstance(ctx.get("option_chain", {}), dict) else {}
     option_analysis = ctx.get("option_analysis", {}) if isinstance(ctx.get("option_analysis", {}), dict) else {}
@@ -36,10 +138,47 @@ def build_market_snapshot(ctx, fmt_time_func=None):
         created_at = ""
 
     nifty_price = _safe_float(ctx.get("price", ctx.get("nifty_price", 0)), 0)
-    pcr_value = _safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
+
+    oi_row_aggregate = _aggregate_option_rows(option_chain, option_analysis)
+    # V20.6 OI Single Source Lock: row aggregate is authoritative when rows exist.
+    oc_total_call = _safe_int(option_chain.get("total_call_oi", 0), 0)
+    oc_total_put = _safe_int(option_chain.get("total_put_oi", 0), 0)
+    oc_call_chg = _safe_int(option_chain.get("call_oi_change", 0), 0)
+    oc_put_chg = _safe_int(option_chain.get("put_oi_change", 0), 0)
+
+    if oi_row_aggregate.get("has_rows"):
+        auth_total_call_oi = oi_row_aggregate["total_call_oi"]
+        auth_total_put_oi = oi_row_aggregate["total_put_oi"]
+        auth_call_oi_change = oi_row_aggregate["call_oi_change"]
+        auth_put_oi_change = oi_row_aggregate["put_oi_change"]
+        auth_pcr = oi_row_aggregate["pcr"]
+        oi_source = "current_option_chain_rows"
+    else:
+        auth_total_call_oi = oc_total_call
+        auth_total_put_oi = oc_total_put
+        auth_call_oi_change = oc_call_chg
+        auth_put_oi_change = oc_put_chg
+        auth_pcr = _safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
+        oi_source = "option_chain_totals"
+
+    pcr_value = auth_pcr if auth_pcr > 0 else _safe_float(ctx.get("pcr", option_chain.get("pcr", 0)), 0)
+
+    oi_mismatches = []
+    if oi_row_aggregate.get("has_rows"):
+        if oc_call_chg and _pct_gap(oc_call_chg, auth_call_oi_change) > 3:
+            oi_mismatches.append(f"Call OI Chg top-level != rows ({oc_call_chg} vs {auth_call_oi_change})")
+        if oc_put_chg and _pct_gap(oc_put_chg, auth_put_oi_change) > 3:
+            oi_mismatches.append(f"Put OI Chg top-level != rows ({oc_put_chg} vs {auth_put_oi_change})")
+        if oc_total_call and _pct_gap(oc_total_call, auth_total_call_oi) > 3:
+            oi_mismatches.append("Call OI total top-level != rows")
+        if oc_total_put and _pct_gap(oc_total_put, auth_total_put_oi) > 3:
+            oi_mismatches.append("Put OI total top-level != rows")
+
+    oc_signature, oc_payload = _option_chain_signature(option_chain, option_analysis)
+    refresh_time = created_at or datetime.now().strftime("%H:%M:%S")
 
     snapshot = {
-        "version": "V19.5.1 Snapshot Engine",
+        "version": "V20.5 Single Snapshot Authority",
         "created_at": created_at,
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -56,14 +195,18 @@ def build_market_snapshot(ctx, fmt_time_func=None):
             "expiry": option_chain.get("expiry", ctx.get("selected_expiry", "")),
             "atm_strike": option_chain.get("atm_strike", ctx.get("atm_strike", "")),
             "pcr": pcr_value,
-            "total_call_oi": _safe_int(option_chain.get("total_call_oi", 0), 0),
-            "total_put_oi": _safe_int(option_chain.get("total_put_oi", 0), 0),
-            "call_oi_change": _safe_int(option_chain.get("call_oi_change", 0), 0),
-            "put_oi_change": _safe_int(option_chain.get("put_oi_change", 0), 0),
+            "total_call_oi": int(auth_total_call_oi),
+            "total_put_oi": int(auth_total_put_oi),
+            "call_oi_change": int(auth_call_oi_change),
+            "put_oi_change": int(auth_put_oi_change),
             "rows_count": len(option_chain.get("rows", []) or []),
+            "analysis_rows_count": len(option_analysis.get("rows", []) or []),
+            "fetched_at": option_analysis.get("fetched_at") or option_chain.get("fetched_at", ""),
+            "source_snapshot_id": option_chain.get("snapshot_id") or option_analysis.get("snapshot_id") or "",
+            "signature": oc_signature,
         },
         "signals": {
-            "option_bias": _safe_float(option_analysis.get("bias", ctx.get("option_bias", 0)), 0),
+            "option_bias": _safe_float(option_analysis.get("bias", _option_bias_from_oi(auth_call_oi_change, auth_put_oi_change)), 0),
             "price_action_bias": _safe_float(ctx.get("price_action_bias", 0), 0),
             "heavyweight_bias": _safe_float(heavyweight_analysis.get("pressure", ctx.get("heavy_bias", 0)), 0),
             "market_bias": _safe_float(ctx.get("market_bias", 0), 0),
@@ -89,18 +232,48 @@ def build_market_snapshot(ctx, fmt_time_func=None):
             "nifty_source": ctx.get("nifty_source", ""),
             "heavy_source": ctx.get("heavy_source", ""),
             "vix_source": ctx.get("vix_source", ""),
-        }
+        },
+        "candidates": {
+            "best_ce_strike": (ctx.get("best_ce") or {}).get("strike") if isinstance(ctx.get("best_ce"), dict) else None,
+            "best_pe_strike": (ctx.get("best_pe") or {}).get("strike") if isinstance(ctx.get("best_pe"), dict) else None,
+            "candidate_source": "current_option_chain_row",
+        },
+        "oi_single_source": {
+            "source": oi_source,
+            "sync_ok": len(oi_mismatches) == 0,
+            "mismatches": oi_mismatches[:6],
+            "row_aggregate": oi_row_aggregate,
+            "authoritative": {
+                "total_call_oi": int(auth_total_call_oi),
+                "total_put_oi": int(auth_total_put_oi),
+                "call_oi_change": int(auth_call_oi_change),
+                "put_oi_change": int(auth_put_oi_change),
+                "pcr": float(pcr_value),
+                "option_bias": _safe_float(option_analysis.get("bias", _option_bias_from_oi(auth_call_oi_change, auth_put_oi_change)), 0),
+            },
+        },
+        "data_flow": {
+            "refresh_time": refresh_time,
+            "oc_signature": oc_signature,
+            "oc_payload_id": _compact_signature(oc_payload, 10),
+            "single_snapshot": True,
+            "oi_single_source": True,
+        },
     }
 
-    snapshot["snapshot_id"] = "|".join([
-        str(snapshot["market"]["nifty_price"]),
-        str(snapshot["option_chain"]["expiry"]),
-        str(snapshot["option_chain"]["atm_strike"]),
-        str(snapshot["option_chain"]["pcr"]),
-        str(snapshot["signals"]["option_bias"]),
-        str(snapshot["risk"]["seller_risk"]),
-        str(snapshot["ai"]["final_action"]),
-    ])
+    id_payload = {
+        "refresh_time": refresh_time,
+        "price": snapshot["market"]["nifty_price"],
+        "expiry": snapshot["option_chain"]["expiry"],
+        "atm": snapshot["option_chain"]["atm_strike"],
+        "oc_sig": oc_signature,
+        "option_bias": snapshot["signals"]["option_bias"],
+        "price_action_bias": snapshot["signals"].get("price_action_bias", 0),
+        "heavyweight_bias": snapshot["signals"].get("heavyweight_bias", 0),
+        "risk": snapshot["risk"].get("seller_risk", 0),
+        "action": snapshot["ai"].get("final_action", "WAIT"),
+    }
+    snapshot["snapshot_id"] = "SNAP-" + _compact_signature(id_payload, 16)
     return snapshot
 
 
@@ -159,6 +332,19 @@ def snapshot_health(snapshot):
     if _safe_int(oc.get("rows_count", 0), 0) < 5:
         issues.append("Option-chain rows too low.")
         points -= 15
+    if _safe_int(oc.get("analysis_rows_count", 0), 0) < 5:
+        warnings.append("Option-analysis rows too low.")
+        points -= 8
+    if not oc.get("signature"):
+        warnings.append("Option-chain signature missing.")
+        points -= 8
+
+    oi_lock = snapshot.get("oi_single_source", {}) if isinstance(snapshot.get("oi_single_source", {}), dict) else {}
+    if oi_lock and not oi_lock.get("sync_ok", True):
+        issues.append("OI single-source mismatch detected.")
+        points -= 25
+        for msg in (oi_lock.get("mismatches", []) or [])[:3]:
+            warnings.append(str(msg))
 
     pcr = _safe_float(oc.get("pcr", 0), 0)
     if pcr <= 0:

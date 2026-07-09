@@ -35,7 +35,7 @@ def _safe_int(value, default=0):
 
 def _action(value):
     value = str(value or "WAIT").upper().strip()
-    return value if value in {"SELL CE", "SELL PE"} else "WAIT"
+    return value if value in {"SELL CE", "SELL PE", "IRON CONDOR", "BUY CALL", "BUY PUT", "BUY CALL (HEDGED)", "BUY PUT (HEDGED)"} else "WAIT"
 
 
 def apply_stability_lock(

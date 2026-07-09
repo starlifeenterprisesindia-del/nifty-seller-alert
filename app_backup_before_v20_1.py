@@ -138,25 +138,6 @@ if "auto_refresh_interval" not in st.session_state:
 if "last_manual_refresh" not in st.session_state:
     st.session_state["last_manual_refresh"] = ""
 
-# V20.1: floating manual refresh trigger. This is independent of auto-refresh.
-try:
-    if str(st.query_params.get("manual_refresh", "")).lower() in ("1", "true", "yes"):
-        st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
-        st.session_state["last_manual_refresh"] = datetime.now().strftime("%H:%M:%S")
-        # V20.2: Floating refresh must behave like sidebar refresh.
-        # Clear Streamlit cache so option-chain / best CE-PE / matrix do not reuse old TTL data.
-        try:
-            st.cache_data.clear()
-        except Exception:
-            pass
-        try:
-            del st.query_params["manual_refresh"]
-        except Exception:
-            pass
-        st.rerun()
-except Exception:
-    pass
-
 
 st.markdown(
     """
@@ -186,15 +167,6 @@ st.markdown(
 .super-bad {background:rgba(220,38,38,.16); border-left:5px solid #dc2626; padding:12px; border-radius:12px;}
 .super-muted {opacity:.76; font-size:.88rem;}
 .sidebar-refresh-note {padding:10px;border-radius:12px;background:rgba(34,197,94,.10);border:1px solid rgba(34,197,94,.25);margin:8px 0;}
-.v201-top-status{padding:9px 12px;border-radius:12px;background:rgba(128,128,128,.09);border:1px solid rgba(128,128,128,.20);font-weight:750;margin:6px 0 10px 0;}
-.v201-ai-card{padding:18px 20px;border-radius:18px;margin:10px 0 14px 0;border-left:8px solid #f59e0b;background:rgba(170,126,22,.20);}
-.v201-ai-card.green{border-left-color:#22c55e;background:rgba(22,135,75,.23);}
-.v201-ai-card.red{border-left-color:#ef4444;background:rgba(170,38,38,.23);}
-.v201-ai-card h2{margin:0 0 8px 0;font-size:1.6rem;}
-.v201-reason{margin-top:8px;line-height:1.42;}
-.floating-refresh{position:fixed;right:18px;bottom:22px;z-index:999999;background:#2563eb;color:white!important;padding:12px 16px;border-radius:999px;text-decoration:none!important;font-weight:850;box-shadow:0 8px 24px rgba(0,0,0,.35);border:1px solid rgba(255,255,255,.25);}
-.floating-refresh:hover{background:#1d4ed8;color:white!important;}
-@media(max-width:700px){.floating-refresh{right:12px;bottom:16px;padding:11px 14px;font-size:.92rem}.main-title{font-size:1.35rem}.v201-ai-card h2{font-size:1.25rem}}
 </style>
 <style>
 .v17-strip {padding:14px 18px;border-radius:14px;margin:10px 0 12px 0;font-weight:800;border-left:7px solid rgba(255,255,255,.3);}
@@ -984,9 +956,6 @@ def analyze_option_chain(option_chain):
         "bias": bias,
         "best_ce": best_ce,
         "best_pe": best_pe,
-        "snapshot_id": option_chain.get("snapshot_id", ""),
-        "fetched_at": option_chain.get("fetched_at", ""),
-        "underlying": option_chain.get("underlying", spot),
         "message": "OK",
     }
 
@@ -3593,89 +3562,6 @@ def v164_select_best_strikes(option_analysis, spot, premium_min=30, premium_max=
     return best
 
 
-
-# V20.3 Candidate Freshness Guard
-# Best CE/PE must always come from the latest option-chain snapshot. The lock stores
-# only strike/side state; price/SL/target are always recalculated from current rows.
-def _v203_current_option_row(option_analysis, strike):
-    try:
-        strike = int(float(strike or 0))
-        for rr in (option_analysis.get("rows", []) if isinstance(option_analysis, dict) else []):
-            if int(rr.get("strike", 0) or 0) == strike:
-                return dict(rr)
-    except Exception:
-        pass
-    return None
-
-
-def _v203_candidate_score(row, side, spot=0):
-    if not row:
-        return -9999.0
-    prefix = str(side).lower()
-    try:
-        base = float(row.get(f"{prefix}_v164_score", row.get(f"{prefix}_sell_score", -9999)) or -9999)
-    except Exception:
-        base = -9999.0
-    # If v164 score is missing on a refreshed current row, recalculate from current row.
-    if base <= -999:
-        try:
-            base = float(v164_score_candidate(row, str(side).upper(), float(spot or price or 0), 30, 150))
-        except Exception:
-            base = float(row.get(f"{prefix}_sell_score", -9999) or -9999)
-    return base
-
-
-def _v203_candidate_freshness_guard(side, new_row, option_analysis, spot=0):
-    """Keep candidate stable without using stale price.
-    - New and previous strikes are both resolved from current option_analysis rows.
-    - If best strike flips by a tiny score gap, keep old strike for one confirmation.
-    - LTP/Entry/SL/Target always use the current row, never stored old row.
-    """
-    if not new_row or not isinstance(option_analysis, dict) or not option_analysis.get("success"):
-        return new_row
-    side = str(side).upper()
-    key = f"v203_best_{side}_candidate_lock"
-    snapshot_id = str(option_analysis.get("snapshot_id", ""))
-    new_strike = int(new_row.get("strike", 0) or 0)
-    current_new = _v203_current_option_row(option_analysis, new_strike) or dict(new_row)
-    new_score = _v203_candidate_score(current_new, side, spot)
-    prev = st.session_state.get(key, {}) if hasattr(st, "session_state") else {}
-    prev_strike = int(prev.get("strike", 0) or 0) if isinstance(prev, dict) else 0
-
-    # First run or same strike: update lock and return fresh current row.
-    if not prev_strike or prev_strike == new_strike:
-        st.session_state[key] = {"strike": new_strike, "pending": 0, "pending_strike": 0, "snapshot_id": snapshot_id, "score": round(new_score, 2), "time": fmt_time()}
-        current_new["candidate_freshness"] = "fresh"
-        return current_new
-
-    prev_current = _v203_current_option_row(option_analysis, prev_strike)
-    if not prev_current:
-        # Previous strike is not in latest chain window, so accept new strike.
-        st.session_state[key] = {"strike": new_strike, "pending": 0, "pending_strike": 0, "snapshot_id": snapshot_id, "score": round(new_score, 2), "time": fmt_time()}
-        current_new["candidate_freshness"] = "fresh-prev-out-of-window"
-        return current_new
-
-    prev_score = _v203_candidate_score(prev_current, side, spot)
-    score_gap = new_score - prev_score
-    try:
-        material = int((snapshot_delta or {}).get("material_change", 0) or 0)
-    except Exception:
-        material = 0
-    pending_strike = int(prev.get("pending_strike", 0) or 0) if isinstance(prev, dict) else 0
-    pending = int(prev.get("pending", 0) or 0) if isinstance(prev, dict) else 0
-    pending = pending + 1 if pending_strike == new_strike else 1
-
-    # Tiny score changes should not make CE/PE jump every refresh.
-    if score_gap < 8 and material < 60 and pending < 2:
-        st.session_state[key] = {"strike": prev_strike, "pending": pending, "pending_strike": new_strike, "snapshot_id": snapshot_id, "score": round(prev_score, 2), "time": fmt_time()}
-        prev_current["candidate_freshness"] = f"stable-lock; new {new_strike} pending"
-        return prev_current
-
-    st.session_state[key] = {"strike": new_strike, "pending": 0, "pending_strike": 0, "snapshot_id": snapshot_id, "score": round(new_score, 2), "time": fmt_time()}
-    current_new["candidate_freshness"] = "fresh-confirmed"
-    return current_new
-
-
 def v164_unified_decision_engine(ranked, price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, seller_risk, shock_score, gamma_score, news_score, data_quality, conflict_mode, move_guard):
     """One engine for final decision. Strategy Matrix and final card must not contradict."""
     ranked = ranked or [{"strategy": "WAIT", "confidence": 25}]
@@ -3786,16 +3672,6 @@ try:
     if _v164_best.get("PE"):
         best_pe = _v164_best["PE"]
         pe_strike = int(best_pe.get("strike", pe_strike))
-except Exception:
-    pass
-
-# V20.3: Resolve Best CE/PE from the current option-chain rows and prevent stale candidate display.
-try:
-    if option_analysis.get("success"):
-        best_ce = _v203_candidate_freshness_guard("CE", best_ce, option_analysis, price) if best_ce else None
-        best_pe = _v203_candidate_freshness_guard("PE", best_pe, option_analysis, price) if best_pe else None
-        ce_strike = int(best_ce.get("strike", ce_strike)) if best_ce else ce_strike
-        pe_strike = int(best_pe.get("strike", pe_strike)) if best_pe else pe_strike
 except Exception:
     pass
 
@@ -4228,128 +4104,6 @@ except Exception:
 # ai_brain.py now provides snapshot bias/explanation.
 # It does not overwrite final action; Decision Engine owns execution verdict.
 
-
-# =========================================================
-# V20.5 SINGLE SNAPSHOT CONTEXT + DATA FLOW MONITOR
-# =========================================================
-def _v205_build_snapshot_context():
-    """Build one explicit context for Snapshot Engine.
-
-    Important: do not pass locals() here. Every top table must use values that
-    came from this one context/snapshot chain.
-    """
-    g = globals()
-    return {
-        "price": g.get("price", 0),
-        "nifty_price": g.get("price", 0),
-        "change": g.get("change", 0),
-        "change_pct": g.get("change_pct", 0),
-        "vix": g.get("vix", 0),
-        "india_vix": g.get("vix", 0),
-        "vix_change_pct": g.get("vix_change_pct", 0),
-        "pcr": g.get("pcr", 0),
-        "status": g.get("market_text", ""),
-        "market_status_text": g.get("market_text", ""),
-        "day_name": g.get("day_name", ""),
-        "selected_expiry": g.get("selected_expiry", ""),
-        "atm_strike": g.get("atm_strike", ""),
-        "option_chain": g.get("option_chain", {}) if isinstance(g.get("option_chain", {}), dict) else {},
-        "option_analysis": g.get("option_analysis", {}) if isinstance(g.get("option_analysis", {}), dict) else {},
-        "heavyweight_analysis": g.get("heavyweight_analysis", {}) if isinstance(g.get("heavyweight_analysis", {}), dict) else {},
-        "news": g.get("news", {}) if isinstance(g.get("news", {}), dict) else {},
-        "final_decision": g.get("final_decision", {}) if isinstance(g.get("final_decision", {}), dict) else {},
-        "option_bias": g.get("option_bias", 0),
-        "price_action_bias": g.get("price_action_bias", 0),
-        "heavy_bias": g.get("heavy_bias", 0),
-        "market_bias": g.get("market_bias", 0),
-        "smart_money_bias": g.get("smart_money_bias", 0),
-        "pcr_bias": g.get("pcr_bias", 0),
-        "conflict_mode": g.get("conflict_mode", False),
-        "data_quality": g.get("data_quality", 0),
-        "seller_risk": g.get("seller_risk", 0),
-        "news_score": (g.get("news", {}) or {}).get("score", 0) if isinstance(g.get("news", {}), dict) else 0,
-        "gamma_score_v7": g.get("gamma_score_v7", 0),
-        "shock_score_v7": g.get("shock_score_v7", 0),
-        "expiry_mode": g.get("expiry_mode", g.get("mode", "")),
-        "mode": g.get("mode", ""),
-        "dhan_ready": g.get("dhan_ready", False),
-        "nifty_source": g.get("source_text", ""),
-        "heavy_source": g.get("heavy_source", ""),
-        "vix_source": g.get("vix_source", ""),
-        "best_ce": g.get("best_ce", {}) if isinstance(g.get("best_ce", {}), dict) else {},
-        "best_pe": g.get("best_pe", {}) if isinstance(g.get("best_pe", {}), dict) else {},
-    }
-
-
-def _v205_data_flow_monitor(snapshot, previous_snapshot=None):
-    """Check whether every refresh is using one fresh snapshot.
-
-    This does not change the trade decision. It only warns if data flow looks
-    weak/stale/split so AI does not silently trust bad data.
-    """
-    try:
-        oc = snapshot.get("option_chain", {}) if isinstance(snapshot.get("option_chain", {}), dict) else {}
-        df = snapshot.get("data_flow", {}) if isinstance(snapshot.get("data_flow", {}), dict) else {}
-        sh_label = "UNKNOWN"
-        if "snapshot_health_external" in globals() and isinstance(snapshot_health_external, dict):
-            sh_label = str(snapshot_health_external.get("label", "UNKNOWN"))
-        prev_oc_sig = ""
-        prev_sid = ""
-        if isinstance(previous_snapshot, dict):
-            prev_oc_sig = str(((previous_snapshot.get("option_chain", {}) or {}).get("signature", "")))
-            prev_sid = str(previous_snapshot.get("snapshot_id", ""))
-        oc_sig = str(oc.get("signature", ""))
-        sid = str(snapshot.get("snapshot_id", ""))
-        same_oc = bool(prev_oc_sig and oc_sig and prev_oc_sig == oc_sig)
-        same_sid = bool(prev_sid and sid and prev_sid == sid)
-        repeat_key = "v205_same_oc_repeat_count"
-        if same_oc:
-            st.session_state[repeat_key] = int(st.session_state.get(repeat_key, 0) or 0) + 1
-        else:
-            st.session_state[repeat_key] = 0
-        repeat_count = int(st.session_state.get(repeat_key, 0) or 0)
-        issues = []
-        warnings = []
-        if not oc.get("success", False):
-            issues.append("Option-chain not live")
-        if int(oc.get("rows_count", 0) or 0) < 5:
-            issues.append("OC rows low")
-        if not oc_sig:
-            warnings.append("OC signature missing")
-        if same_sid:
-            warnings.append("Snapshot ID repeated")
-        if repeat_count >= 3:
-            warnings.append(f"OC unchanged {repeat_count} refresh")
-        oi_lock = snapshot.get("oi_single_source", {}) if isinstance(snapshot.get("oi_single_source", {}), dict) else {}
-        oi_sync_ok = bool(oi_lock.get("sync_ok", True))
-        if not oi_sync_ok:
-            issues.append("OI sync mismatch")
-            for _m in (oi_lock.get("mismatches", []) or [])[:2]:
-                warnings.append(str(_m))
-        health_ok = sh_label.upper() in ("HEALTHY", "CAUTION")
-        status = "FRESH" if not issues and repeat_count < 3 and health_ok else ("CAUTION" if not issues else "WEAK")
-        return {
-            "status": status,
-            "fresh": status == "FRESH",
-            "snapshot_id": sid,
-            "short_id": sid[-6:] if sid else "NA",
-            "oc_signature": oc_sig,
-            "oc_rows": int(oc.get("rows_count", 0) or 0),
-            "oc_analysis_rows": int(oc.get("analysis_rows_count", 0) or 0),
-            "oc_source_id": str(oc.get("source_snapshot_id", "")),
-            "oc_time": str(oc.get("fetched_at", "") or df.get("refresh_time", "")),
-            "repeat_count": repeat_count,
-            "snapshot_health": sh_label,
-            "oi_sync": "OK" if oi_sync_ok else "MISMATCH",
-            "oi_source": str(oi_lock.get("source", "NA")) if oi_lock else "NA",
-            "issues": issues[:4],
-            "warnings": warnings[:4],
-            "line": f"Data Flow: {status} | SNAP {sid[-6:] if sid else 'NA'} | OC rows {int(oc.get('rows_count',0) or 0)} | OI {'OK' if oi_sync_ok else 'MISMATCH'} | OC same {repeat_count}x | Brain Sync OK",
-        }
-    except Exception as e:
-        return {"status": "WEAK", "fresh": False, "snapshot_id": "", "short_id": "NA", "oc_rows": 0, "repeat_count": 0, "issues": [str(e)], "warnings": [], "line": "Data Flow: WEAK | monitor error"}
-
-
 # =========================================================
 # V19.9 SNAPSHOT ENGINE — SINGLE AUTHORITY
 # =========================================================
@@ -4368,10 +4122,8 @@ try:
         {},
     )
 
-    _v205_snapshot_context = _v205_build_snapshot_context()
-
     market_snapshot = v19_build_market_snapshot(
-        _v205_snapshot_context,
+        locals(),
         fmt_time,
     )
 
@@ -4384,14 +4136,7 @@ try:
         market_snapshot,
     )
 
-    v205_data_flow = _v205_data_flow_monitor(
-        market_snapshot,
-        _previous_snapshot_v199,
-    )
-    market_snapshot["data_flow_monitor"] = v205_data_flow
-
     st.session_state["v199_last_market_snapshot"] = market_snapshot
-    st.session_state["v205_active_snapshot_id"] = market_snapshot.get("snapshot_id", "")
 
     # Compatibility aliases for existing Developer/UI panels.
     market_snapshot_external = market_snapshot
@@ -4401,9 +4146,6 @@ try:
         final_decision["external_snapshot_engine"] = "READY"
         final_decision["snapshot_health"] = snapshot_health_external
         final_decision["snapshot_health_external"] = snapshot_health_external
-        final_decision["single_snapshot_id"] = market_snapshot.get("snapshot_id", "")
-        final_decision["data_flow_monitor"] = v205_data_flow
-        final_decision["oi_single_source_lock"] = market_snapshot.get("oi_single_source", {})
 
 except Exception as _v199_snapshot_error:
     st.error(
@@ -5130,43 +4872,24 @@ st.markdown("""
 # V20 CLEAN UI HELPERS
 # =========================================================
 def _v20_signal_reliability_rows():
-    """Signal table must use the final decision report first.
-
-    V20.6 OI Single Source Lock: this table no longer prefers a parallel
-    intelligence_report that may have been created before the final snapshot.
-    It uses final_decision -> market_snapshot fallback only.
-    """
-    rows = []
+    candidates = []
+    try:
+        if isinstance(intelligence_report, dict):
+            candidates.append(intelligence_report)
+    except Exception:
+        pass
     try:
         if isinstance(final_decision, dict):
             ir = final_decision.get("intelligence_report", {})
             if isinstance(ir, dict):
-                rows = ir.get("reliability_rows", []) or []
-    except Exception:
-        rows = []
-    if not rows:
-        try:
-            if isinstance(market_snapshot, dict):
-                sig = market_snapshot.get("signals", {}) or {}
-                rows = [
-                    {"Signal": "Price Action", "Bias": round(float(sig.get("price_action_bias", 0) or 0), 1), "Status": "Snapshot"},
-                    {"Signal": "Option Chain / OI", "Bias": round(float(sig.get("option_bias", 0) or 0), 1), "Status": "Snapshot OI-Lock"},
-                    {"Signal": "Heavyweights", "Bias": round(float(sig.get("heavyweight_bias", 0) or 0), 1), "Status": "Snapshot"},
-                    {"Signal": "Market Bias", "Bias": round(float(sig.get("market_bias", 0) or 0), 1), "Status": "Snapshot"},
-                ]
-        except Exception:
-            rows = []
-    try:
-        oi_lock = market_snapshot.get("oi_single_source", {}) if isinstance(market_snapshot, dict) else {}
-        if oi_lock:
-            rows.append({
-                "Signal": "OI Sync",
-                "Bias": "OK" if oi_lock.get("sync_ok", True) else "MISMATCH",
-                "Status": str(oi_lock.get("source", "NA")),
-            })
+                candidates.append(ir)
     except Exception:
         pass
-    return rows if isinstance(rows, list) else []
+    for src in candidates:
+        rows = src.get("reliability_rows", []) if isinstance(src, dict) else []
+        if isinstance(rows, list) and rows:
+            return rows
+    return []
 
 def _v20_compact_reasons(report, fallback=None, limit=4):
     reasons=[]
@@ -5212,159 +4935,6 @@ def _v20_oi_report():
         pass
     return {}
 
-
-def _v201_signed(x):
-    try:
-        return max(-100.0, min(100.0, float(x or 0)))
-    except Exception:
-        return 0.0
-
-
-def _v201_projection():
-    """Single compact market projection used only for top AI card.
-
-    V20.4 fix: use app globals, not function locals(). Earlier this function
-    was reading its own empty local scope, so outlook could become stale/neutral
-    even when the Decision Engine had fresh market data.
-    """
-    g = globals()
-    ms = g.get("market_snapshot", {}) if isinstance(g.get("market_snapshot", {}), dict) else {}
-    sig = ms.get("signals", {}) if isinstance(ms.get("signals", {}), dict) else {}
-    risk = ms.get("risk", {}) if isinstance(ms.get("risk", {}), dict) else {}
-    market = ms.get("market", {}) if isinstance(ms.get("market", {}), dict) else {}
-    pa = _v201_signed(sig.get("price_action_bias", g.get("price_action_bias", 0)))
-    ob = _v201_signed(sig.get("option_bias", g.get("option_bias", 0)))
-    hw = _v201_signed(sig.get("heavyweight_bias", g.get("heavy_bias", 0)))
-    sm = _v201_signed(g.get("smart_money_bias", 0))
-    pcrb = _v201_signed(g.get("pcr_bias", 0))
-    news_score_local = float(risk.get("news_risk", 0) or 0)
-    vix_val = float(market.get("india_vix", g.get("vix", 0)) or 0)
-    # VIX/news reduce confidence; direction comes from PA + OI + HW + FII/DII.
-    raw = (pa * 0.30) + (ob * 0.25) + (hw * 0.15) + (sm * 0.08) + (pcrb * 0.03)
-    risk_penalty = max(0.0, news_score_local - 45.0) * 0.08 + max(0.0, vix_val - 16.0) * 0.8
-    raw = max(-100.0, min(100.0, raw))
-    bullish = int(round(max(0, min(100, 50 + raw / 2 - risk_penalty / 2))))
-    bearish = int(round(max(0, min(100, 100 - bullish))))
-    direction = "UP" if bullish > bearish else "DOWN" if bearish > bullish else "RANGE"
-    probability = max(bullish, bearish)
-    return {"raw": raw, "bullish": bullish, "bearish": bearish, "direction": direction, "probability": probability}
-
-
-def _v201_change_line(proj):
-    current = int(proj.get("probability", 50) or 50)
-    direction = str(proj.get("direction", "RANGE"))
-    key = "v201_last_projection_prob"
-    prev = st.session_state.get(key, None)
-    st.session_state[key] = current
-    if prev is None:
-        return "First snapshot — next refresh se change compare hoga."
-    delta = current - int(prev)
-    if abs(delta) < 3:
-        return "No major change vs last refresh."
-    side = "Bullish" if direction == "UP" else "Bearish" if direction == "DOWN" else "Range"
-    word = "increased" if delta > 0 else "reduced"
-    return f"{side} pressure {abs(delta)}% {word} vs last refresh."
-
-
-def _v201_top_factors(limit=3):
-    factors = []
-    try:
-        g = globals()
-        ms = g.get("market_snapshot", {}) if isinstance(g.get("market_snapshot", {}), dict) else {}
-        sig = ms.get("signals", {}) if isinstance(ms.get("signals", {}), dict) else {}
-        data = [
-            ("Price Action", _v201_signed(sig.get("price_action_bias", g.get("price_action_bias", 0)))),
-            ("Option Chain/OI", _v201_signed(sig.get("option_bias", g.get("option_bias", 0)))),
-            ("Heavyweights", _v201_signed(sig.get("heavyweight_bias", g.get("heavy_bias", 0)))),
-            ("FII/DII", _v201_signed(g.get("smart_money_bias", 0))),
-            ("PCR", _v201_signed(g.get("pcr_bias", 0))),
-        ]
-        data.sort(key=lambda x: abs(x[1]), reverse=True)
-        for name, val in data[:limit]:
-            if val > 15:
-                factors.append(f"{name} supportive")
-            elif val < -15:
-                factors.append(f"{name} weak")
-            else:
-                factors.append(f"{name} neutral")
-    except Exception:
-        pass
-    return factors[:limit] or ["Mixed signals", "Wait for confirmation"]
-
-
-def _v204_single_brain_sync():
-    """One visible source-of-truth for the first four V20 tables.
-
-    V20.5 rule: all first four tables display the same snapshot_id and data
-    flow monitor. If one section cannot read this snapshot, show warning.
-    """
-    g = globals()
-    ms = g.get("market_snapshot", {}) if isinstance(g.get("market_snapshot", {}), dict) else {}
-    de = g.get("decision_engine_report", {}) if isinstance(g.get("decision_engine_report", {}), dict) else {}
-    sh = g.get("snapshot_health_external", {}) if isinstance(g.get("snapshot_health_external", {}), dict) else {}
-    flow = g.get("v205_data_flow", {}) if isinstance(g.get("v205_data_flow", {}), dict) else (ms.get("data_flow_monitor", {}) if isinstance(ms.get("data_flow_monitor", {}), dict) else {})
-    tick = str(ms.get("snapshot_id", "")) or str(flow.get("snapshot_id", "")) or fmt_time()
-    stale_reasons = []
-    if sh and str(sh.get("label", "")).upper() in ("WEAK", "UNRELIABLE"):
-        stale_reasons.append("Snapshot health " + str(sh.get("label")))
-    if flow and not flow.get("fresh", False):
-        stale_reasons.extend(flow.get("issues", []) or flow.get("warnings", []) or ["Data Flow caution"])
-    if not de:
-        stale_reasons.append("Decision report missing")
-    return {
-        "tick": tick,
-        "short_id": flow.get("short_id", tick[-6:] if tick else "NA"),
-        "time": flow.get("oc_time") or fmt_time(),
-        "final_action": de.get("final_action", "WAIT"),
-        "execution_status": de.get("execution_status", "WAIT"),
-        "confidence": de.get("calibrated_confidence", 0),
-        "snapshot_health": sh.get("label", "NA") if sh else flow.get("snapshot_health", "NA"),
-        "snapshot_score": sh.get("score", "NA") if sh else "NA",
-        "oc_rows": int(flow.get("oc_rows", 0) or 0),
-        "fresh": not stale_reasons,
-        "data_flow_status": flow.get("status", "NA"),
-        "data_flow_line": flow.get("line", "Data Flow: NA"),
-        "oi_sync": flow.get("oi_sync", "NA"),
-        "oi_source": flow.get("oi_source", "NA"),
-        "stale_reasons": list(dict.fromkeys([str(x) for x in stale_reasons if x]))[:4],
-    }
-
-
-def _v201_candidate_rows():
-    rows = []
-    try:
-        ce_row = globals().get("best_ce", None)
-        pe_row = globals().get("best_pe", None)
-        oc_time = ""
-        try:
-            oc_time = str((globals().get("option_analysis", {}) or {}).get("fetched_at", "") or (globals().get("option_chain", {}) or {}).get("fetched_at", ""))
-        except Exception:
-            oc_time = ""
-        for label, side, row in [("Best CE", "CE", ce_row), ("Best PE", "PE", pe_row)]:
-            if not row:
-                continue
-            prefix = side.lower()
-            strike = int(row.get("strike", 0) or 0)
-            # Always re-resolve the row from current option_analysis before displaying price.
-            current_row = _v203_current_option_row(globals().get("option_analysis", {}), strike) or row
-            ltp = float(current_row.get(f"{prefix}_ltp", row.get(f"{prefix}_ltp", 0)) or 0)
-            plan = v12_sl_target_for_seller(ltp, globals().get("confidence", 0), globals().get("gamma_score_v7", 0), globals().get("shock_score_v7", 0)) if ltp else {}
-            hedge_strike = v12_select_hedge_strike(strike, side, globals().get("hedge_gap", 100)) if strike else 0
-            note = str(row.get("candidate_freshness", "fresh") or "fresh")
-            rows.append({
-                "Candidate": label,
-                "Strike": f"{strike} {side}" if strike else "-",
-                "Entry": round(ltp, 2),
-                "SL": round(float(plan.get("sl", 0) or 0), 2),
-                "Target": round(float(plan.get("target1", 0) or 0), 2),
-                "Hedge": f"{hedge_strike} {side}" if hedge_strike else "-",
-                "OC Time": oc_time or fmt_time(),
-                "Fresh": "🔒 Stable" if "stable-lock" in note else "✅ Fresh",
-            })
-    except Exception:
-        pass
-    return rows
-
 # =========================================================
 # UI
 # =========================================================
@@ -5377,43 +4947,69 @@ st.markdown("<div class='main-title'>🧠 Nifty Seller AI Dashboard V20 Clean Ed
 
 
 # =========================================================
-# V20.1 CLEAN TOP CONTROL — floating manual refresh + compact status
+# V20 CLEAN TOP CONTROL
 # =========================================================
-st.markdown("<a class='floating-refresh' href='?manual_refresh=1'>🔄 Refresh</a>", unsafe_allow_html=True)
+try:
+    st.markdown("### 🔄 Live Refresh + Status")
+    if st.button("🔄 Refresh Live Data Now", key="v20_main_top_refresh", use_container_width=True):
+        st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
+        st.rerun()
+    _v20_health = _v1916_build_health_snapshot()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Data", _v20_health.get("freshness", "NA"))
+    c2.metric("Engines", f"{_v20_health.get('engines_ready',0)}/{_v20_health.get('engines_total',0)}")
+    c3.metric("OC Rows", _v20_health.get("option_rows", 0))
+    c4.metric("Last", _v20_health.get("last_refresh", "NA"))
+except Exception as _v20_status_err:
+    st.caption("Top status unavailable: " + str(_v20_status_err))
+
+
+# V20 CLEAN: old V18/V19 debug decision bundle removed from normal UI.
+# Engines still run; only noisy repeated UI is removed.
+try:
+    _v20_rr = _v20_risk_summary()
+    if _v20_rr:
+        st.markdown("### 🛡️ Risk Summary")
+        r1, r2, r3 = st.columns(3)
+        r1.metric("Safety", f"{_v20_rr.get('safety_score', 100 - int(_v20_rr.get('risk_score',0) or 0))}/100")
+        r2.metric("Risk Grade", _v20_rr.get("risk_grade", "NA"))
+        r3.metric("Guidance", _v20_rr.get("guidance", "NA"))
+except Exception:
+    pass
 
 try:
-    _v20_health = _v1916_build_health_snapshot()
-    _v20_rr = _v20_risk_summary()
-    _safety_score = _v20_rr.get('safety_score', 100 - int(_v20_rr.get('risk_score', 0) or 0)) if _v20_rr else 'NA'
-    st.markdown(
-        f"<div class='v201-top-status'>"
-        f"🟢 {_v20_health.get('freshness','NA')} | "
-        f"⚙️ Engines {_v20_health.get('engines_ready',0)}/{_v20_health.get('engines_total',0)} | "
-        f"📊 OC {_v20_health.get('option_rows',0)} | "
-        f"🛡️ Risk {_safety_score}/100 | "
-        f"🕒 Last {_v20_health.get('last_refresh','NA')}"
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-except Exception as _v20_status_err:
-    st.caption("Compact status unavailable: " + str(_v20_status_err))
-
-# Engines still run in background; noisy repeated UI is removed from normal screen.
-if developer_mode:
-    try:
-        _v20_oi = _v20_oi_report()
-        if _v20_oi:
-            with st.expander("Developer: OI Flow Engine details", expanded=False):
-                st.write(_v20_oi)
-    except Exception:
-        pass
+    _v20_oi = _v20_oi_report()
+    if _v20_oi:
+        with st.expander("📊 OI Flow Engine — Writing / Unwinding / Migration", expanded=False):
+            o1, o2, o3, o4 = st.columns(4)
+            o1.metric("OI Bias", _v20_oi.get("bias", "NA"))
+            o2.metric("Flow Confidence", f"{_v20_oi.get('confidence',0)}/100")
+            o3.metric("Support", f"{_v20_oi.get('support_strength',0)}/100")
+            o4.metric("Resistance", f"{_v20_oi.get('resistance_strength',0)}/100")
+            st.info(_v20_oi.get("summary", "No OI flow summary."))
+except Exception:
+    pass
 
 st.markdown(
     "<div class='sub-title'>Smart Seller Terminal: Snapshot Authority + AI Brain + Risk + Decision Engine</div>",
     unsafe_allow_html=True,
 )
 
-# V20.1 compact market movement state used by AI Final Authority.
+r1, r2, r3, r4, r5 = st.columns(5)
+_price_arrow, _price_cls, _price_delta = v13_trend("nifty_price", price, 2)
+_vix_arrow, _vix_cls, _vix_delta = v13_trend("vix", vix, 2)
+_hw_arrow, _hw_cls, _hw_delta = v13_trend("heavy_bias", heavy_bias, 2)
+r1.markdown(f"<div class='ribbon'>{market_text}<br><span class='{_price_cls}'>Nifty {_price_arrow} {_price_delta}</span></div>", unsafe_allow_html=True)
+r2.markdown(f"<div class='ribbon'>Data: {source_text}</div>", unsafe_allow_html=True)
+r3.markdown(f"<div class='ribbon'>News {news['label']} {news['score']}/100<br><span class='{_vix_cls}'>VIX {_vix_arrow} {_vix_delta}</span></div>", unsafe_allow_html=True)
+r4.markdown(f"<div class='ribbon'>HW: {bias_label(heavy_bias)}<br><span class='{_hw_cls}'>{_hw_arrow} {_hw_delta}</span></div>", unsafe_allow_html=True)
+r5.markdown(f"<div class='ribbon'>PCR: {pcr:.2f}</div>", unsafe_allow_html=True)
+r6, r7, r8 = st.columns(3)
+r6.markdown(f"<div class='ribbon'>Mode: {market_mode}</div>", unsafe_allow_html=True)
+r7.markdown(f"<div class='ribbon'>Shock: {shock_score_v7}/100</div>", unsafe_allow_html=True)
+r8.markdown(f"<div class='ribbon'>Discipline: {discipline_score}/100</div>", unsafe_allow_html=True)
+
+# V17 Health Monitor: compact trading status. Details go to Developer Mode.
 _oc_age_note = "Live" if option_chain.get("success") else "Not Live"
 _pa_status = "Live" if price_action_result.get("success") else "Manual"
 _pos_status = "Saved" if ACTIVE_POSITION_STORE.exists() else "Not saved"
@@ -5421,30 +5017,38 @@ _mg = locals().get("v164_move_guard", {}) or {}
 _mg_label = str(_mg.get("label", "NORMAL") or "NORMAL")
 _mg_move = float(_mg.get("move_points", 0) or 0)
 _mg_daily = float(_mg.get("daily_pct", 0) or 0)
-
+if _mg_label == "FAST FALL":
+    _mcls, _memoji, _marrow = "v17-red", "🔴", "↘↘↓"
+elif _mg_label == "FAST RISE":
+    _mcls, _memoji, _marrow = "v17-green", "🟢", "↗↗↑"
+elif _mg_label not in ("NA", "NORMAL"):
+    _mcls, _memoji, _marrow = "v17-yellow", "🟡", "↕"
+else:
+    _mcls, _memoji, _marrow = "v17-grey", "⚪", "→"
 st.markdown(
-    f"<div class='v201-top-status'>"
-    f"📍 {market_text} | 📡 {source_text} | 🌪️ VIX {vix:.2f} | 📊 PCR {pcr:.2f} | "
-    f"📰 News {news['label']} {news['score']}/100 | ⚡ {_mg_label} {_mg_move:+.1f} pts"
-    f"</div>",
+    f"""
+<div class='v17-strip {_mcls}'>
+{_memoji} <b>MARKET:</b> {_mg_label} &nbsp; | &nbsp; <b>Direction:</b> {_marrow} &nbsp; | &nbsp;
+<b>Last:</b> {_mg_move:+.1f} pts &nbsp; | &nbsp; <b>Today:</b> {_mg_daily:+.2f}%
+</div>
+""",
     unsafe_allow_html=True,
 )
-try:
-    _flow_line_v205 = (v205_data_flow or {}).get("line", "") if isinstance(v205_data_flow, dict) else ""
-    if _flow_line_v205:
-        st.caption("📡 " + _flow_line_v205)
-except Exception:
-    pass
-
-if developer_mode:
-    with st.expander("Developer: Live Health Monitor", expanded=False):
-        h1, h2, h3, h4, h5 = st.columns(5)
-        h1.metric("Dhan API", "🟢 Ready" if dhan_ready else "🔴 Missing")
-        h2.metric("Option Chain", "🟢 " + _oc_age_note if option_chain.get("success") else "🔴 " + _oc_age_note)
-        h3.metric("Price Action", "🟢 " + _pa_status if price_action_result.get("success") else "🟡 " + _pa_status)
-        h4.metric("Position Save", _pos_status)
-        h5.metric("Last Refresh", fmt_time())
+with st.expander("🩺 Live Health Monitor", expanded=False):
+    h1, h2, h3, h4, h5 = st.columns(5)
+    h1.metric("Dhan API", "🟢 Ready" if dhan_ready else "🔴 Missing")
+    h2.metric("Option Chain", "🟢 " + _oc_age_note if option_chain.get("success") else "🔴 " + _oc_age_note)
+    h3.metric("Price Action", "🟢 " + _pa_status if price_action_result.get("success") else "🟡 " + _pa_status)
+    h4.metric("Position Save", _pos_status)
+    h5.metric("Last Refresh", fmt_time())
+    if developer_mode:
         st.caption(f"Market Move Guard: {_mg_label} | Refresh move: {_mg_move} pts | Daily: {_mg_daily}% | Score: {_mg.get('score',0)}/100")
+        if option_chain.get("success"):
+            st.caption(f"OC fetched: {option_chain.get('fetched_at', 'NA')} | Expiry: {option_chain.get('expiry', selected_expiry)} | ATM: {option_chain.get('atm_strike', 'NA')}")
+        if price_action_result.get("success"):
+            st.caption(f"Price Action fetched: {price_action_result.get('fetched_at', 'NA')} | Source: {price_action_source}")
+        else:
+            st.caption(f"Price Action auto not live: {price_action_result.get('message', 'Manual fallback')}")
 
 if "INVALID/EXPIRED" in source_text:
     st.error("Dhan Access Token invalid/expired hai. DhanHQ se naya token generate karke Streamlit Secrets me DHAN_ACCESS_TOKEN update karo.")
@@ -5485,49 +5089,27 @@ _signal_gate_v162 = {
     )[:16],
 }
 
-try:
-    _v204_brain_sync = _v204_single_brain_sync()
-except Exception:
-    _v204_brain_sync = {"tick": fmt_time(), "time": fmt_time(), "fresh": False, "stale_reasons": ["Brain sync unavailable"], "snapshot_health": "NA", "snapshot_score": "NA"}
-
-st.markdown("### 🧠 AI FINAL AUTHORITY")
-_status_class = "green" if _de_status_v197 == "APPROVED" and _de_final_v197 == "SELL PE" else ("red" if _de_status_v197 == "APPROVED" and _de_final_v197 == "SELL CE" else ("red" if _de_status_v197 == "BLOCKED" else ""))
+st.markdown("### ⚖️ Final AI Decision")
+_status_class = "green" if _de_status_v197 == "APPROVED" else ("red" if _de_status_v197 == "BLOCKED" else "")
 _status_text = {
     "APPROVED": "ENTRY APPROVED ✅",
     "BLOCKED": "ENTRY BLOCKED / WAIT ⚠️",
     "PREVIEW_ONLY": "MARKET CLOSED — PLAN PREVIEW 🔒",
     "WAIT": "WAIT — NO FRESH TRADE",
 }.get(_de_status_v197, "WAIT — NO FRESH TRADE")
-_proj_v201 = _v201_projection()
-_change_v201 = _v201_change_line(_proj_v201)
-_factor_list_v201 = _v201_top_factors(3)
-_reason_list_v20 = _v20_compact_reasons(_de_gate_v197, _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable."), limit=2)
-_combined_reasons_v201 = list(dict.fromkeys([str(x) for x in (_factor_list_v201 + _reason_list_v20) if x]))[:3]
-_reason_html_v20 = "<br>".join(["• " + str(x) for x in _combined_reasons_v201]) if _combined_reasons_v201 else "• Mixed signals — wait for confirmation."
-_action_line_v201 = "No fresh trade. Wait for stronger confirmation."
-if _de_final_v197 in ("SELL CE", "SELL PE", "IRON CONDOR") and selected_strike != "No Strike":
-    _action_line_v201 = f"{_de_final_v197}: {selected_strike} | Hedge: {hedge} | Confidence {int(_de_gate_v197.get('calibrated_confidence',0) or 0)}%"
-_news_line_v201 = f"News Risk: {news['label']} ({news['score']}/100)"
-
+_reason_list_v20 = _v20_compact_reasons(_de_gate_v197, _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable."), limit=4)
+_reason_html_v20 = "<br>".join(["• " + str(x) for x in _reason_list_v20]) if _reason_list_v20 else "• No fresh trade reason available."
 st.markdown(f"""
-<div class='v201-ai-card {_status_class}'>
-<h2>{_status_text} — {_de_final_v197}</h2>
+<div class='v17-final {_status_class}'>
+<h2>{_status_text}</h2>
+<b>Verdict:</b> {_de_final_v197} &nbsp; | &nbsp;
 <b>Confidence:</b> {_de_gate_v197.get('calibrated_confidence',0)}% &nbsp; | &nbsp;
-<b>Market Outlook:</b> {_proj_v201.get('direction')} {_proj_v201.get('probability')}%
-<span style='opacity:.72'>(Bull {_proj_v201.get('bullish')}% / Bear {_proj_v201.get('bearish')}%)</span><br>
-<b>Change:</b> {_change_v201}<br>
-<b>Action:</b> {_action_line_v201}<br>
-<b>{_news_line_v201}</b> &nbsp; | &nbsp; <b>Last:</b> {_v204_brain_sync.get('time', fmt_time())}<br>
-<b>Brain Sync:</b> SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | OI {_v204_brain_sync.get('oi_sync','NA')} | {_v204_brain_sync.get('snapshot_health','NA')} {_v204_brain_sync.get('snapshot_score','NA')}/100 | OC {_v204_brain_sync.get('oc_rows',0)} rows
-<div class='v201-reason'><b>Why:</b><br>{_reason_html_v20}</div>
+<b>Seller Risk:</b> {seller_risk:.0f}%<br>
+<b>Market:</b> {_mg_label} ({_mg_move:+.1f} pts / {_mg_daily:+.2f}%)<br><br>
+<b>Reason:</b><br>{_reason_html_v20}
 </div>
 """, unsafe_allow_html=True)
 
-try:
-    if not _v204_brain_sync.get("fresh", True):
-        st.warning("⚠️ Brain Sync caution: " + " | ".join(_v204_brain_sync.get("stale_reasons", []) or ["Data freshness check failed"]))
-except Exception:
-    pass
 
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 📶 Signal Reliability Table")
@@ -5535,7 +5117,7 @@ try:
     _v20_rel_rows = _v20_signal_reliability_rows()
     if _v20_rel_rows:
         st.dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
-        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot for top tables. Ye table batata hai kaunse signals trade ko support/oppose kar rahe hain.")
+        st.caption("Ye table batata hai kaunse signals trade ko support/oppose kar rahe hain.")
     else:
         st.info("Signal reliability rows abhi available nahi hain.")
 except Exception as _v20_sig_err:
@@ -5614,54 +5196,11 @@ _strategy_rows_v163 = [
     {"Strategy":"BUY CALL (Hedged)","Rank Score":_v163_rank_score("BUY CALL (Hedged)"),"Sell CE":_buy_call["Buy Strike"],"Buy CE Hedge":_buy_call["Hedge"],"Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":_buy_call["Entry"],"SL":_buy_call["SL"],"Target":_buy_call["Target"],"Entry Status":"Only strong trend"},
     {"Strategy":"WAIT","Rank Score":_v163_rank_score("WAIT"),"Sell CE":"-","Buy CE Hedge":"-","Sell PE":"-","Buy PE Hedge":"-","Entry/Credit":0,"SL":"No trade","Target":"No trade","Entry Status":"Capital safe"},
 ]
-
-# V20.2: Strategy Matrix Stability Lock
-# Ranking score can change by 2-8 points on every live refresh. Do not let the top
-# strategy flip between IRON CONDOR / SELL CE / SELL PE unless the new leader is
-# clearly stronger or the market has materially changed.
-def _v202_stable_strategy_rows(rows):
-    try:
-        rows = sorted(list(rows or []), key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
-        if not rows:
-            return rows
-        current_top = str(rows[0].get("Strategy", "WAIT"))
-        current_score = int(rows[0].get("Rank Score", 0) or 0)
-        prev = st.session_state.get("v202_strategy_rank_lock", {})
-        material = 0
-        try:
-            material = int((snapshot_delta or {}).get("material_change", 0) or 0)
-        except Exception:
-            material = 0
-
-        if prev and current_top != str(prev.get("strategy", "")):
-            prev_strategy = str(prev.get("strategy", ""))
-            prev_row = next((r for r in rows if str(r.get("Strategy", "")) == prev_strategy), None)
-            prev_score_now = int((prev_row or {}).get("Rank Score", 0) or 0)
-            score_gap = current_score - prev_score_now
-
-            # Lock previous leader when gap is small and material change is weak.
-            if prev_row and score_gap < 10 and material < 65:
-                prev_row = dict(prev_row)
-                prev_row["Entry Status"] = "🔒 Stable / Wait confirm"
-                rows = [prev_row] + [r for r in rows if str(r.get("Strategy", "")) != prev_strategy]
-                return rows
-
-        st.session_state["v202_strategy_rank_lock"] = {
-            "strategy": current_top,
-            "score": current_score,
-            "material_change": material,
-            "time": fmt_time(),
-        }
-        return rows
-    except Exception:
-        return sorted(list(rows or []), key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
-
-_strategy_rows_v163 = _v202_stable_strategy_rows(_strategy_rows_v163)
+_strategy_rows_v163 = sorted(_strategy_rows_v163, key=lambda x: int(x.get("Rank Score", 0) or 0), reverse=True)
 st.dataframe(pd.DataFrame(_strategy_rows_v163), width="stretch", hide_index=True)
 st.caption(
-    f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | "
     "Rank Score sirf strategy ordering hai; trade approval aur Decision Confidence "
-    "sirf Decision Engine + Stability Lock se aate hain."
+    "sirf Decision Engine se aate hain."
 )
 _best_row_v163 = _strategy_rows_v163[0] if _strategy_rows_v163 else {"Strategy": "WAIT", "Rank Score": 0}
 st.markdown(
@@ -5718,17 +5257,16 @@ if developer_mode:
 # V13: put the most actionable parts near the top for mobile trading.
 # V16.3: Strategy setup moved near top as Smart Strategy Matrix.
 
-st.markdown("### 📋 Live Best Candidates")
-try:
-    _cand_rows_v201 = _v201_candidate_rows()
-    if _cand_rows_v201:
-        st.dataframe(pd.DataFrame(_cand_rows_v201), width="stretch", hide_index=True)
-        st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Best CE/PE latest option-chain row se price update karta hai. Strike small gap par stable-lock ho sakti hai, par price old nahi hota.")
+with st.expander("⚡ Live Candidate Cards — Price + SL + Target", expanded=True):
+    if option_analysis.get("success"):
+        ctop1, ctop2 = st.columns(2)
+        with ctop1:
+            v13_candidate_card("🔴 Best CE Candidate", "CE", best_ce, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
+        with ctop2:
+            v13_candidate_card("🟢 Best PE Candidate", "PE", best_pe, final_trade, hedge_gap, confidence, gamma_score_v7, shock_score_v7)
+        st.caption("Candidate reference hai. Entry sirf Super Final Decision green hone par.")
     else:
-        st.info("Best candidates ke liye live option-chain active hona zaroori hai.")
-except Exception as _cand_err_v201:
-    st.caption("Live Best Candidates unavailable: " + str(_cand_err_v201))
-
+        st.info("Live candidate cards ke liye Dhan option-chain active hona zaroori hai.")
 
 
 with st.expander("💼 Active Positions + Add Position", expanded=False):
@@ -5924,9 +5462,21 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
 
         st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
-        # V20.1: Candidate Verdict duplicate UI removed.
-        if developer_mode:
-            st.caption("Developer note: old Candidate Verdict removed from main UI; candidate safety is merged into AI Final Authority + Live Best Candidates.")
+        # V10 candidate safety verdicts
+        try:
+            ce_verdict = v10_candidate_verdict("CE", best_ce["strike"], best_ce.get("ce_sell_score", 0), best_ce.get("ce_signal", ""), best_ce.get("ce_delta", 0), best_ce.get("ce_iv", 0), best_ce.get("ce_spread_pct", 0), final_trade, conflict_mode) if best_ce else None
+            pe_verdict = v10_candidate_verdict("PE", best_pe["strike"], best_pe.get("pe_sell_score", 0), best_pe.get("pe_signal", ""), best_pe.get("pe_delta", 0), best_pe.get("pe_iv", 0), best_pe.get("pe_spread_pct", 0), final_trade, conflict_mode) if best_pe else None
+            st.markdown("### 🧾 Candidate Verdict")
+            if ce_verdict:
+                st.write("🔴", ce_verdict["verdict"])
+                for rr in ce_verdict["reasons"]:
+                    st.caption("CE: " + rr)
+            if pe_verdict:
+                st.write("🟢", pe_verdict["verdict"])
+                for rr in pe_verdict["reasons"]:
+                    st.caption("PE: " + rr)
+        except Exception as _e:
+            st.caption("V10 candidate verdict unavailable for this snapshot.")
 
         st.caption("OI+price labels are conventional inferences. Every option trade has both buyer and seller; OI alone does not prove who initiated the trade.")
         st.caption("Snapshot OI acceleration becomes active after at least two fresh Dhan snapshots. Press Refresh after 4+ seconds to compare snapshots.")
@@ -5977,30 +5527,29 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False
         st.warning(heavy_analysis.get("message", "Heavyweight data unavailable."))
 
 
-if developer_mode:
-    with st.expander("🚨 Automatic Market News Risk Indicator", expanded=False):
-        n1, n2, n3, n4 = st.columns(4)
-        n1.metric("Final News Risk", f"{news['score']}/100", news["label"])
-        n2.metric("Scheduled Event", f"{news['scheduled']}/100", "AUTO" if news["auto_calendar"] else "Manual fallback")
-        n3.metric("Breaking News", f"{news['breaking']}/100", "AUTO" if news["auto_news"] else "Fallback")
-        n4.metric("Market Reaction", f"{news['reaction']}/100")
-    
-        if news["label"] == "CRITICAL":
-            st.error("⚫ CRITICAL: fresh option selling block. Event/news + market reaction risk high.")
-        elif news["label"] == "HIGH":
-            st.warning("🔴 HIGH: fresh selling reduce/avoid; hedge mandatory.")
-        elif news["label"] == "MEDIUM":
-            st.info("🟡 MEDIUM: smaller quantity and strict monitoring.")
-        else:
-            st.success("🟢 LOW: no major risk detected by available sources, but market risk remains.")
-    
-        if te_result.get("success"):
-            st.caption(f"Calendar engine active | relevant high/medium events: {te_result.get('events', 0)}")
-        if alpha_result.get("success"):
-            st.caption(f"News-sentiment engine active | recent items scanned: {alpha_result.get('items', 0)}")
-        if not news["auto_calendar"] or not news["auto_news"]:
-            st.caption("Automatic APIs are optional. Until keys are added, manual fallback + live market reaction still drive the indicator.")
-    
+with st.expander("🚨 Automatic Market News Risk Indicator", expanded=False):
+    n1, n2, n3, n4 = st.columns(4)
+    n1.metric("Final News Risk", f"{news['score']}/100", news["label"])
+    n2.metric("Scheduled Event", f"{news['scheduled']}/100", "AUTO" if news["auto_calendar"] else "Manual fallback")
+    n3.metric("Breaking News", f"{news['breaking']}/100", "AUTO" if news["auto_news"] else "Fallback")
+    n4.metric("Market Reaction", f"{news['reaction']}/100")
+
+    if news["label"] == "CRITICAL":
+        st.error("⚫ CRITICAL: fresh option selling block. Event/news + market reaction risk high.")
+    elif news["label"] == "HIGH":
+        st.warning("🔴 HIGH: fresh selling reduce/avoid; hedge mandatory.")
+    elif news["label"] == "MEDIUM":
+        st.info("🟡 MEDIUM: smaller quantity and strict monitoring.")
+    else:
+        st.success("🟢 LOW: no major risk detected by available sources, but market risk remains.")
+
+    if te_result.get("success"):
+        st.caption(f"Calendar engine active | relevant high/medium events: {te_result.get('events', 0)}")
+    if alpha_result.get("success"):
+        st.caption(f"News-sentiment engine active | recent items scanned: {alpha_result.get('items', 0)}")
+    if not news["auto_calendar"] or not news["auto_news"]:
+        st.caption("Automatic APIs are optional. Until keys are added, manual fallback + live market reaction still drive the indicator.")
+
 
 with st.expander("🏛️ FII / DII Smart Money", expanded=False):
     try:
