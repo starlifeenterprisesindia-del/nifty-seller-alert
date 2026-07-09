@@ -2355,8 +2355,8 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V22.1 AI_MASTER")
-st.sidebar.caption("V22.1: One Brain / AI_MASTER Routing")
+st.sidebar.title("⚙️ V22.2 AI_MASTER")
+st.sidebar.caption("V22.2: One Brain Authority Lock")
 
 # V21.6: duplicate Quick Refresh block removed. Use single Refresh Control below.
 
@@ -4933,6 +4933,122 @@ def _v221_candidate_rows(master):
         })
     return out
 
+
+# =========================================================
+# V22.2 CANDIDATE + STRATEGY AUTHORITY LOCK
+# =========================================================
+# Professional order: Market/Decision -> Strategy -> Candidate -> Strike.
+# Best CE/PE rows from old option-chain scoring remain ONLY raw evidence.
+# The first four UI matrices must display only AI_MASTER-approved plans.
+def _v222_parse_side_from_plan(strategy_obj):
+    strategy_obj = strategy_obj if isinstance(strategy_obj, dict) else {}
+    side = str(strategy_obj.get("side", "") or "").upper()
+    if side in ("CE", "PE"):
+        return side
+    text = (str(strategy_obj.get("sell_strike", "")) + " " + str(strategy_obj.get("action", ""))).upper()
+    if "CE" in text or "SELL CE" in text:
+        return "CE"
+    if "PE" in text or "SELL PE" in text:
+        return "PE"
+    return ""
+
+
+def _v222_money_to_num(value, default=0.0):
+    return _v221_num(value, default)
+
+
+def _v222_plan_from_strategy_report(strategy_obj, action, side):
+    """Build the display plan from the approved strategy report.
+
+    This avoids Candidate Matrix reading old `best_ce` / `best_pe` directly.
+    If Strategy Engine has no valid sell strike, return a locked/no-trade plan.
+    """
+    strategy_obj = strategy_obj if isinstance(strategy_obj, dict) else {}
+    action = str(action or "WAIT").upper()
+    side = str(side or "").upper()
+    if action not in ("SELL CE", "SELL PE", "IRON CONDOR") or side not in ("CE", "PE"):
+        return {"strike": "-", "hedge": "-", "entry": 0.0, "sl": 0.0, "target": 0.0, "target2": 0.0, "source": "AI_MASTER_LOCKED"}
+
+    sell = strategy_obj.get("sell_strike", "No Strike")
+    hedge_value = strategy_obj.get("hedge_strike", "No Hedge")
+    entry = _v222_money_to_num(strategy_obj.get("entry_value", strategy_obj.get("entry", 0)), 0.0)
+    sl = _v222_money_to_num(strategy_obj.get("sl_value", strategy_obj.get("sl", 0)), 0.0)
+    target = _v222_money_to_num(strategy_obj.get("target_value", strategy_obj.get("target", 0)), 0.0)
+    target2 = _v222_money_to_num(strategy_obj.get("target2_value", strategy_obj.get("target2", 0)), 0.0)
+
+    # Normalize label side if Strategy Engine stores numeric strings.
+    sell_num = _v221_int(sell, 0)
+    hedge_num = _v221_int(hedge_value, 0)
+    sell_label = f"{sell_num} {side}" if sell_num else str(sell or "-")
+    hedge_label = f"{hedge_num} {side}" if hedge_num else str(hedge_value or "-")
+
+    if sell_label in ("No Strike", "", "0") or entry <= 0:
+        return {"strike": "-", "hedge": "-", "entry": 0.0, "sl": 0.0, "target": 0.0, "target2": 0.0, "source": "AI_MASTER_NO_APPROVED_CANDIDATE"}
+    return {"strike": sell_label, "hedge": hedge_label, "entry": round(entry, 2), "sl": round(sl, 2), "target": round(target, 2), "target2": round(target2, 2), "source": "AI_MASTER_STRATEGY_AUTHORITY"}
+
+
+def _v222_authority_plans(action, strategy_obj, confidence_value):
+    """Return CE/PE plans that obey AI_MASTER action.
+
+    SELL CE: only CE plan active.
+    SELL PE: only PE plan active.
+    IRON CONDOR: both sides allowed, using current live option rows as raw evidence
+    only because the current strategy engine is directional-only.
+    WAIT/BLOCKED: both locked.
+    """
+    action = str(action or "WAIT").upper()
+    strategy_obj = strategy_obj if isinstance(strategy_obj, dict) else {}
+    active_side = _v222_parse_side_from_plan(strategy_obj)
+    locked = {"strike": "-", "hedge": "-", "entry": 0.0, "sl": 0.0, "target": 0.0, "target2": 0.0, "source": "AI_MASTER_LOCKED"}
+    ce_plan = dict(locked)
+    pe_plan = dict(locked)
+
+    if action == "SELL CE":
+        ce_plan = _v222_plan_from_strategy_report(strategy_obj, action, "CE" if active_side != "PE" else active_side)
+        if "CE" not in str(ce_plan.get("strike", "")).upper():
+            ce_plan = _v221_side_plan("CE", best_ce if isinstance(best_ce, dict) else {}, confidence_value)
+            ce_plan["source"] = "AI_MASTER_APPROVED_LIVE_EVIDENCE"
+    elif action == "SELL PE":
+        pe_plan = _v222_plan_from_strategy_report(strategy_obj, action, "PE" if active_side != "CE" else active_side)
+        if "PE" not in str(pe_plan.get("strike", "")).upper():
+            pe_plan = _v221_side_plan("PE", best_pe if isinstance(best_pe, dict) else {}, confidence_value)
+            pe_plan["source"] = "AI_MASTER_APPROVED_LIVE_EVIDENCE"
+    elif action == "IRON CONDOR":
+        # Iron Condor requires both live sides; still one AI_MASTER-approved strategy.
+        ce_plan = _v221_side_plan("CE", best_ce if isinstance(best_ce, dict) else {}, confidence_value); ce_plan["source"] = "AI_MASTER_IRON_CONDOR_APPROVED"
+        pe_plan = _v221_side_plan("PE", best_pe if isinstance(best_pe, dict) else {}, confidence_value); pe_plan["source"] = "AI_MASTER_IRON_CONDOR_APPROVED"
+    return ce_plan, pe_plan
+
+
+def _v222_candidate_rows(master):
+    out = []
+    action = str(master.get("final_action", "WAIT") or "WAIT").upper()
+    status = str(master.get("execution_status", "WAIT") or "WAIT").upper()
+    oc_time = ""
+    try:
+        oc_time = str((option_analysis or {}).get("fetched_at", "") or (option_chain or {}).get("fetched_at", ""))
+    except Exception:
+        oc_time = ""
+    for label, side, plan in [
+        ("Best CE", "CE", master.get("ce_plan", {})),
+        ("Best PE", "PE", master.get("pe_plan", {})),
+    ]:
+        plan = plan if isinstance(plan, dict) else {}
+        is_active = (action == f"SELL {side}") or (action == "IRON CONDOR")
+        approved = is_active and status in ("APPROVED", "PREVIEW_ONLY") and str(plan.get("strike", "-")) not in ("-", "No Strike", "")
+        out.append({
+            "Candidate": label,
+            "AI Status": "✅ Approved" if approved else "🔒 Locked by AI_MASTER",
+            "Strike": plan.get("strike", "-") if approved else "-",
+            "Entry": plan.get("entry", 0) if approved else 0,
+            "SL": plan.get("sl", 0) if approved else 0,
+            "Target": plan.get("target", 0) if approved else 0,
+            "Hedge": plan.get("hedge", "-") if approved else "-",
+            "OC Time": oc_time or fmt_time(),
+            "Source": plan.get("source", "AI_MASTER"),
+        })
+    return out
+
 try:
     _advisor_v221 = advisor_report if isinstance(advisor_report, dict) else {}
     _snapshot_v221 = market_snapshot if isinstance(market_snapshot, dict) else {}
@@ -4946,12 +5062,13 @@ try:
     _confidence_v221 = _v221_int(_advisor_v221.get("confidence", _decision_v221.get("calibrated_confidence", 0)), 0)
     _strategy_dict_v221 = _advisor_v221.get("strategy", {}) if isinstance(_advisor_v221.get("strategy", {}), dict) else {}
     _projection_v221 = _v221_build_projection(_snapshot_v221)
-    _ce_plan_v221 = _v221_side_plan("CE", best_ce if isinstance(best_ce, dict) else {}, _confidence_v221)
-    _pe_plan_v221 = _v221_side_plan("PE", best_pe if isinstance(best_pe, dict) else {}, _confidence_v221)
+    # V22.2: Candidate Authority Lock. Plans come after AI_MASTER action + Strategy Engine,
+    # not directly from old best_ce/best_pe scoring.
+    _ce_plan_v221, _pe_plan_v221 = _v222_authority_plans(_final_action_v221, _strategy_dict_v221, _confidence_v221)
     _evidence_rows_v221 = _v221_build_evidence_rows(_snapshot_v221, _intelligence_v221)
 
     AI_MASTER = {
-        "version": "V22.1_AI_MASTER_SINGLE_ROUTING",
+        "version": "V22.2_ONE_BRAIN_AUTHORITY_LOCK",
         "created_at": fmt_time(),
         "snapshot_id": _advisor_v221.get("snapshot_id", _snapshot_v221.get("snapshot_id", "SNAP-NA")),
         "short_snapshot_id": _advisor_v221.get("short_snapshot_id", str(_snapshot_v221.get("snapshot_id", "SNAP-NA"))[-8:]),
@@ -4974,7 +5091,7 @@ try:
         "evidence_rows": _evidence_rows_v221,
     }
     AI_MASTER["strategy_rows"] = _v221_strategy_rows(AI_MASTER)
-    AI_MASTER["candidate_rows"] = _v221_candidate_rows(AI_MASTER)
+    AI_MASTER["candidate_rows"] = _v222_candidate_rows(AI_MASTER)
     if isinstance(final_decision, dict):
         final_decision["AI_MASTER"] = AI_MASTER
 except Exception as _v221_master_error:
@@ -5349,7 +5466,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.1 AI_MASTER Routing</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.2 One Brain Authority Lock</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -5479,37 +5596,38 @@ if _advisor_v214:
     _de_status_v197 = str(_advisor_v214.get("execution_status", _de_status_v197) or _de_status_v197).upper()
 
 st.markdown("### 🧠 AI FINAL AUTHORITY")
-_status_class = "green" if _de_status_v197 == "APPROVED" and _de_final_v197 == "SELL PE" else ("red" if _de_status_v197 == "APPROVED" and _de_final_v197 == "SELL CE" else ("red" if _de_status_v197 == "BLOCKED" else ""))
+# V22.2: AI Final Authority is now a pure AI_MASTER display.
+# No globals/compatibility decision values are allowed to create visible advice here.
+_m_v222 = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}
+_final_v222 = str(_m_v222.get("final_action", "WAIT") or "WAIT").upper()
+_status_v222 = str(_m_v222.get("execution_status", "WAIT") or "WAIT").upper()
+_conf_v222 = _v221_int(_m_v222.get("confidence", 0), 0)
+_proj_v222 = _m_v222.get("projection", {}) if isinstance(_m_v222.get("projection", {}), dict) else {"direction":"RANGE","probability":50,"bullish":50,"bearish":50}
+_change_v222 = _v201_change_line(_proj_v222)
+_reasons_v222 = _m_v222.get("reasons", []) if isinstance(_m_v222.get("reasons", []), list) else []
+_reason_html_v222 = "<br>".join(["• " + str(x) for x in _reasons_v222[:3]]) if _reasons_v222 else "• Mixed signals — wait for confirmation."
+_status_class = "green" if _status_v222 == "APPROVED" and _final_v222 == "SELL PE" else ("red" if _status_v222 == "APPROVED" and _final_v222 == "SELL CE" else ("red" if _status_v222 == "BLOCKED" else ""))
 _status_text = {
     "APPROVED": "ENTRY APPROVED ✅",
     "BLOCKED": "ENTRY BLOCKED / WAIT ⚠️",
     "PREVIEW_ONLY": "MARKET CLOSED — PLAN PREVIEW 🔒",
     "WAIT": "WAIT — NO FRESH TRADE",
-}.get(_de_status_v197, "WAIT — NO FRESH TRADE")
-_proj_v201 = _v201_projection()
-_change_v201 = _v201_change_line(_proj_v201)
-_factor_list_v201 = _v201_top_factors(3)
-_reason_list_v20 = _v20_compact_reasons(_de_gate_v197, _de_gate_v197.get("execution_reason", "Decision Engine verdict unavailable."), limit=2)
-_advisor_reasons_v214 = _ai_master_v221.get("reasons", []) if isinstance(_ai_master_v221.get("reasons", []), list) else (_advisor_v214.get("reasons", []) if isinstance(_advisor_v214.get("reasons", []), list) else [])
-_combined_reasons_v201 = list(dict.fromkeys([str(x) for x in (_advisor_reasons_v214 + _factor_list_v201 + _reason_list_v20) if x]))[:3]
-_reason_html_v20 = "<br>".join(["• " + str(x) for x in _combined_reasons_v201]) if _combined_reasons_v201 else "• Mixed signals — wait for confirmation."
-_action_line_v201 = _ai_master_v221.get("advice", _advisor_v214.get("advice", "No fresh trade. Wait for stronger confirmation."))
-if not _advisor_v214 and _de_final_v197 in ("SELL CE", "SELL PE", "IRON CONDOR") and selected_strike != "No Strike":
-    _action_line_v201 = f"{_de_final_v197}: {selected_strike} | Hedge: {hedge} | Confidence {int(_de_gate_v197.get('calibrated_confidence',0) or 0)}%"
-_news_line_v201 = f"News Risk: {news['label']} ({news['score']}/100)"
+}.get(_status_v222, "WAIT — NO FRESH TRADE")
+_action_line_v222 = _m_v222.get("advice", "WAIT — no fresh trade.")
+_news_line_v222 = f"News Risk: {news['label']} ({news['score']}/100)"
 
 st.markdown(f"""
 <div class='v201-ai-card {_status_class}'>
-<h2>{_status_text} — {_de_final_v197}</h2>
-<b>Confidence:</b> {_de_gate_v197.get('calibrated_confidence',0)}% &nbsp; | &nbsp;
-<b>Market Outlook:</b> {_proj_v201.get('direction')} {_proj_v201.get('probability')}%
-<span style='opacity:.72'>(Bull {_proj_v201.get('bullish')}% / Bear {_proj_v201.get('bearish')}%)</span><br>
-<b>Change:</b> {_change_v201}<br>
-<b>Action:</b> {_action_line_v201}<br>
-<b>{_news_line_v201}</b> &nbsp; | &nbsp; <b>Last:</b> {_v204_brain_sync.get('time', fmt_time())}<br>
-<b>Advisor:</b> Single AI Brain | {_ai_master_v221.get('version', _advisor_v214.get('advisor_version','V21.4'))}<br>
-<b>Brain Sync:</b> SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | OI {_v204_brain_sync.get('oi_sync','NA')} | {_v204_brain_sync.get('snapshot_health','NA')} {_v204_brain_sync.get('snapshot_score','NA')}/100 | OC {_v204_brain_sync.get('oc_rows',0)} rows
-<div class='v201-reason'><b>Why:</b><br>{_reason_html_v20}</div>
+<h2>{_status_text} — {_final_v222}</h2>
+<b>Confidence:</b> {_conf_v222}% &nbsp; | &nbsp;
+<b>Market Outlook:</b> {_proj_v222.get('direction')} {_proj_v222.get('probability')}%
+<span style='opacity:.72'>(Bull {_proj_v222.get('bullish')}% / Bear {_proj_v222.get('bearish')}%)</span><br>
+<b>Change:</b> {_change_v222}<br>
+<b>Action:</b> {_action_line_v222}<br>
+<b>{_news_line_v222}</b> &nbsp; | &nbsp; <b>Last:</b> {_m_v222.get('created_at', fmt_time())}<br>
+<b>Advisor:</b> Single AI_MASTER | {_m_v222.get('version','V22.2')}<br>
+<b>Trace:</b> SNAP {_m_v222.get('short_snapshot_id','NA')} | {_m_v222.get('data_flow_status','NA')} | OI {_m_v222.get('oi_sync_status','NA')} | Source {_m_v222.get('source_of_truth','AI_MASTER')}
+<div class='v201-reason'><b>Why:</b><br>{_reason_html_v222}</div>
 </div>
 """, unsafe_allow_html=True)
 
