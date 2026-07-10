@@ -3,38 +3,12 @@ from io import StringIO
 from datetime import datetime, timedelta
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
-from pathlib import Path as _Path
 
 import pandas as pd
 import requests
 import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
-
-
-# =========================================================
-# V22.7 PATCH: safer local data storage + developer error log
-# =========================================================
-def v227_get_data_dir():
-    """Return data directory. Default is local ./data; set NIFTY_DATA_DIR in
-    Streamlit secrets or environment for a mounted/persistent folder."""
-    try:
-        secret_dir = st.secrets.get("NIFTY_DATA_DIR", None)
-    except Exception:
-        secret_dir = None
-    return _Path(os.getenv("NIFTY_DATA_DIR") or secret_dir or "data")
-
-def v227_log_error(area, err):
-    """Keep errors visible in Developer Mode instead of hiding them silently."""
-    try:
-        st.session_state.setdefault("v227_error_log", []).append({
-            "time": datetime.now(IST).strftime("%H:%M:%S"),
-            "area": str(area),
-            "error": str(err),
-        })
-        st.session_state["v227_error_log"] = st.session_state["v227_error_log"][-25:]
-    except Exception:
-        pass
 
 
 # V19.5.1 Full Audit Fix module import.
@@ -118,56 +92,6 @@ except Exception:
 # =========================================================
 
 IST = ZoneInfo("Asia/Kolkata")
-
-
-# =========================================================
-# V22.10 PATCH: Ultra-safe DataFrame display for Streamlit/PyArrow
-# =========================================================
-def v229_safe_df(obj):
-    """Return a PyArrow-safe DataFrame for st.dataframe/st.table.
-
-    Streamlit Cloud serializes dataframes with PyArrow. If any display table
-    has mixed values in one column (numbers + text/emoji/list/dict), PyArrow can
-    crash the whole app. For dashboard safety, display tables are converted to
-    clean strings. Calculations remain unchanged because this function is used
-    only immediately before UI display.
-    """
-    try:
-        df = obj if isinstance(obj, pd.DataFrame) else pd.DataFrame(obj)
-        df = df.copy()
-        df = df.replace([float("inf"), float("-inf")], "")
-        df = df.where(pd.notnull(df), "")
-        for col in df.columns:
-            df[col] = df[col].map(lambda v: "" if v is None else str(v))
-        df.columns = [str(c) for c in df.columns]
-        return df
-    except Exception as e:
-        try:
-            v227_log_error("v229_safe_df", e)
-        except Exception:
-            pass
-        return pd.DataFrame({"Display Error": [str(e)]})
-
-def v229_dataframe(obj, *args, **kwargs):
-    try:
-        return st.dataframe(v229_safe_df(obj), *args, **kwargs)
-    except Exception as e:
-        try:
-            v227_log_error("v229_dataframe", e)
-        except Exception:
-            pass
-        return st.write(v229_safe_df(obj).to_dict("records"))
-
-def v229_table(obj, *args, **kwargs):
-    try:
-        return st.table(v229_safe_df(obj), *args, **kwargs)
-    except Exception as e:
-        try:
-            v227_log_error("v229_table", e)
-        except Exception:
-            pass
-        return st.write(v229_safe_df(obj).to_dict("records"))
-
 DHAN_BASE = "https://api.dhan.co/v2"
 DHAN_INSTRUMENT_MASTER = "https://images.dhan.co/api-data/api-scrip-master.csv"
 DEFAULT_NIFTY_SECURITY_ID = 13
@@ -1559,12 +1483,11 @@ def v91_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk
 # =========================================================
 # V10.2 UI + FII/DII JOURNAL HELPERS
 # =========================================================
-DATA_DIR = v227_get_data_dir()
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+from pathlib import Path as _Path
 
-FII_DII_STORE = DATA_DIR / "fii_dii_journal.csv"
+FII_DII_STORE = _Path("data/fii_dii_journal.csv")
 
-ACTIVE_POSITION_STORE = DATA_DIR / "active_position.csv"
+ACTIVE_POSITION_STORE = _Path("data/active_position.csv")
 
 def v16_load_active_position():
     defaults = {
@@ -1584,8 +1507,8 @@ def v16_load_active_position():
                 defaults["Entry Premium ₹"] = float(defaults.get("Entry Premium ₹", 0) or 0)
                 defaults["Current Premium ₹"] = float(defaults.get("Current Premium ₹", 0) or 0)
                 defaults["Daily Loss Hit / Stop Trading"] = str(defaults.get("Daily Loss Hit / Stop Trading", False)).lower() in ("true", "1", "yes")
-    except Exception as e:
-        v227_log_error("load_active_position", e)
+    except Exception:
+        pass
     return defaults
 
 def v16_save_active_position(side, strike, entry_price, current_price, lots, trades_taken, daily_loss_hit):
@@ -1603,8 +1526,7 @@ def v16_save_active_position(side, strike, entry_price, current_price, lots, tra
         }])
         row.to_csv(ACTIVE_POSITION_STORE, index=False)
         return True
-    except Exception as e:
-        v227_log_error("save_active_position", e)
+    except Exception:
         return False
 
 def v16_clear_active_position():
@@ -1612,8 +1534,7 @@ def v16_clear_active_position():
         if ACTIVE_POSITION_STORE.exists():
             ACTIVE_POSITION_STORE.unlink()
         return True
-    except Exception as e:
-        v227_log_error("clear_active_position", e)
+    except Exception:
         return False
 
 
@@ -1621,7 +1542,7 @@ def v16_clear_active_position():
 # =========================================================
 # V16.2 SUPER APP: MULTI-POSITION PORTFOLIO MANAGER
 # =========================================================
-PORTFOLIO_POSITION_STORE = DATA_DIR / "portfolio_positions.csv"
+PORTFOLIO_POSITION_STORE = _Path("data/portfolio_positions.csv")
 
 PORTFOLIO_COLUMNS = [
     "Position ID", "Status", "Strategy", "Lots", "Lot Size",
@@ -1638,8 +1559,8 @@ def v162_portfolio_load():
                 if col not in df.columns:
                     df[col] = "" if col in ["Position ID", "Status", "Strategy", "Created At", "Updated At", "Notes", "Sell1 Side", "Sell2 Side"] else 0
             return df[PORTFOLIO_COLUMNS]
-    except Exception as e:
-        v227_log_error("portfolio_load", e)
+    except Exception:
+        pass
     return pd.DataFrame(columns=PORTFOLIO_COLUMNS)
 
 def v162_portfolio_save(df):
@@ -1647,8 +1568,7 @@ def v162_portfolio_save(df):
         PORTFOLIO_POSITION_STORE.parent.mkdir(parents=True, exist_ok=True)
         df.to_csv(PORTFOLIO_POSITION_STORE, index=False)
         return True
-    except Exception as e:
-        v227_log_error("portfolio_save", e)
+    except Exception:
         return False
 
 def v162_new_position_id():
@@ -1795,8 +1715,8 @@ def v102_load_fii_dii_journal():
             if "Date" in df.columns:
                 df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
             return df[cols]
-    except Exception as e:
-        v227_log_error("load_fii_dii_journal", e)
+    except Exception:
+        pass
     return pd.DataFrame(columns=cols)
 
 def v102_save_fii_dii_journal(df):
@@ -1807,8 +1727,7 @@ def v102_save_fii_dii_journal(df):
             df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce").dt.date.astype(str)
         df2.to_csv(FII_DII_STORE, index=False)
         return True
-    except Exception as e:
-        v227_log_error("save_fii_dii_journal", e)
+    except Exception:
         return False
 
 def v102_journal_stats(df, lookback=30):
@@ -5464,41 +5383,8 @@ try:
     }
     AI_MASTER["strategy_rows"] = _v221_strategy_rows(AI_MASTER)
     AI_MASTER["candidate_rows"] = _v222_candidate_rows(AI_MASTER)
-
-    # =========================================================
-    # V22.8 HARD SINGLE-AI UI BINDING
-    # =========================================================
-    # After AI_MASTER is built, all legacy/compatibility variables used by
-    # lower UI sections are overwritten from AI_MASTER only. Older engines may
-    # still calculate evidence internally, but they cannot leak a different
-    # visible final advice, confidence, strike, SL or target.
-    final_trade = AI_MASTER.get("final_action", "WAIT")
-    confidence = _v221_int(AI_MASTER.get("confidence", 0), 0)
-    selected_strike = AI_MASTER.get("strategy", {}).get("sell_strike", "No Strike")
-    selected_hedge = AI_MASTER.get("strategy", {}).get("hedge_strike", "No Hedge")
-    selected_entry = AI_MASTER.get("strategy", {}).get("entry", "No Trade")
-    selected_sl = AI_MASTER.get("strategy", {}).get("sl", "No Trade")
-    selected_target = AI_MASTER.get("strategy", {}).get("target", "No Trade")
-    selected_strike_score = confidence if str(final_trade).upper() != "WAIT" else 0
-
-    AI_MASTER["ui_binding"] = {
-        "status": "HARD_LOCK_ACTIVE",
-        "final_trade_var": final_trade,
-        "confidence_var": confidence,
-        "selected_strike_var": selected_strike,
-        "selected_hedge_var": selected_hedge,
-        "selected_entry_var": selected_entry,
-        "selected_sl_var": selected_sl,
-        "selected_target_var": selected_target,
-        "rule": "All visible advice variables are rewritten from AI_MASTER after legacy engines run.",
-    }
-    AI_MASTER["version"] = "V22.8_HARD_SINGLE_AI_BINDING"
-
     if isinstance(final_decision, dict):
         final_decision["AI_MASTER"] = AI_MASTER
-        final_decision["action"] = final_trade
-        final_decision["confidence"] = confidence
-        final_decision["strategy"] = AI_MASTER.get("strategy", {})
 except Exception as _v221_master_error:
     st.error("AI_MASTER Single Routing failed: " + str(_v221_master_error))
     st.stop()
@@ -5758,7 +5644,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.8 Hard Single-AI Binding</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.6 Data Ownership Lock</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -5934,7 +5820,7 @@ st.markdown("### 📶 Signal Reliability Table")
 try:
     _v20_rel_rows = _v20_signal_reliability_rows()
     if _v20_rel_rows:
-        v229_dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
+        st.dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
         st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot + Single Advisor. Ye table sirf evidence dikhata hai; advice AI Final Authority se aati hai.")
     else:
         st.info("Signal reliability rows abhi available nahi hain.")
@@ -5945,7 +5831,7 @@ st.markdown("### 🎯 Smart Strategy Matrix — AI_MASTER Strategy Routing")
 try:
     _strategy_rows_v221 = AI_MASTER.get("strategy_rows", []) if isinstance(AI_MASTER, dict) else []
     if _strategy_rows_v221:
-        v229_dataframe(pd.DataFrame(_strategy_rows_v221), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(_strategy_rows_v221), width="stretch", hide_index=True)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -6008,7 +5894,7 @@ st.markdown("### 📋 AI Candidate Matrix")
 try:
     _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
     if _cand_rows_v221:
-        v229_dataframe(pd.DataFrame(_cand_rows_v221), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(_cand_rows_v221), width="stretch", hide_index=True)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -6049,7 +5935,7 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
         pc2.metric("Total P/L", f"₹{_total_pnl:,.0f}")
         pc3.metric("Portfolio Risk", "HIGH" if max(gamma_score_v7, shock_score_v7) >= 70 else "MEDIUM" if max(gamma_score_v7, shock_score_v7) >= 45 else "LOW")
         pc4.metric("Fresh Entry", "Allowed" if _signal_gate_v162.get("allowed") else "Blocked")
-        v229_dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
+        st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
         st.caption("AI Action har refresh par live premium + hedge + risk ke hisab se update hota hai. Current price zero aaye to option chain range/strike check karo.")
         with st.expander("Position Actions — mark exit", expanded=False):
             _exit_id = st.selectbox("Position ID", list(_active_pf["Position ID"].astype(str)), key="v162_exit_id")
@@ -6110,11 +5996,11 @@ with st.expander("🚀 Position Manager — Hold / Exit / Trail SL", expanded=Fa
     if active_side == "None" or active_lots <= 0:
         st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
     try:
-        if active_entry_price > 0:
-            prem_plan = v10_sl_target(active_entry_price, gamma_score_v7, shock_score_v7, confidence)
+        if entry_premium > 0:
+            prem_plan = v10_sl_target(entry_premium, gamma_score_v7, shock_score_v7, confidence)
             st.write(f"V10 Premium Plan: SL around {prem_plan['sl']} | Target around {prem_plan['target']} | Trail after premium reaches {prem_plan['trail_after']}")
-    except Exception as e:
-        v227_log_error("position_manager_premium_plan", e)
+    except Exception:
+        pass
     else:
         p1, p2, p3, p4 = st.columns(4)
         p1.metric("Position AI", position_ai["action"], f"Position Score {position_ai['confidence']}%")
@@ -6208,9 +6094,9 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         try:
             _atm_strike = int(round(float(price) / 50.0) * 50)
             st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
-            v229_dataframe(_oc_df, width="stretch", hide_index=True)
+            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), width="stretch", hide_index=True)
         except Exception:
-            v229_dataframe(_oc_df, width="stretch", hide_index=True)
+            st.dataframe(_oc_df, width="stretch", hide_index=True)
 
         st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
@@ -6253,7 +6139,7 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False
                 "Est. Nifty pts": round(price * (r["weight"] / 100) * (r["change_pct"] / 100), 1),
             })
         hw_table = pd.DataFrame(hw_rows)
-        v229_dataframe(hw_table, width="stretch", hide_index=True)
+        st.dataframe(hw_table, width="stretch", hide_index=True)
         st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
 
         if final_trade == "SELL CE" and heavy_bias > 35:
@@ -6312,7 +6198,7 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
         st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
     st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
     if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
-        v229_dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
+        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
 
 
 with st.expander("💰 Position & Risk Manager", expanded=False):
@@ -6360,32 +6246,6 @@ with st.expander("🔐 DhanHQ Setup Status", expanded=False):
 
 st.markdown("---")
 st.markdown(
-    "<div class='small-note'>V22.8 Hard Single-AI Binding: duplicate visible advice removed; trading screen is focused and mobile friendly. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
+    "<div class='small-note'>V20 Clean Edition: duplicate/debug UI removed; trading screen is focused and mobile friendly. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
-
-# V22.8 developer-only AI_MASTER audit. Keeps normal trading UI clean.
-try:
-    if st.session_state.get("developer_mode"):
-        _am = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}
-        _bind = _am.get("ui_binding", {}) if isinstance(_am.get("ui_binding", {}), dict) else {}
-        with st.expander("🔎 AI_MASTER Data-Flow Audit — single advice check", expanded=False):
-            st.write({
-                "AI_MASTER version": _am.get("version", "NA"),
-                "Final action": _am.get("final_action", "WAIT"),
-                "Execution": _am.get("execution_status", "WAIT"),
-                "Confidence": _am.get("confidence", 0),
-                "UI hard lock": _bind.get("status", "MISSING"),
-                "Legacy engines": _am.get("legacy_ranker_status", "NA"),
-                "Candidate source": (_am.get("ce_plan", {}) or {}).get("source", "NA") if isinstance(_am.get("ce_plan", {}), dict) else "NA",
-                "Data flow": _am.get("data_flow_status", "NA"),
-                "OI sync": _am.get("oi_sync_status", "NA"),
-            })
-            st.caption("PASS condition: UI hard lock = HARD_LOCK_ACTIVE and visible trade variables match AI_MASTER final action/strategy.")
-
-    if st.session_state.get("developer_mode") and st.session_state.get("v227_error_log"):
-        with st.expander("🛠 Developer Error Log — storage/runtime warnings", expanded=False):
-            v229_dataframe(pd.DataFrame(st.session_state.get("v227_error_log", [])), use_container_width=True)
-            st.caption(f"Data folder: {DATA_DIR.resolve()}")
-except Exception:
-    pass
