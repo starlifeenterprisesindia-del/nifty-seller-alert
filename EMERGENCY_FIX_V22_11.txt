@@ -1,0 +1,1 @@
+Emergency rollback based on V22.6 with global Streamlit dataframe/table/write PyArrow crash guard. AI/trading logic unchanged.
