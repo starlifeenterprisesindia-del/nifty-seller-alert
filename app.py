@@ -121,31 +121,25 @@ IST = ZoneInfo("Asia/Kolkata")
 
 
 # =========================================================
-# V22.9 PATCH: Safe DataFrame display for Streamlit/PyArrow
+# V22.10 PATCH: Ultra-safe DataFrame display for Streamlit/PyArrow
 # =========================================================
 def v229_safe_df(obj):
     """Return a PyArrow-safe DataFrame for st.dataframe/st.table.
-    Streamlit Cloud uses PyArrow for dataframe serialization; mixed object
-    columns such as list/dict/tuple + string can crash the app. This keeps
-    numeric columns numeric and safely stringifies only unsafe object columns.
+
+    Streamlit Cloud serializes dataframes with PyArrow. If any display table
+    has mixed values in one column (numbers + text/emoji/list/dict), PyArrow can
+    crash the whole app. For dashboard safety, display tables are converted to
+    clean strings. Calculations remain unchanged because this function is used
+    only immediately before UI display.
     """
     try:
         df = obj if isinstance(obj, pd.DataFrame) else pd.DataFrame(obj)
         df = df.copy()
+        df = df.replace([float("inf"), float("-inf")], "")
+        df = df.where(pd.notnull(df), "")
         for col in df.columns:
-            try:
-                ser = df[col]
-                if ser.dtype == "object":
-                    def _unsafe(v):
-                        return isinstance(v, (list, dict, tuple, set))
-                    # Stringify object columns when they contain complex values
-                    # or mixed non-null Python types.
-                    non_null = ser.dropna()
-                    type_count = len({type(v).__name__ for v in non_null.head(200).tolist()})
-                    if ser.map(_unsafe).any() or type_count > 1:
-                        df[col] = ser.map(lambda v: "" if v is None or (not isinstance(v, (list, dict, tuple, set)) and pd.isna(v)) else str(v))
-            except Exception:
-                df[col] = df[col].astype(str)
+            df[col] = df[col].map(lambda v: "" if v is None else str(v))
+        df.columns = [str(c) for c in df.columns]
         return df
     except Exception as e:
         try:
@@ -155,10 +149,25 @@ def v229_safe_df(obj):
         return pd.DataFrame({"Display Error": [str(e)]})
 
 def v229_dataframe(obj, *args, **kwargs):
-    return st.dataframe(v229_safe_df(obj), *args, **kwargs)
+    try:
+        return st.dataframe(v229_safe_df(obj), *args, **kwargs)
+    except Exception as e:
+        try:
+            v227_log_error("v229_dataframe", e)
+        except Exception:
+            pass
+        return st.write(v229_safe_df(obj).to_dict("records"))
 
 def v229_table(obj, *args, **kwargs):
-    return v229_table(v229_safe_df(obj), *args, **kwargs)
+    try:
+        return st.table(v229_safe_df(obj), *args, **kwargs)
+    except Exception as e:
+        try:
+            v227_log_error("v229_table", e)
+        except Exception:
+            pass
+        return st.write(v229_safe_df(obj).to_dict("records"))
+
 DHAN_BASE = "https://api.dhan.co/v2"
 DHAN_INSTRUMENT_MASTER = "https://images.dhan.co/api-data/api-scrip-master.csv"
 DEFAULT_NIFTY_SECURITY_ID = 13
