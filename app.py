@@ -11,67 +11,6 @@ import streamlit.components.v1 as components
 import yfinance as yf
 
 
-# =========================================================
-# EMERGENCY V22.11: Streamlit Cloud PyArrow crash guard
-# Display-only safety. Trading calculations/AI logic are NOT changed.
-# =========================================================
-def _v2211_display_safe_df(obj):
-    try:
-        # Support pandas Styler without sending Styler to Streamlit/Arrow
-        if hasattr(obj, "data") and obj.__class__.__name__.lower().endswith("styler"):
-            obj = obj.data
-        df = obj.copy() if isinstance(obj, pd.DataFrame) else pd.DataFrame(obj)
-        df = df.replace([float("inf"), float("-inf")], "")
-        df = df.where(pd.notnull(df), "")
-        # Streamlit Cloud converts display DataFrames to PyArrow.
-        # Mixed object columns can crash, so display values become strings only.
-        for c in df.columns:
-            df[c] = df[c].map(lambda x: "" if x is None else str(x))
-        df.columns = [str(c) for c in df.columns]
-        return df
-    except Exception as e:
-        return pd.DataFrame({"Display Error": [str(e)]})
-
-_v2211_original_dataframe = st.dataframe
-_v2211_original_table = st.table
-_v2211_original_write = st.write
-
-def _v2211_safe_dataframe(data=None, *args, **kwargs):
-    try:
-        if data is not None:
-            data = _v2211_display_safe_df(data)
-        return _v2211_original_dataframe(data, *args, **kwargs)
-    except Exception as e:
-        return _v2211_original_write("Table display skipped to prevent app crash:", str(e))
-
-def _v2211_safe_table(data=None, *args, **kwargs):
-    try:
-        if data is not None:
-            data = _v2211_display_safe_df(data)
-        return _v2211_original_table(data, *args, **kwargs)
-    except Exception as e:
-        return _v2211_original_write("Table display skipped to prevent app crash:", str(e))
-
-def _v2211_safe_write(*args, **kwargs):
-    safe_args = []
-    for a in args:
-        try:
-            if isinstance(a, pd.DataFrame) or (hasattr(a, "data") and a.__class__.__name__.lower().endswith("styler")):
-                safe_args.append(_v2211_display_safe_df(a))
-            else:
-                safe_args.append(a)
-        except Exception:
-            safe_args.append(str(a))
-    try:
-        return _v2211_original_write(*safe_args, **kwargs)
-    except Exception as e:
-        return _v2211_original_write("Display skipped to prevent app crash:", str(e))
-
-st.dataframe = _v2211_safe_dataframe
-st.table = _v2211_safe_table
-st.write = _v2211_safe_write
-
-
 # V19.5.1 Full Audit Fix module import.
 try:
     from snapshot_engine import (
