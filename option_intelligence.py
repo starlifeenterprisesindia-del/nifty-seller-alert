@@ -1,17 +1,17 @@
 """
-core/option_intelligence.py
-Version: V22.8
-Department: Option Intelligence
-Status: Architecture Skeleton
+option_intelligence.py
+Version : V22.9
+Department : Option Intelligence
+Status : Phase-1 Logic
 
-NOTE:
-This is the first implementation of the Option Intelligence Department.
-No BUY/SELL logic is included yet.
-Only the department structure is defined.
+Sprint Goal:
+- Interpret OI + Price relationship
+- Interpret Volume strength
+- No BUY/SELL decision
 """
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Dict, Any
 
 
 @dataclass
@@ -22,66 +22,83 @@ class OptionReport:
 
 
 class OISpecialist:
-    def analyze(self, snapshot):
-        return {"oi": "pending"}
+    """Interprets Price + OI behaviour"""
 
+    def analyze(self, price_change: float, oi_change: float):
+        if price_change > 0 and oi_change > 0:
+            signal = "Long Build-up"
+        elif price_change < 0 and oi_change > 0:
+            signal = "Short Build-up"
+        elif price_change > 0 and oi_change < 0:
+            signal = "Short Covering"
+        elif price_change < 0 and oi_change < 0:
+            signal = "Long Unwinding"
+        else:
+            signal = "Neutral"
 
-class OIChangeSpecialist:
-    def analyze(self, snapshot):
-        return {"oi_change": "pending"}
+        strength = min(100, abs(oi_change) * 2)
+
+        return {
+            "signal": signal,
+            "strength": round(strength, 1)
+        }
 
 
 class VolumeSpecialist:
-    def analyze(self, snapshot):
-        return {"volume": "pending"}
+    """Interprets participation quality"""
 
+    def analyze(self, current_volume: float, average_volume: float):
+        if average_volume <= 0:
+            status = "Unknown"
+        else:
+            ratio = current_volume / average_volume
 
-class CEWritingSpecialist:
-    def analyze(self, snapshot):
-        return {"ce_writing": "pending"}
+            if ratio >= 2:
+                status = "Spike Volume"
+            elif ratio >= 1.3:
+                status = "High Volume"
+            elif ratio >= 0.8:
+                status = "Normal Volume"
+            else:
+                status = "Weak Volume"
 
-
-class PEWritingSpecialist:
-    def analyze(self, snapshot):
-        return {"pe_writing": "pending"}
-
-
-class PCRSpecialist:
-    def analyze(self, snapshot):
-        return {"pcr": "pending"}
-
-
-class UnwindingSpecialist:
-    def analyze(self, snapshot):
-        return {"unwinding": "pending"}
-
-
-class StrikePressureSpecialist:
-    def analyze(self, snapshot):
-        return {"strike_pressure": "pending"}
+        return {
+            "status": status
+        }
 
 
 class OptionIntelligenceDirector:
 
     def __init__(self):
-        self.specialists = [
-            OISpecialist(),
-            OIChangeSpecialist(),
-            VolumeSpecialist(),
-            CEWritingSpecialist(),
-            PEWritingSpecialist(),
-            PCRSpecialist(),
-            UnwindingSpecialist(),
-            StrikePressureSpecialist(),
-        ]
+        self.oi = OISpecialist()
+        self.volume = VolumeSpecialist()
 
-    def build_report(self, snapshot) -> OptionReport:
-        details = {}
-        for specialist in self.specialists:
-            details.update(specialist.analyze(snapshot))
+    def build_report(
+        self,
+        price_change: float,
+        oi_change: float,
+        current_volume: float,
+        average_volume: float,
+    ) -> OptionReport:
+
+        oi_report = self.oi.analyze(price_change, oi_change)
+        volume_report = self.volume.analyze(
+            current_volume,
+            average_volume
+        )
+
+        details = {
+            "oi": oi_report,
+            "volume": volume_report,
+        }
+
+        summary = (
+            f'OI: {oi_report["signal"]} | '
+            f'Volume: {volume_report["status"]}'
+        )
 
         return OptionReport(
-            summary="Option Intelligence architecture initialized.",
-            confidence=0.0,
+            summary=summary,
+            confidence=oi_report["strength"],
             details=details,
         )
