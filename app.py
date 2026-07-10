@@ -118,6 +118,47 @@ except Exception:
 # =========================================================
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+# =========================================================
+# V22.9 PATCH: Safe DataFrame display for Streamlit/PyArrow
+# =========================================================
+def v229_safe_df(obj):
+    """Return a PyArrow-safe DataFrame for st.dataframe/st.table.
+    Streamlit Cloud uses PyArrow for dataframe serialization; mixed object
+    columns such as list/dict/tuple + string can crash the app. This keeps
+    numeric columns numeric and safely stringifies only unsafe object columns.
+    """
+    try:
+        df = obj if isinstance(obj, pd.DataFrame) else pd.DataFrame(obj)
+        df = df.copy()
+        for col in df.columns:
+            try:
+                ser = df[col]
+                if ser.dtype == "object":
+                    def _unsafe(v):
+                        return isinstance(v, (list, dict, tuple, set))
+                    # Stringify object columns when they contain complex values
+                    # or mixed non-null Python types.
+                    non_null = ser.dropna()
+                    type_count = len({type(v).__name__ for v in non_null.head(200).tolist()})
+                    if ser.map(_unsafe).any() or type_count > 1:
+                        df[col] = ser.map(lambda v: "" if v is None or (not isinstance(v, (list, dict, tuple, set)) and pd.isna(v)) else str(v))
+            except Exception:
+                df[col] = df[col].astype(str)
+        return df
+    except Exception as e:
+        try:
+            v227_log_error("v229_safe_df", e)
+        except Exception:
+            pass
+        return pd.DataFrame({"Display Error": [str(e)]})
+
+def v229_dataframe(obj, *args, **kwargs):
+    return st.dataframe(v229_safe_df(obj), *args, **kwargs)
+
+def v229_table(obj, *args, **kwargs):
+    return v229_table(v229_safe_df(obj), *args, **kwargs)
 DHAN_BASE = "https://api.dhan.co/v2"
 DHAN_INSTRUMENT_MASTER = "https://images.dhan.co/api-data/api-scrip-master.csv"
 DEFAULT_NIFTY_SECURITY_ID = 13
@@ -5884,7 +5925,7 @@ st.markdown("### 📶 Signal Reliability Table")
 try:
     _v20_rel_rows = _v20_signal_reliability_rows()
     if _v20_rel_rows:
-        st.dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
+        v229_dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
         st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot + Single Advisor. Ye table sirf evidence dikhata hai; advice AI Final Authority se aati hai.")
     else:
         st.info("Signal reliability rows abhi available nahi hain.")
@@ -5895,7 +5936,7 @@ st.markdown("### 🎯 Smart Strategy Matrix — AI_MASTER Strategy Routing")
 try:
     _strategy_rows_v221 = AI_MASTER.get("strategy_rows", []) if isinstance(AI_MASTER, dict) else []
     if _strategy_rows_v221:
-        st.dataframe(pd.DataFrame(_strategy_rows_v221), width="stretch", hide_index=True)
+        v229_dataframe(pd.DataFrame(_strategy_rows_v221), width="stretch", hide_index=True)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -5958,7 +5999,7 @@ st.markdown("### 📋 AI Candidate Matrix")
 try:
     _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
     if _cand_rows_v221:
-        st.dataframe(pd.DataFrame(_cand_rows_v221), width="stretch", hide_index=True)
+        v229_dataframe(pd.DataFrame(_cand_rows_v221), width="stretch", hide_index=True)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -5999,7 +6040,7 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
         pc2.metric("Total P/L", f"₹{_total_pnl:,.0f}")
         pc3.metric("Portfolio Risk", "HIGH" if max(gamma_score_v7, shock_score_v7) >= 70 else "MEDIUM" if max(gamma_score_v7, shock_score_v7) >= 45 else "LOW")
         pc4.metric("Fresh Entry", "Allowed" if _signal_gate_v162.get("allowed") else "Blocked")
-        st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
+        v229_dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
         st.caption("AI Action har refresh par live premium + hedge + risk ke hisab se update hota hai. Current price zero aaye to option chain range/strike check karo.")
         with st.expander("Position Actions — mark exit", expanded=False):
             _exit_id = st.selectbox("Position ID", list(_active_pf["Position ID"].astype(str)), key="v162_exit_id")
@@ -6158,9 +6199,9 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         try:
             _atm_strike = int(round(float(price) / 50.0) * 50)
             st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
-            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), width="stretch", hide_index=True)
+            v229_dataframe(_oc_df, width="stretch", hide_index=True)
         except Exception:
-            st.dataframe(_oc_df, width="stretch", hide_index=True)
+            v229_dataframe(_oc_df, width="stretch", hide_index=True)
 
         st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
@@ -6203,7 +6244,7 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False
                 "Est. Nifty pts": round(price * (r["weight"] / 100) * (r["change_pct"] / 100), 1),
             })
         hw_table = pd.DataFrame(hw_rows)
-        st.dataframe(hw_table, width="stretch", hide_index=True)
+        v229_dataframe(hw_table, width="stretch", hide_index=True)
         st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
 
         if final_trade == "SELL CE" and heavy_bias > 35:
@@ -6262,7 +6303,7 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
         st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
     st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
     if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
-        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
+        v229_dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
 
 
 with st.expander("💰 Position & Risk Manager", expanded=False):
@@ -6335,7 +6376,7 @@ try:
 
     if st.session_state.get("developer_mode") and st.session_state.get("v227_error_log"):
         with st.expander("🛠 Developer Error Log — storage/runtime warnings", expanded=False):
-            st.dataframe(pd.DataFrame(st.session_state.get("v227_error_log", [])), use_container_width=True)
+            v229_dataframe(pd.DataFrame(st.session_state.get("v227_error_log", [])), use_container_width=True)
             st.caption(f"Data folder: {DATA_DIR.resolve()}")
 except Exception:
     pass
