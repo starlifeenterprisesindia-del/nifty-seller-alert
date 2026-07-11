@@ -367,12 +367,14 @@ def _render_v27_command_hierarchy(case_data):
 
     journey = case_data.get("market_journey", {}) if isinstance(case_data, dict) else {}
     if isinstance(journey, dict) and journey:
-        with st.expander("🧭 V37.3 Move Remaining & Reversal Intelligence", expanded=True):
+        with st.expander("🧱 V38.3 Barrier Intelligence 2.0 & Move Remaining", expanded=True):
             _zone_low = float(journey.get("expected_zone_low", 0) or 0)
             _zone_high = float(journey.get("expected_zone_high", 0) or 0)
             _primary_direction = str(journey.get("primary_direction", journey.get("direction", "RANGE")))
             _primary_signed = float(journey.get("primary_signed_points", 0) or 0)
             _primary_text = f"{_primary_signed:+.0f} pts" if _primary_direction in {"UP", "DOWN"} else "Two-sided range"
+            _barrier_stats = journey.get("barrier_statistics", {}) if isinstance(journey.get("barrier_statistics", {}), dict) else {}
+            _tracked_barriers = journey.get("tracked_barriers", []) if isinstance(journey.get("tracked_barriers", []), list) else []
             st.markdown(
                 f"**Primary Estimate:** `{_primary_text}` &nbsp; | &nbsp; "
                 f"**Direction:** `{_primary_direction}` &nbsp; | &nbsp; "
@@ -390,12 +392,41 @@ def _render_v27_command_hierarchy(case_data):
                 "Barrier Distance": f"{float(journey.get('barrier_distance_points',0) or 0):.0f} pts" if journey.get('barrier_distance_points') is not None else "NA",
                 "Barrier Adjustment": f"-{float(journey.get('barrier_adjustment_points',0) or 0):.0f} pts",
                 "Touches": int(journey.get('barrier_touch_count',0) or 0),
+                "Resolved Tests": int(_barrier_stats.get('resolved_tests',0) or 0),
+                "Bounce / Break": f"{float(_barrier_stats.get('bounce_probability',50) or 50):.0f}% / {float(_barrier_stats.get('break_probability',50) or 50):.0f}%",
+                "Sample Confidence": f"{float(_barrier_stats.get('sample_confidence',0) or 0):.0f}%",
+                "Last Outcome": _barrier_stats.get('last_outcome','UNTESTED'),
                 "Barrier State": journey.get('barrier_strength','BALANCED'),
                 "Stage": journey.get('move_stage','Unknown'),
                 "Energy": journey.get('market_energy','Unknown'),
                 "Time Phase": journey.get('time_phase','Normal Session'),
             }]
             _render_safe_table(_journey_rows, max_rows=1)
+            if _tracked_barriers:
+                _barrier_rows = []
+                for _barrier in _tracked_barriers[:6]:
+                    if not isinstance(_barrier, dict):
+                        continue
+                    _barrier_rows.append({
+                        "ID": _barrier.get("id", "-"),
+                        "Type": _barrier.get("type", "-"),
+                        "Level": _barrier.get("level", "-"),
+                        "Distance": f"{float(_barrier.get('distance_points',0) or 0):.0f} pts",
+                        "Touches": int(_barrier.get("touches", 0) or 0),
+                        "Resolved": int(_barrier.get("resolved_tests", 0) or 0),
+                        "Bounce": f"{float(_barrier.get('bounce_probability',50) or 50):.0f}%",
+                        "Break": f"{float(_barrier.get('break_probability',50) or 50):.0f}%",
+                        "Strength": _barrier.get("strength", "COLLECTING EVIDENCE"),
+                        "Last Result": _barrier.get("last_outcome", "UNTESTED"),
+                        "Time": _barrier.get("last_time_phase", "-"),
+                    })
+                if _barrier_rows:
+                    st.markdown("**Bounded Barrier Registry — nearest levels first**")
+                    _render_safe_table(_barrier_rows, max_rows=6)
+            st.caption(
+                "Volume context: " + str(_barrier_stats.get("volume_context", "NO_RESOLVED_TEST"))
+                + " | OI context: " + str(_barrier_stats.get("oi_context", "NO_RESOLVED_TEST"))
+            )
             st.caption(
                 "Psychology context: " + str(journey.get("psychology_case_state", "BALANCED_OBSERVATION"))
                 + " | Authority: " + str(journey.get("authority", "EVIDENCE_ONLY_TO_CO"))
@@ -406,8 +437,8 @@ def _render_v27_command_hierarchy(case_data):
             for _warning in list(journey.get("warnings", []) or [])[:4]:
                 st.warning(str(_warning))
             st.info(
-                "Move Remaining ek bounded estimate hai, target ya trade signal nahi. "
-                "Har fresh snapshot par ATR, barrier, OI/volume aur psychology evidence ke saath dobara calculate hota hai; final judgement AI_MASTER ka hai."
+                "Barrier Intelligence session ke fresh snapshots se bounded touch/bounce/break evidence banati hai. "
+                "Percentages sample-size dependent hain, target ya trade signal nahi; final judgement AI_MASTER ka hai."
             )
 
     psychology = case_data.get("market_psychology", {}) if isinstance(case_data, dict) else {}
@@ -487,7 +518,7 @@ def _render_v27_command_hierarchy(case_data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V37.3 - MOVE REMAINING + PSYCHOLOGY BUNDLE
+# NIFTY SELLER AI DASHBOARD V38.3 - BARRIER INTELLIGENCE 2.0
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -508,7 +539,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V37.3 Move Remaining",
+    page_title="Nifty Seller AI V38.3 Barrier Intelligence",
     page_icon="🧠",
     layout="wide",
 )
@@ -2770,7 +2801,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V37.3 AI COMMAND")
+st.sidebar.title("🏛️ V38.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -5902,7 +5933,7 @@ try:
             float(fii_today), float(dii_today), _adv_hw_v24, _dec_hw_v24, _adv_hw_v24, _dec_hw_v24
         )
 
-        # V37.1-V37.3: upgrade the existing Market Journey investigator.
+        # V38.1-V38.3: upgrade the existing Market Journey investigator with bounded barrier history.
         # It estimates independent upside/downside room, then applies psychology,
         # barrier and reversal-risk adjustments. The department is evidence-only
         # and its report must enter the CO case file before AI_MASTER judgement.
@@ -5918,6 +5949,7 @@ try:
             smart_money_report=_v24_money_report,
             psychology_report=_v36_psychology_report,
             hour=datetime.now(IST).hour,
+            observed_at=datetime.now(IST).isoformat(timespec="seconds"),
         )
         _market_journey_trace_v37 = _market_journey_v37.to_compact_dict()
         _market_journey_department_v37 = _market_journey_v37.to_department_report()
@@ -6157,7 +6189,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V37_3_MOVE_REMAINING_PSYCHOLOGY_BUNDLE",
+                "version": "V38_3_BARRIER_INTELLIGENCE_2_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6509,7 +6541,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V37.3 Move Remaining Intelligence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V38.3 Barrier Intelligence 2.0</div>", unsafe_allow_html=True)
 
 
 # =========================================================

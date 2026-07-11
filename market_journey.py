@@ -1,14 +1,15 @@
 """
 market_journey.py
-Version: V37.3
-Department: Market Journey / Move Remaining Intelligence
-Status: V37.1 foundation + V37.2 two-sided estimate + V37.3 barrier/reversal adjustment
+Version: V38.3
+Department: Market Journey / Barrier Intelligence 2.0
+Status: V38.1 bounded barrier registry + V38.2 outcome statistics + V38.3 probability/strength profile
 
 Safety contract:
 - Improves the existing V35 Market Journey module; no duplicate move engine.
 - Evidence and bounded estimation only; never emits BUY/SELL or execution permission.
 - Uses one verified snapshot and existing department reports only.
 - Report must pass through DSP review -> CO case file -> AI_MASTER.
+- Barrier history is bounded session evidence, not an execution rule.
 - No API calls, loops, threads, timers, or automatic trading-rule changes.
 """
 from __future__ import annotations
@@ -43,6 +44,8 @@ class MarketJourneyReport:
     barrier_adjustment_points: float
     barrier_touch_count: int
     barrier_strength: str
+    barrier_statistics: Dict[str, Any]
+    tracked_barriers: list[Dict[str, Any]]
     time_phase: str
     psychology_case_state: str
     authority: str
@@ -55,9 +58,12 @@ class MarketJourneyReport:
 
     def to_department_report(self) -> Dict[str, Any]:
         signed = f"{self.primary_signed_points:+.0f}" if self.primary_direction in {"UP", "DOWN"} else "range"
+        bounce = float(self.barrier_statistics.get("bounce_probability", 50.0) or 50.0)
+        break_prob = float(self.barrier_statistics.get("break_probability", 50.0) or 50.0)
         summary = (
             f"Move Remaining {signed} pts | up room {self.upside_remaining_points:.0f} | "
-            f"down room {self.downside_remaining_points:.0f} | reversal {self.reversal_risk}"
+            f"down room {self.downside_remaining_points:.0f} | barrier bounce {bounce:.0f}% / "
+            f"break {break_prob:.0f}% | reversal {self.reversal_risk}"
         )
         return {
             "summary": summary,
@@ -69,14 +75,14 @@ class MarketJourneyReport:
 class MarketJourneyEngine:
     """One-snapshot market journey investigator.
 
-    V37 does not create a second brain. It extends the existing V35 journey
+    V38 does not create a second brain. It extends the existing V35 journey
     investigator with an independent upside/downside room estimate and then
     applies barrier and reversal-risk adjustments. The output is descriptive
     evidence for CO; AI_MASTER retains all decision authority.
     """
 
-    VERSION = "V37.3_MOVE_REMAINING_BARRIER_ADJUSTMENT"
-    STATE_KEY = "v35_barrier_state"  # Preserve existing bounded touch history.
+    VERSION = "V38.3_BARRIER_INTELLIGENCE_2"
+    STATE_KEY = "v38_barrier_registry"
 
     def evaluate(
         self,
@@ -92,6 +98,7 @@ class MarketJourneyEngine:
         smart_money_report: Any,
         hour: int,
         psychology_report: Any = None,
+        observed_at: Optional[str] = None,
     ) -> MarketJourneyReport:
         price = float(price or 0.0)
         atr = max(float(atr or 0.0), 1.0)
@@ -115,13 +122,25 @@ class MarketJourneyEngine:
 
         direction = self._direction(trend, pcr, strike_pressure, fii, heavy)
         barrier_type, barrier_level = self._nearest_barrier(price, support, resistance, direction)
-        touch_count = self._update_touch_state(
+        time_phase = self._time_phase(hour)
+        oi_signal = str(o.get("oi", {}).get("signal", "Neutral"))
+        barrier_context = self._update_barrier_registry(
             state=state,
             price=price,
             atr=atr,
-            barrier_type=barrier_type,
-            barrier_level=barrier_level,
+            support=support,
+            resistance=resistance,
+            active_type=barrier_type,
+            active_level=barrier_level,
+            volume_status=volume,
+            oi_signal=oi_signal,
+            strike_pressure=strike_pressure,
+            time_phase=time_phase,
+            observed_at=observed_at or "SESSION",
         )
+        barrier_statistics = dict(barrier_context.get("active", {}))
+        tracked_barriers = list(barrier_context.get("tracked", []))
+        touch_count = int(barrier_statistics.get("touches", 0) or 0)
 
         breakout, reversal, strength, reasons, warnings = self._probabilities(
             direction=direction,
@@ -131,6 +150,7 @@ class MarketJourneyEngine:
             strike_pressure=strike_pressure,
             barrier_type=barrier_type,
             touch_count=touch_count,
+            barrier_profile=barrier_statistics,
             fii=fii,
             heavy=heavy,
         )
@@ -236,7 +256,6 @@ class MarketJourneyEngine:
                 f"Nearby barrier reduced the primary room estimate by {primary_adjustment:.1f} points"
             )
 
-        time_phase = self._time_phase(hour)
         if time_phase in {"Opening Shock Zone", "Late Move Zone"}:
             warnings.append(f"{time_phase}: estimate can change quickly on the next snapshot.")
         if primary_direction == "RANGE":
@@ -271,6 +290,8 @@ class MarketJourneyEngine:
             barrier_adjustment_points=round(primary_adjustment, 1),
             barrier_touch_count=touch_count,
             barrier_strength=strength,
+            barrier_statistics=barrier_statistics,
+            tracked_barriers=tracked_barriers,
             time_phase=time_phase,
             psychology_case_state=psychology_state,
             authority="EVIDENCE_ONLY_TO_CO",
@@ -294,6 +315,7 @@ class MarketJourneyEngine:
         touches = int(k["touch_count"])
         fii = k["fii"]
         heavy = k["heavy"]
+        profile = k.get("barrier_profile", {}) if isinstance(k.get("barrier_profile", {}), Mapping) else {}
 
         if energy == "High":
             breakout += 12
@@ -344,8 +366,32 @@ class MarketJourneyEngine:
             breakout += 8
             reasons.append("Smart money aligned")
 
+        resolved_tests = int(profile.get("resolved_tests", 0) or 0)
+        history_confidence = float(profile.get("sample_confidence", 0) or 0)
+        bounce_probability = float(profile.get("bounce_probability", 50) or 50)
+        break_probability = float(profile.get("break_probability", 50) or 50)
+        history_weight = self._clamp(history_confidence / 100.0, 0.0, 0.90)
+        if resolved_tests >= 2 and history_weight > 0:
+            if bounce_probability >= 56:
+                delta = min(18.0, (bounce_probability - 50.0) * 0.45 * history_weight)
+                reversal += delta
+                breakout -= delta * 0.80
+                reasons.append(
+                    f"Barrier history: {bounce_probability:.0f}% bounce over {resolved_tests} resolved tests"
+                )
+            elif break_probability >= 56:
+                delta = min(18.0, (break_probability - 50.0) * 0.45 * history_weight)
+                breakout += delta
+                reversal -= delta * 0.70
+                reasons.append(
+                    f"Barrier history: {break_probability:.0f}% break over {resolved_tests} resolved tests"
+                )
+
         breakout, reversal = self._normalise_pair(breakout, reversal)
-        if defended and reversal >= 58:
+        history_strength = str(profile.get("strength", ""))
+        if history_strength and history_strength != "COLLECTING EVIDENCE":
+            strength = history_strength
+        elif defended and reversal >= 58:
             strength = "STRONG DEFENCE"
         elif not defended and breakout >= 58:
             strength = "WEAKENING / BREAK RISK"
@@ -422,8 +468,10 @@ class MarketJourneyEngine:
         extension = 0.0
         if breakout_probability >= 58:
             extension = atr * self._clamp((breakout_probability - 55.0) / 100.0, 0.02, 0.24)
-        if barrier_strength == "STRONG DEFENCE":
-            extension *= 0.35
+        if barrier_strength in {"STRONG DEFENCE", "DEFENCE LEAN"}:
+            extension *= 0.35 if barrier_strength == "STRONG DEFENCE" else 0.60
+        elif barrier_strength in {"HIGH BREAK RISK", "WEAKENING / BREAK RISK"}:
+            extension *= 1.25
         cap = max(atr * 0.08, distance + extension)
         adjusted = min(raw_room, cap)
         return max(1.0, adjusted), max(0.0, raw_room - adjusted), distance
@@ -510,22 +558,313 @@ class MarketJourneyEngine:
             confidence -= 6.0
         return self._clamp(confidence, 35.0, 88.0)
 
-    def _update_touch_state(self, *, state, price, atr, barrier_type, barrier_level):
+    def _update_barrier_registry(
+        self,
+        *,
+        state: MutableMapping[str, Any],
+        price: float,
+        atr: float,
+        support: Optional[float],
+        resistance: Optional[float],
+        active_type: str,
+        active_level: Optional[float],
+        volume_status: str,
+        oi_signal: str,
+        strike_pressure: str,
+        time_phase: str,
+        observed_at: str,
+    ) -> Dict[str, Any]:
         store = state.get(self.STATE_KEY, {})
         if not isinstance(store, dict):
             store = {}
-        key = f"{barrier_type}:{round(barrier_level or 0, 1)}"
-        threshold = max(10.0, min(30.0, atr * 0.18))
-        inside = barrier_level is not None and abs(price - barrier_level) <= threshold
-        previous = store.get(key, {}) if isinstance(store.get(key), dict) else {}
-        was_inside = bool(previous.get("inside", False))
-        count = int(previous.get("touches", 0) or 0)
-        if inside and not was_inside:
-            count += 1
-        # Bounded single active barrier record; no unbounded history growth.
-        store = {key: {"inside": inside, "touches": min(count, 20)}}
+        records = [dict(item) for item in store.get("records", []) if isinstance(item, Mapping)]
+        sequence = int(store.get("sequence", 0) or 0) + 1
+        next_id = int(store.get("next_id", 1) or 1)
+        merge_distance = max(6.0, min(25.0, atr * 0.12))
+
+        current_ids: list[str] = []
+        for barrier_type, level in (("SUPPORT", support), ("RESISTANCE", resistance)):
+            if level is None:
+                continue
+            record, next_id = self._find_or_create_barrier(
+                records=records,
+                next_id=next_id,
+                barrier_type=barrier_type,
+                level=float(level),
+                merge_distance=merge_distance,
+                observed_at=observed_at,
+                time_phase=time_phase,
+                sequence=sequence,
+            )
+            self._observe_barrier(
+                record=record,
+                price=price,
+                atr=atr,
+                volume_status=volume_status,
+                oi_signal=oi_signal,
+                strike_pressure=strike_pressure,
+                observed_at=observed_at,
+                time_phase=time_phase,
+                sequence=sequence,
+            )
+            current_ids.append(str(record.get("id", "")))
+
+        # Keep the registry deliberately bounded. Current barriers are retained,
+        # then the most recently seen records fill the remaining slots.
+        records.sort(
+            key=lambda item: (
+                str(item.get("id", "")) in current_ids,
+                int(item.get("last_sequence", 0) or 0),
+                int(item.get("resolved_tests", 0) or 0),
+            ),
+            reverse=True,
+        )
+        records = records[:12]
+
+        active_record = None
+        if active_level is not None and active_type in {"SUPPORT", "RESISTANCE"}:
+            candidates = [item for item in records if item.get("type") == active_type]
+            if candidates:
+                active_record = min(candidates, key=lambda item: abs(float(item.get("level", 0) or 0) - active_level))
+
+        active_profile = self._barrier_profile(active_record, price)
+        tracked = [self._barrier_profile(item, price) for item in records]
+        tracked.sort(
+            key=lambda item: (
+                float(item.get("distance_points", 999999) or 999999),
+                -float(item.get("sample_confidence", 0) or 0),
+            )
+        )
+        store = {"sequence": sequence, "next_id": next_id, "records": records}
         state[self.STATE_KEY] = store
-        return count
+        active_profile["registry_size"] = len(records)
+        return {"active": active_profile, "tracked": tracked[:6], "registry_size": len(records)}
+
+    def _find_or_create_barrier(
+        self,
+        *,
+        records: list[Dict[str, Any]],
+        next_id: int,
+        barrier_type: str,
+        level: float,
+        merge_distance: float,
+        observed_at: str,
+        time_phase: str,
+        sequence: int,
+    ) -> tuple[Dict[str, Any], int]:
+        same_type = [item for item in records if item.get("type") == barrier_type]
+        record = None
+        if same_type:
+            nearest = min(same_type, key=lambda item: abs(float(item.get("level", 0) or 0) - level))
+            if abs(float(nearest.get("level", 0) or 0) - level) <= merge_distance:
+                record = nearest
+        if record is None:
+            record = {
+                "id": f"B{next_id}",
+                "type": barrier_type,
+                "level": round(level, 2),
+                "first_seen": observed_at,
+                "last_seen": observed_at,
+                "last_time_phase": time_phase,
+                "observations": 0,
+                "touches": 0,
+                "resolved_tests": 0,
+                "bounces": 0,
+                "breaks": 0,
+                "volume_confirmed_bounces": 0,
+                "volume_confirmed_breaks": 0,
+                "oi_confirmed_bounces": 0,
+                "oi_confirmed_breaks": 0,
+                "last_relation": "UNSEEN",
+                "last_outcome": "UNTESTED",
+                "last_outcome_at": "",
+                "pending": None,
+                "last_sequence": sequence,
+            }
+            records.append(record)
+            next_id += 1
+        else:
+            old_level = float(record.get("level", level) or level)
+            record["level"] = round(old_level * 0.85 + level * 0.15, 2)
+        record["last_seen"] = observed_at
+        record["last_time_phase"] = time_phase
+        record["last_sequence"] = sequence
+        record["observations"] = min(500, int(record.get("observations", 0) or 0) + 1)
+        return record, next_id
+
+    def _observe_barrier(
+        self,
+        *,
+        record: Dict[str, Any],
+        price: float,
+        atr: float,
+        volume_status: str,
+        oi_signal: str,
+        strike_pressure: str,
+        observed_at: str,
+        time_phase: str,
+        sequence: int,
+    ) -> None:
+        barrier_type = str(record.get("type", ""))
+        level = float(record.get("level", 0) or 0)
+        touch_zone = max(6.0, min(22.0, atr * 0.14))
+        break_zone = max(touch_zone + 2.0, min(35.0, atr * 0.20))
+        if barrier_type == "RESISTANCE":
+            if price > level + break_zone:
+                relation = "BROKEN_SIDE"
+            elif price >= level - touch_zone:
+                relation = "TOUCH"
+            else:
+                relation = "SAFE_SIDE"
+        else:
+            if price < level - break_zone:
+                relation = "BROKEN_SIDE"
+            elif price <= level + touch_zone:
+                relation = "TOUCH"
+            else:
+                relation = "SAFE_SIDE"
+
+        previous_relation = str(record.get("last_relation", "UNSEEN"))
+        pending = record.get("pending") if isinstance(record.get("pending"), Mapping) else None
+        just_started = False
+        if relation == "TOUCH" and previous_relation != "TOUCH" and pending is None:
+            record["touches"] = min(50, int(record.get("touches", 0) or 0) + 1)
+            pending = {
+                "age": 0,
+                "started_at": observed_at,
+                "time_phase": time_phase,
+                "volume_status": volume_status,
+                "oi_signal": oi_signal,
+                "strike_pressure": strike_pressure,
+            }
+            record["pending"] = pending
+            record["last_outcome"] = "TEST_IN_PROGRESS"
+            just_started = True
+
+        if pending is not None and not just_started:
+            pending = dict(pending)
+            pending["age"] = int(pending.get("age", 0) or 0) + 1
+            record["pending"] = pending
+            outcome = None
+            if relation == "SAFE_SIDE":
+                outcome = "BOUNCE"
+            elif relation == "BROKEN_SIDE":
+                outcome = "BREAK"
+            if outcome:
+                self._resolve_barrier_test(
+                    record=record,
+                    outcome=outcome,
+                    pending=pending,
+                    current_volume=volume_status,
+                    current_oi_signal=oi_signal,
+                    current_pressure=strike_pressure,
+                    observed_at=observed_at,
+                )
+            elif int(pending.get("age", 0) or 0) > 12:
+                record["pending"] = None
+                record["last_outcome"] = "UNRESOLVED_TEST"
+                record["last_outcome_at"] = observed_at
+
+        record["last_relation"] = relation
+        record["last_sequence"] = sequence
+
+    def _resolve_barrier_test(
+        self,
+        *,
+        record: Dict[str, Any],
+        outcome: str,
+        pending: Mapping[str, Any],
+        current_volume: str,
+        current_oi_signal: str,
+        current_pressure: str,
+        observed_at: str,
+    ) -> None:
+        record["resolved_tests"] = min(50, int(record.get("resolved_tests", 0) or 0) + 1)
+        field = "bounces" if outcome == "BOUNCE" else "breaks"
+        record[field] = min(50, int(record.get(field, 0) or 0) + 1)
+        high_volume = any(
+            status in {"High", "Spike", "High Volume", "Spike Volume"}
+            for status in (str(pending.get("volume_status", "")), str(current_volume))
+        )
+        volume_field = "volume_confirmed_bounces" if outcome == "BOUNCE" else "volume_confirmed_breaks"
+        if high_volume:
+            record[volume_field] = min(50, int(record.get(volume_field, 0) or 0) + 1)
+
+        barrier_type = str(record.get("type", ""))
+        touch_pressure = str(pending.get("strike_pressure", ""))
+        touch_oi = str(pending.get("oi_signal", ""))
+        if outcome == "BOUNCE":
+            oi_confirmed = (
+                (barrier_type == "RESISTANCE" and (touch_pressure == "CE Resistance" or current_pressure == "CE Resistance"))
+                or (barrier_type == "SUPPORT" and (touch_pressure == "PE Support" or current_pressure == "PE Support"))
+            )
+        elif barrier_type == "RESISTANCE":
+            oi_confirmed = touch_oi in {"Long Build-up", "Short Covering"} or current_oi_signal in {"Long Build-up", "Short Covering"}
+        else:
+            oi_confirmed = touch_oi in {"Short Build-up", "Long Unwinding"} or current_oi_signal in {"Short Build-up", "Long Unwinding"}
+        oi_field = "oi_confirmed_bounces" if outcome == "BOUNCE" else "oi_confirmed_breaks"
+        if oi_confirmed:
+            record[oi_field] = min(50, int(record.get(oi_field, 0) or 0) + 1)
+
+        record["last_outcome"] = outcome
+        record["last_outcome_at"] = observed_at
+        record["pending"] = None
+
+    def _barrier_profile(self, record: Optional[Mapping[str, Any]], price: float) -> Dict[str, Any]:
+        if not isinstance(record, Mapping):
+            return {
+                "id": "NONE", "type": "NONE", "level": None, "touches": 0,
+                "resolved_tests": 0, "bounces": 0, "breaks": 0,
+                "bounce_probability": 50.0, "break_probability": 50.0,
+                "sample_confidence": 0.0, "strength": "COLLECTING EVIDENCE",
+                "last_outcome": "UNTESTED", "last_seen_at": "",
+                "last_time_phase": "", "volume_context": "NO_RESOLVED_TEST",
+                "oi_context": "NO_RESOLVED_TEST", "pending_status": "NONE",
+                "distance_points": None,
+            }
+        resolved = int(record.get("resolved_tests", 0) or 0)
+        bounces = int(record.get("bounces", 0) or 0)
+        breaks = int(record.get("breaks", 0) or 0)
+        touches = int(record.get("touches", 0) or 0)
+        bounce_probability = (bounces + 1.25) / (resolved + 2.5) * 100.0
+        break_probability = 100.0 - bounce_probability
+        sample_confidence = min(92.0, 20.0 + resolved * 14.0 + min(touches, 8) * 3.0) if touches else 0.0
+        if resolved < 2:
+            strength = "COLLECTING EVIDENCE"
+        elif bounce_probability >= 68 and sample_confidence >= 50:
+            strength = "STRONG DEFENCE"
+        elif bounce_probability >= 58:
+            strength = "DEFENCE LEAN"
+        elif break_probability >= 68 and sample_confidence >= 50:
+            strength = "HIGH BREAK RISK"
+        elif break_probability >= 58:
+            strength = "WEAKENING / BREAK RISK"
+        else:
+            strength = "BALANCED"
+        volume_confirmed = int(record.get("volume_confirmed_bounces", 0) or 0) + int(record.get("volume_confirmed_breaks", 0) or 0)
+        oi_confirmed = int(record.get("oi_confirmed_bounces", 0) or 0) + int(record.get("oi_confirmed_breaks", 0) or 0)
+        level = float(record.get("level", 0) or 0)
+        return {
+            "id": str(record.get("id", "")),
+            "type": str(record.get("type", "NONE")),
+            "level": round(level, 2),
+            "touches": touches,
+            "resolved_tests": resolved,
+            "bounces": bounces,
+            "breaks": breaks,
+            "bounce_probability": round(bounce_probability, 1),
+            "break_probability": round(break_probability, 1),
+            "sample_confidence": round(sample_confidence, 1),
+            "strength": strength,
+            "last_outcome": str(record.get("last_outcome", "UNTESTED")),
+            "last_outcome_at": str(record.get("last_outcome_at", "")),
+            "last_seen_at": str(record.get("last_seen", "")),
+            "last_time_phase": str(record.get("last_time_phase", "")),
+            "volume_context": f"{volume_confirmed}/{resolved} outcomes volume-confirmed" if resolved else "NO_RESOLVED_TEST",
+            "oi_context": f"{oi_confirmed}/{resolved} outcomes OI-confirmed" if resolved else "NO_RESOLVED_TEST",
+            "pending_status": "TEST_IN_PROGRESS" if isinstance(record.get("pending"), Mapping) else "NONE",
+            "distance_points": round(abs(price - level), 1),
+        }
 
     def _direction(self, trend, pcr, pressure, fii, heavy):
         up = down = 0

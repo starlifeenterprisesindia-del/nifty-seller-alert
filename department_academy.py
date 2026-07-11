@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V37.3
+Version: V38.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -41,7 +41,7 @@ class DepartmentSOP:
         "PRICE_ACTION": ("trend", "barrier", "move_stage", "range"),
         "MARKET_BEHAVIOUR": ("barrier", "breakout", "reversal", "energy"),
         "MARKET_PSYCHOLOGY": ("psychology_state", "retail_fear", "retail_greed", "data_coverage", "psychology_case_report"),
-        "MARKET_JOURNEY": ("upside_remaining_points", "downside_remaining_points", "primary_direction", "reversal_risk", "barrier_adjustment_points"),
+        "MARKET_JOURNEY": ("upside_remaining_points", "downside_remaining_points", "primary_direction", "reversal_risk", "barrier_adjustment_points", "barrier_statistics", "tracked_barriers"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
@@ -172,7 +172,7 @@ class DepartmentAcademy:
         "PRICE_ACTION": "DSP Price Action",
         "MARKET_BEHAVIOUR": "DSP Market Behaviour",
         "MARKET_PSYCHOLOGY": "DSP Market Psychology",
-        "MARKET_JOURNEY": "DSP Move Remaining Intelligence",
+        "MARKET_JOURNEY": "DSP Move & Barrier Intelligence",
         "SMART_MONEY": "DSP Smart Money",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
@@ -279,4 +279,6 @@ class DepartmentAcademy:
             lessons.append("Barrier response available for breakout/reversal learning.")
         if branch == "MARKET_PSYCHOLOGY" and "psychology_state" in facts:
             lessons.append("Consolidated psychology case recorded; outcome validation required before directional use.")
+        if branch == "MARKET_JOURNEY" and "barrier_statistics" in facts:
+            lessons.append("Barrier touch/bounce/break samples recorded; probability remains sample-size dependent.")
         return lessons or ["Observation recorded for future validation."]

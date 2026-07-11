@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V37.3
+Version: V38.3
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -275,7 +275,7 @@ class CommandingOfficer:
         all_evidence = [evidence for branch in branch_map.values() for evidence in branch.evidence]
         accepted_evidence: List[str] = []
         rejected_evidence: List[str] = []
-        # V36 Psychology and V37 Move Remaining remain observation-only branches
+        # V36 Psychology and V38 Move/Barrier Intelligence remain observation-only branches
         # during live validation. Their evidence is visible in the CO file, but
         # cannot silently improve or weaken execution case-strength scores.
         scoring_evidence_count = sum(
@@ -477,7 +477,7 @@ class AIOrganizationController:
         "PRICE_ACTION": BranchBoss("PRICE_ACTION", "DSP Price Action", 0),
         "MARKET_BEHAVIOUR": BranchBoss("MARKET_BEHAVIOUR", "DSP Market Behaviour", 0),
         "MARKET_PSYCHOLOGY": BranchBoss("MARKET_PSYCHOLOGY", "DSP Market Psychology", 0),
-        "MARKET_JOURNEY": BranchBoss("MARKET_JOURNEY", "DSP Move Remaining Intelligence", 0),
+        "MARKET_JOURNEY": BranchBoss("MARKET_JOURNEY", "DSP Move & Barrier Intelligence", 0),
         "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money", 0),
         "RISK": BranchBoss("RISK", "DSP Risk", 0),
         "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),
