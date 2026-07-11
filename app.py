@@ -98,6 +98,7 @@ try:
     from ai_master import AIMaster
     from market_memory import MarketMemory
     from learning_department import LearningDepartment
+    from command_hierarchy import AIOrganizationController
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -5580,7 +5581,36 @@ try:
         _did_snapshot_v24 = SnapshotManager().create_snapshot(_did_payload_v24, [], _did_quality_v24)
         _did_distributor_v24 = DataDistributor(_did_snapshot_v24)
         _snapshot_id_v24 = _did_distributor_v24.snapshot_id
-        _data_quality_ok_v24 = bool(_did_snapshot_v24.quality_score >= 60 and option_analysis.get("success", False))
+        # V26 command hierarchy: every branch report is reviewed by its DSP,
+        # consolidated by the CO, and only then forwarded to AI_MASTER.
+        _data_branch_report_v26 = {
+            "summary": f"Verified snapshot {_snapshot_id_v24} | quality {_did_snapshot_v24.quality_score}/100",
+            "confidence": float(_did_snapshot_v24.quality_score),
+            "details": {
+                "snapshot_id": _snapshot_id_v24,
+                "quality_score": _did_snapshot_v24.quality_score,
+                "rows_count": len(option_analysis.get("rows", [])) if isinstance(option_analysis, dict) else 0,
+            },
+        }
+        _co_case_v26 = AIOrganizationController().build_case_file(
+            snapshot_id=_snapshot_id_v24,
+            data_quality_score=float(_did_snapshot_v24.quality_score),
+            reports={
+                "DATA": _data_branch_report_v26,
+                "OPTION": _v24_option_report,
+                "PRICE_ACTION": _v24_price_report,
+                "MARKET_BEHAVIOUR": _v24_behaviour_report,
+                "SMART_MONEY": _v24_money_report,
+                "RISK": _v24_risk_report,
+                "CANDIDATE": _v24_candidate_report,
+                "STRATEGY": _v24_strategy_report,
+            },
+        )
+        _data_quality_ok_v24 = bool(
+            _did_snapshot_v24.quality_score >= 60
+            and option_analysis.get("success", False)
+            and _co_case_v26.accepted
+        )
         _v24_decision = AIMaster().decide(
             snapshot_id=_snapshot_id_v24, data_quality_ok=_data_quality_ok_v24,
             price_report=_v24_price_report, option_report=_v24_option_report,
@@ -5677,7 +5707,33 @@ try:
                 "candidate": {"summary": _v24_candidate_report.summary, "confidence": _v24_candidate_report.confidence},
             },
             "v24_trace": _v24_decision.trace,
+            "command_hierarchy": {
+                "version": "V26_CO_COMMAND_CONTROL",
+                "co_status": _co_case_v26.command_status,
+                "accepted": _co_case_v26.accepted,
+                "agreement_score": _co_case_v26.agreement_score,
+                "data_quality_score": _co_case_v26.data_quality_score,
+                "conflicts": list(_co_case_v26.conflicts),
+                "warnings": list(_co_case_v26.warnings),
+                "branches": {
+                    _name: {
+                        "boss": _branch.boss,
+                        "status": _branch.status,
+                        "confidence": _branch.confidence,
+                        "summary": _branch.summary,
+                    }
+                    for _name, _branch in _co_case_v26.branch_reports.items()
+                },
+            },
         })
+        if _co_case_v26.conflicts:
+            AI_MASTER.setdefault("warnings", []).extend(
+                ["CO conflict: " + _x for _x in _co_case_v26.conflicts[:3]]
+            )
+        if not _co_case_v26.accepted:
+            AI_MASTER["final_action"] = "WAIT"
+            AI_MASTER["execution_status"] = "WAIT"
+            AI_MASTER["advice"] = "CO HOLD: branch case file not cleared for execution."
 
         # V24.1 lightweight session memory. Store plain compact dictionaries,
         # not custom class instances, to reduce retained object graphs on rerun.
