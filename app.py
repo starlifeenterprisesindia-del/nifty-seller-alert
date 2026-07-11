@@ -392,12 +392,15 @@ def _render_v27_command_hierarchy(case_data):
 
     psychology = case_data.get("market_psychology", {}) if isinstance(case_data, dict) else {}
     if isinstance(psychology, dict) and psychology:
-        with st.expander("🧠 V36 Market Psychology — Fear, Greed, Trap, Liquidity & Panic", expanded=True):
+        with st.expander("🧠 V36 Market Psychology — Fear, Trap, Panic & Participation", expanded=True):
             _fear = psychology.get("retail_fear", {}) or {}
             _greed = psychology.get("retail_greed", {}) or {}
             _trap = psychology.get("trap_detection", {}) or {}
             _liquidity = psychology.get("liquidity_sweep", {}) or {}
             _panic = psychology.get("panic_selling", {}) or {}
+            _participation = psychology.get("upside_participation", {}) or {}
+            _short_cover = _participation.get("short_covering", {}) or {}
+            _long_build = _participation.get("long_build_up", {}) or {}
             _bull_trap = _trap.get("bull_trap_risk", {}) or {}
             _bear_trap = _trap.get("bear_trap_risk", {}) or {}
             _up_liq = _liquidity.get("upside_liquidity_grab_risk", {}) or {}
@@ -406,8 +409,8 @@ def _render_v27_command_hierarchy(case_data):
                 f"**Psychology:** `{psychology.get('psychology_state','BALANCED')}` &nbsp; | &nbsp; "
                 f"**Trap:** `{_trap.get('state','LOW_TRAP_EVIDENCE')}` &nbsp; | &nbsp; "
                 f"**Liquidity:** `{_liquidity.get('state','LOW_LIQUIDITY_SWEEP_EVIDENCE')}` &nbsp; | &nbsp; "
-                f"**Liquidity Confidence:** {float(_liquidity.get('confidence',0) or 0):.0f}% &nbsp; | &nbsp; "
-                f"**Panic:** `{_panic.get('state','LOW_PANIC_EVIDENCE')}`"
+                f"**Panic:** `{_panic.get('state','LOW_PANIC_EVIDENCE')}` &nbsp; | &nbsp; "
+                f"**Participation:** `{_participation.get('state','LOW_UPMOVE_PARTICIPATION_EVIDENCE')}`"
             )
             _psych_rows = [{
                 "Retail Fear": f"{float(_fear.get('score',0) or 0):.0f}/100",
@@ -417,6 +420,8 @@ def _render_v27_command_hierarchy(case_data):
                 "Upside Grab": f"{float(_up_liq.get('score',0) or 0):.0f}/100",
                 "Downside Grab": f"{float(_down_liq.get('score',0) or 0):.0f}/100",
                 "Panic Evidence": f"{float(_panic.get('score',0) or 0):.0f}/100",
+                "Short Cover": f"{float(_short_cover.get('score',0) or 0):.0f}/100",
+                "Long Build-up": f"{float(_long_build.get('score',0) or 0):.0f}/100",
             }]
             _render_safe_table(_psych_rows, max_rows=1)
             st.caption(
@@ -433,16 +438,22 @@ def _render_v27_command_hierarchy(case_data):
                 st.caption("Panic evidence: " + str(_item))
             for _item in list(_panic.get("cautions", []) or [])[:3]:
                 st.caption("Panic caution: " + str(_item))
+            for _item in list(_short_cover.get("evidence", []) or [])[:2]:
+                st.caption("Short-covering evidence: " + str(_item))
+            for _item in list(_long_build.get("evidence", []) or [])[:2]:
+                st.caption("Long-build-up evidence: " + str(_item))
+            for _item in list(_participation.get("cautions", []) or [])[:3]:
+                st.caption("Participation caution: " + str(_item))
             st.info(
-                "Liquidity grab, stop hunt aur panic selling abhi confirmed fact ya trade signal nahi hain. "
-                "Single-snapshot evidence ko follow-through confirmation chahiye; final judgement AI_MASTER ka hai."
+                "Trap, liquidity grab, panic, short covering aur long build-up abhi confirmed fact ya trade signal nahi hain. "
+                "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
     st.caption("Command flow: Verified Snapshot → Departments including Market Psychology → CO Case File → AI_MASTER → Case History → Pattern Probability → Market Journey → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V36.4 - PANIC SELLING EVIDENCE FOUNDATION
+# NIFTY SELLER AI DASHBOARD V36.5 - SHORT COVERING & LONG BUILD-UP EVIDENCE FOUNDATION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -463,7 +474,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V36.4 Panic Evidence",
+    page_title="Nifty Seller AI V36.5 Participation Evidence",
     page_icon="🧠",
     layout="wide",
 )
@@ -2725,7 +2736,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V36.4 AI COMMAND")
+st.sidebar.title("🏛️ V36.5 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -5826,8 +5837,8 @@ try:
             _v24_price_report.details, _v24_option_report.details, datetime.now(IST).hour
         )
 
-        # V36.4 Market Psychology: Emotion + Trap + Liquidity Sweep + Panic Evidence.
-        # It reads existing reports only, cannot confirm panic/trap/stop hunt from one snapshot,
+        # V36.5 Market Psychology: Emotion + Trap + Liquidity + Panic + Upside Participation Evidence.
+        # It reads existing reports only and cannot confirm psychology events from one snapshot,
         # cannot issue a trade, and must report through CO.
         _v36_psychology_report = MarketPsychologyDirector().build_report(
             price=float(price),
@@ -6106,7 +6117,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V36_4_PANIC_SELLING_EVIDENCE_FOUNDATION",
+                "version": "V36_5_SHORT_COVERING_LONG_BUILDUP_EVIDENCE_FOUNDATION",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6458,7 +6469,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V36.4 Panic Evidence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V36.5 Participation Evidence</div>", unsafe_allow_html=True)
 
 
 # =========================================================

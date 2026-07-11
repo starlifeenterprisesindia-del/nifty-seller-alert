@@ -1,13 +1,13 @@
 """
 market_psychology.py
-Version: V36.4
+Version: V36.5
 Department: Market Psychology
-Status: Phase-4 — Retail Emotion + Trap + Liquidity Sweep + Panic Evidence
+Status: Phase-5 — Retail Emotion + Trap + Liquidity + Panic + Upside Participation Evidence
 
 Safety contract:
 - Evidence and interpretation only.
 - Never emits BUY, SELL CE, SELL PE, IRON CONDOR, or execution permission.
-- Never claims that a trap, stop hunt, or panic event is confirmed from one snapshot/candle.
+- Never claims that a trap, stop hunt, panic, short-covering, or long-build-up event is confirmed from one snapshot/candle.
 - Report must travel through DSP review -> CO case file -> AI_MASTER.
 - Uses existing department reports and the verified snapshot; no API calls,
   loops, timers, or background work.
@@ -908,10 +908,305 @@ class PanicSellingSpecialist:
         }
 
 
+class UpsideParticipationSpecialist:
+    """Separate possible short covering from possible long build-up.
+
+    Both mechanisms can lift price, but they have different OI meaning:
+    short covering requires price up with OI contraction, while long build-up
+    requires price up with OI expansion. The existing Option Intelligence OI
+    classification is treated as the primary witness and is cross-checked with
+    candle quality, VWAP/trend placement, volume, barriers, traps and liquidity
+    sweeps. This remains a single-snapshot evidence report, not confirmation.
+    """
+
+    @staticmethod
+    def _number(value: Any) -> Optional[float]:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number:
+            return None
+        return number
+
+    @staticmethod
+    def _text(mapping: Mapping[str, Any], *path: str) -> str:
+        current: Any = mapping
+        for key in path:
+            if not isinstance(current, Mapping):
+                return ""
+            current = current.get(key)
+        return str(current or "")
+
+    @staticmethod
+    def _clamp(value: float) -> float:
+        return max(0.0, min(100.0, float(value)))
+
+    def analyze(
+        self,
+        *,
+        change_pct: Any,
+        candle_open: Any,
+        candle_high: Any,
+        candle_low: Any,
+        candle_close: Any,
+        emotion: Optional[Mapping[str, Any]] = None,
+        trap: Optional[Mapping[str, Any]] = None,
+        liquidity: Optional[Mapping[str, Any]] = None,
+        panic: Optional[Mapping[str, Any]] = None,
+        price_action: Optional[Mapping[str, Any]] = None,
+        option_intelligence: Optional[Mapping[str, Any]] = None,
+        market_behaviour: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        emotion = emotion if isinstance(emotion, Mapping) else {}
+        trap = trap if isinstance(trap, Mapping) else {}
+        liquidity = liquidity if isinstance(liquidity, Mapping) else {}
+        panic = panic if isinstance(panic, Mapping) else {}
+        price_action = price_action if isinstance(price_action, Mapping) else {}
+        option_intelligence = option_intelligence if isinstance(option_intelligence, Mapping) else {}
+        market_behaviour = market_behaviour if isinstance(market_behaviour, Mapping) else {}
+
+        change_n = self._number(change_pct)
+        open_n = self._number(candle_open)
+        high_n = self._number(candle_high)
+        low_n = self._number(candle_low)
+        close_n = self._number(candle_close)
+
+        short_cover_score = 0.0
+        long_build_score = 0.0
+        short_cover_evidence: List[str] = []
+        long_build_evidence: List[str] = []
+        shared_evidence: List[str] = []
+        cautions: List[str] = []
+        available = 0
+        possible = 7
+        upward_impulse = False
+
+        # 1) Price must actually be advancing. OI classification without an
+        # upward impulse is not accepted as clean short-covering/long-build-up.
+        if change_n is not None:
+            available += 1
+            if change_n >= 0.80:
+                upward_impulse = True
+                short_cover_score += 18
+                long_build_score += 18
+                shared_evidence.append(f"Sharp positive move +{change_n:.2f}%")
+            elif change_n >= 0.35:
+                upward_impulse = True
+                short_cover_score += 12
+                long_build_score += 12
+                shared_evidence.append(f"Positive move +{change_n:.2f}%")
+            elif change_n > 0:
+                upward_impulse = True
+                short_cover_score += 5
+                long_build_score += 5
+                cautions.append(f"Upside move is limited (+{change_n:.2f}%)")
+            else:
+                cautions.append("No positive market impulse in current snapshot")
+
+        # 2) OI-price classification is the differentiating witness.
+        oi_signal = self._text(option_intelligence, "oi", "signal")
+        if oi_signal:
+            available += 1
+            if oi_signal == "Short Covering":
+                short_cover_score += 42
+                short_cover_evidence.append("Option Intelligence reports price-up with OI contraction")
+                long_build_score -= 10
+            elif oi_signal == "Long Build-up":
+                long_build_score += 42
+                long_build_evidence.append("Option Intelligence reports price-up with OI expansion")
+                short_cover_score -= 10
+            elif oi_signal == "Short Build-up":
+                cautions.append("Fresh short build-up conflicts with a clean upside participation thesis")
+            elif oi_signal == "Long Unwinding":
+                cautions.append("Long unwinding conflicts with a clean upside participation thesis")
+            else:
+                cautions.append("OI-price classification is neutral")
+        else:
+            cautions.append("OI-price classification unavailable")
+
+        # 3) A bullish candle closing near its high supports real participation.
+        valid_candle = (
+            open_n is not None and high_n is not None and low_n is not None
+            and close_n is not None and high_n > low_n
+        )
+        if valid_candle:
+            available += 1
+            candle_range = max(high_n - low_n, 0.01)
+            body_ratio = abs(close_n - open_n) / candle_range
+            close_position = self._clamp((close_n - low_n) / candle_range * 100.0)
+            if close_n > open_n and body_ratio >= 0.60:
+                short_cover_score += 10
+                long_build_score += 10
+                shared_evidence.append(f"Strong bullish candle body ({body_ratio * 100:.0f}% of range)")
+            elif close_n <= open_n:
+                cautions.append("Current candle does not show bullish body follow-through")
+            if close_position >= 80:
+                short_cover_score += 8
+                long_build_score += 8
+                shared_evidence.append(f"Candle closed near its high ({close_position:.0f}% of range)")
+            elif close_position < 55:
+                cautions.append(f"Candle close is not near the high ({close_position:.0f}% of range)")
+        else:
+            body_ratio = None
+            close_position = None
+            cautions.append("Verified candle OHLC unavailable")
+
+        # 4) Trend and VWAP placement support continuation, but do not identify
+        # whether the move is new buying or old shorts exiting.
+        trend = self._text(price_action, "trend", "trend")
+        vwap_status = self._text(price_action, "vwap", "vwap_status")
+        move_stage = self._text(price_action, "move_stage", "stage")
+        barrier_zone = self._text(price_action, "barrier", "barrier_zone")
+        if trend or vwap_status:
+            available += 1
+            if "Bullish" in trend:
+                short_cover_score += 8
+                long_build_score += 8
+                shared_evidence.append(f"Price-action trend: {trend}")
+            if vwap_status == "Above VWAP":
+                short_cover_score += 7
+                long_build_score += 7
+                shared_evidence.append("Price is trading above VWAP")
+
+        # 5) Participation quality from volume.
+        volume_status = self._text(option_intelligence, "volume", "status")
+        if volume_status:
+            available += 1
+            if volume_status == "Spike":
+                short_cover_score += 13
+                long_build_score += 13
+                shared_evidence.append("Option volume spike supports active participation")
+            elif volume_status == "High":
+                short_cover_score += 8
+                long_build_score += 8
+                shared_evidence.append("High option volume supports participation")
+            elif volume_status == "Weak":
+                short_cover_score -= 7
+                long_build_score -= 7
+                cautions.append("Weak volume does not verify the upside mechanism")
+
+        # 6) Strike pressure helps distinguish sustainable support from overhead
+        # supply. It is a supporting witness, not a direction command.
+        strike_pressure = self._text(option_intelligence, "strike", "pressure")
+        barrier_reaction = self._text(option_intelligence, "barrier", "barrier")
+        if strike_pressure or barrier_reaction:
+            available += 1
+            if strike_pressure == "PE Support":
+                long_build_score += 8
+                long_build_evidence.append("PE support is consistent with fresh long participation")
+            elif strike_pressure == "CE Resistance":
+                cautions.append("CE resistance may cap an upside participation move")
+            if barrier_reaction == "Rejection":
+                cautions.append("Barrier rejection weakens clean upside follow-through")
+
+        # 7) Trap/liquidity/exhaustion context prevents the branch from calling a
+        # mature squeeze or stop sweep a healthy continuation move.
+        trap_state = str(trap.get("state", ""))
+        liquidity_state = str(liquidity.get("state", ""))
+        panic_state = str(panic.get("state", ""))
+        reversal_risk = self._text(market_behaviour, "reversal", "reversal_risk")
+        behaviour_barrier = self._text(market_behaviour, "barrier", "barrier_view")
+        if trap_state or liquidity_state or panic_state or reversal_risk or behaviour_barrier:
+            available += 1
+
+        barrier_caution = (
+            "Resistance" in barrier_zone
+            or "Resistance" in behaviour_barrier
+            or barrier_reaction == "Rejection"
+        )
+        bull_trap_caution = trap_state in {"POSSIBLE_BULL_TRAP_RISK", "TWO_WAY_TRAP_RISK"}
+        upside_sweep_caution = liquidity_state in {
+            "POSSIBLE_UPSIDE_LIQUIDITY_GRAB",
+            "TWO_SIDED_LIQUIDITY_SWEEP_RISK",
+        }
+        exhaustion_caution = move_stage in {"Late Move", "Exhaustion Move"} or reversal_risk == "High"
+
+        if panic_state in {"POSSIBLE_PANIC_SELLING", "PANIC_EXHAUSTION_OR_STOP_SWEEP_WATCH"} and oi_signal == "Short Covering":
+            short_cover_score += 6
+            short_cover_evidence.append("Short covering may be a rebound after panic/forced exits")
+        if barrier_caution:
+            short_cover_score -= 4
+            long_build_score -= 6
+            cautions.append("Upside move is approaching or rejecting from resistance")
+        if bull_trap_caution:
+            short_cover_score -= 5
+            long_build_score -= 8
+            cautions.append("Bull-trap evidence conflicts with clean upside continuation")
+        if upside_sweep_caution:
+            short_cover_score -= 5
+            long_build_score -= 8
+            cautions.append("Upside liquidity sweep may be a stop run rather than sustainable buying")
+        if exhaustion_caution:
+            short_cover_score -= 3
+            long_build_score -= 6
+            cautions.append(f"{move_stage or 'High reversal risk'} may indicate upside exhaustion")
+
+        short_cover_score = self._clamp(short_cover_score)
+        long_build_score = self._clamp(long_build_score)
+        caution_context = barrier_caution or bull_trap_caution or upside_sweep_caution or exhaustion_caution
+
+        if upward_impulse and oi_signal == "Short Covering" and short_cover_score >= 58:
+            if caution_context:
+                state = "SHORT_COVERING_EXHAUSTION_WATCH"
+                follow_through = "UPMOVE_VISIBLE_BUT_REVERSAL_RISK"
+            else:
+                state = "POSSIBLE_SHORT_COVERING"
+                follow_through = "PRICE_UP_OI_DOWN_SEQUENCE_VISIBLE"
+            dominant_mechanism = "SHORT_COVERING"
+        elif upward_impulse and oi_signal == "Long Build-up" and long_build_score >= 58:
+            if caution_context:
+                state = "LONG_BUILDUP_AT_BARRIER_WATCH"
+                follow_through = "FRESH_LONGS_VISIBLE_BUT_BARRIER_RISK"
+            else:
+                state = "POSSIBLE_LONG_BUILDUP"
+                follow_through = "PRICE_UP_OI_UP_SEQUENCE_VISIBLE"
+            dominant_mechanism = "LONG_BUILDUP"
+        elif upward_impulse and max(short_cover_score, long_build_score) >= 32:
+            state = "UPMOVE_PARTICIPATION_WATCH"
+            dominant_mechanism = "UNRESOLVED"
+            follow_through = "MORE_OI_AND_PRICE_CONFIRMATION_REQUIRED"
+        else:
+            state = "LOW_UPMOVE_PARTICIPATION_EVIDENCE"
+            dominant_mechanism = "NOT_ESTABLISHED"
+            follow_through = "NOT_ESTABLISHED"
+
+        coverage = self._clamp(available / possible * 100.0)
+        confidence = self._clamp(18.0 + coverage * 0.35 + min(max(short_cover_score, long_build_score), 78.0) * 0.32)
+        confidence = min(confidence, 84.0)
+
+        return {
+            "state": state,
+            "dominant_mechanism": dominant_mechanism,
+            "short_covering": {
+                "score": round(short_cover_score, 1),
+                "evidence": list(dict.fromkeys(short_cover_evidence + shared_evidence))[:8],
+            },
+            "long_build_up": {
+                "score": round(long_build_score, 1),
+                "evidence": list(dict.fromkeys(long_build_evidence + shared_evidence))[:8],
+            },
+            "cautions": list(dict.fromkeys(cautions))[:8],
+            "follow_through_status": follow_through,
+            "metrics": {
+                "oi_signal": oi_signal or "Unknown",
+                "volume_status": volume_status or "Unknown",
+                "move_stage": move_stage or "Unknown",
+                "candle_body_ratio": round(body_ratio, 2) if body_ratio is not None else None,
+                "candle_close_position_pct": round(close_position, 1) if close_position is not None else None,
+            },
+            "data_coverage": round(coverage, 1),
+            "confidence": round(confidence, 1),
+            "confirmation_status": "UNCONFIRMED_SINGLE_SNAPSHOT_REQUIRES_OI_PRICE_FOLLOW_THROUGH",
+            "authority": "EVIDENCE_ONLY_TO_CO",
+            "execution_instruction": "NONE",
+        }
+
+
 class MarketPsychologyDirector:
     """DSP Market Psychology: one report, no independent trade authority."""
 
-    VERSION = "V36.4_PSYCHOLOGY_TRAP_LIQUIDITY_AND_PANIC_EVIDENCE"
+    VERSION = "V36.5_PSYCHOLOGY_WITH_UPSIDE_PARTICIPATION_EVIDENCE"
 
     def build_report(
         self,
@@ -981,6 +1276,20 @@ class MarketPsychologyDirector:
             option_intelligence=option_details,
             market_behaviour=behaviour_details,
         )
+        participation = UpsideParticipationSpecialist().analyze(
+            change_pct=change_pct,
+            candle_open=candle_open,
+            candle_high=candle_high,
+            candle_low=candle_low,
+            candle_close=candle_close,
+            emotion=emotion,
+            trap=trap,
+            liquidity=liquidity,
+            panic=panic,
+            price_action=price_action_details,
+            option_intelligence=option_details,
+            market_behaviour=behaviour_details,
+        )
 
         fear_score = float(emotion["retail_fear"]["score"])
         greed_score = float(emotion["retail_greed"]["score"])
@@ -994,12 +1303,16 @@ class MarketPsychologyDirector:
         lower_liquidity = float(liquidity["downside_liquidity_grab_risk"]["score"])
         panic_state = str(panic["state"])
         panic_score = float(panic["score"])
+        participation_state = str(participation["state"])
+        short_cover_score = float(participation["short_covering"]["score"])
+        long_build_score = float(participation["long_build_up"]["score"])
 
         details = {
             **emotion,
             "trap_detection": trap,
             "liquidity_sweep": liquidity,
             "panic_selling": panic,
+            "upside_participation": participation,
             "authority": "EVIDENCE_ONLY_TO_CO",
             "phase_control": "OBSERVATION_ONLY_NOT_IN_DIRECTIONAL_CONSENSUS",
         }
@@ -1008,14 +1321,16 @@ class MarketPsychologyDirector:
             f"Greed {greed_score:.0f}/100 | Trap {trap_state} "
             f"(Bull {bull_trap:.0f}, Bear {bear_trap:.0f}) | "
             f"Liquidity {liquidity_state} (Up {upper_liquidity:.0f}, Down {lower_liquidity:.0f}) | "
-            f"Panic {panic_state} ({panic_score:.0f}/100) | CO verification required"
+            f"Panic {panic_state} ({panic_score:.0f}/100) | "
+            f"Participation {participation_state} (SC {short_cover_score:.0f}, LB {long_build_score:.0f}) | "
+            f"CO verification required"
         )
         return MarketPsychologyReport(
             summary=summary,
             # Overall branch confidence remains the validated V36.1 emotion
-            # confidence. Trap, liquidity, and panic confidence are displayed
-            # separately and cannot silently change CO case strength during
-            # foundation testing.
+            # confidence. Trap, liquidity, panic and participation confidence
+            # are displayed separately and cannot silently change CO case
+            # strength during foundation testing.
             confidence=confidence,
             details=details,
         )
