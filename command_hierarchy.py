@@ -1,21 +1,26 @@
 """
 command_hierarchy.py
-Version: V26.0
-Role: Department/Branch command-and-control layer
+Version: V30.0
+Role: CO Investigation Engine and command hierarchy.
 
-Hierarchy:
-- Specialists/Employees prepare facts inside each department module.
-- Branch Boss validates the department report.
-- CO receives only validated branch summaries.
-- CO creates one consolidated Case File.
-- AI_MASTER remains the only final trading authority.
-
-No background loops, threads, polling, API calls, or trading decisions exist here.
+One-shot flow only:
+Branch facts -> DSP review -> evidence/witness/contradiction analysis ->
+CO case file -> AI_MASTER. No background loops and no trading decision here.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional
+
+
+@dataclass(frozen=True)
+class EvidenceItem:
+    branch: str
+    statement: str
+    category: str
+    weight: float
+    verified_by: List[str] = field(default_factory=list)
+    contradiction: bool = False
 
 
 @dataclass(frozen=True)
@@ -26,24 +31,36 @@ class BranchReport:
     confidence: float
     summary: str
     facts: Dict[str, Any] = field(default_factory=dict)
+    evidence: List[EvidenceItem] = field(default_factory=list)
+    reasoning: str = ""
+    risk_note: str = ""
+    recommendation: str = "INFORMATION_ONLY"
     warnings: List[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class COCaseFile:
     snapshot_id: str
+    case_id: str
     accepted: bool
     command_status: str
     agreement_score: float
     data_quality_score: float
+    case_strength: float
+    department_readiness: float
+    witness_score: float
     branch_reports: Dict[str, BranchReport]
     consolidated_evidence: List[str]
+    accepted_evidence: List[str]
+    rejected_evidence: List[str]
+    missing_evidence: List[str]
     conflicts: List[str]
     warnings: List[str]
+    court_brief: str
 
 
 class BranchBoss:
-    """Validates one department report and forwards only a compact summary."""
+    """Validates one department report and converts facts into a compact case note."""
 
     def __init__(self, branch: str, boss: str, minimum_confidence: float = 0.0):
         self.branch = branch
@@ -51,11 +68,12 @@ class BranchBoss:
         self.minimum_confidence = float(minimum_confidence)
 
     def review(self, report: Any) -> BranchReport:
-        summary = self._read(report, "summary", "No report")
+        summary = str(self._read(report, "summary", "No report"))[:300]
         confidence = self._number(self._read(report, "confidence", 0.0))
         details = self._read(report, "details", {})
         if not isinstance(details, Mapping):
             details = {}
+        facts = self._compact(details)
 
         warnings: List[str] = []
         if report is None:
@@ -65,16 +83,75 @@ class BranchBoss:
         if not summary or summary == "No report":
             warnings.append("Summary missing")
 
+        evidence = self._extract_evidence(facts, confidence)
+        reasoning = self._reasoning(summary, evidence)
+        risk_note = self._risk_note(facts, confidence)
+        recommendation = self._recommendation(summary, facts)
         status = "READY" if not warnings else "CAUTION"
+
         return BranchReport(
             branch=self.branch,
             boss=self.boss,
             status=status,
             confidence=round(max(0.0, min(100.0, confidence)), 1),
-            summary=str(summary)[:300],
-            facts=self._compact(details),
+            summary=summary,
+            facts=facts,
+            evidence=evidence,
+            reasoning=reasoning,
+            risk_note=risk_note,
+            recommendation=recommendation,
             warnings=warnings,
         )
+
+    def _extract_evidence(self, facts: Mapping[str, Any], confidence: float) -> List[EvidenceItem]:
+        items: List[EvidenceItem] = []
+        for key, value in facts.items():
+            if len(items) >= 8:
+                break
+            text = self._fact_text(value)
+            if not text or text.lower() in {"unknown", "none", "no report", ""}:
+                continue
+            category = "CRITICAL" if key in {"trend", "oi", "volume", "barrier", "vix", "news", "strategy"} else "SUPPORTING"
+            weight = min(100.0, max(20.0, confidence * (1.0 if category == "CRITICAL" else 0.75)))
+            items.append(EvidenceItem(self.branch, f"{key}: {text}"[:220], category, round(weight, 1)))
+        return items
+
+    @staticmethod
+    def _fact_text(value: Any) -> str:
+        if isinstance(value, Mapping):
+            parts=[]
+            for k,v in list(value.items())[:4]:
+                if v not in (None, "", "Unknown"):
+                    parts.append(f"{k}={v}")
+            return ", ".join(parts)
+        if isinstance(value, (list, tuple)):
+            return ", ".join(str(x) for x in list(value)[:4])
+        return str(value)
+
+    @staticmethod
+    def _reasoning(summary: str, evidence: List[EvidenceItem]) -> str:
+        if not evidence:
+            return "Insufficient structured evidence; keep informational."
+        return f"{summary}. Supported by {len(evidence)} structured evidence item(s)."[:360]
+
+    @staticmethod
+    def _risk_note(facts: Mapping[str, Any], confidence: float) -> str:
+        text = str(facts).lower()
+        risks=[]
+        if confidence < 55:
+            risks.append("low confidence")
+        for token,label in (("high impact","news risk"),("high volatility","volatility risk"),("fake","fake-move risk"),("exhaust","exhaustion risk")):
+            if token in text:
+                risks.append(label)
+        return ", ".join(risks) if risks else "No material branch-specific risk flagged."
+
+    @staticmethod
+    def _recommendation(summary: str, facts: Mapping[str, Any]) -> str:
+        text=(summary+" "+str(facts)).upper()
+        for action in ("IRON CONDOR","SELL CE","SELL PE","WAIT"):
+            if action in text:
+                return action
+        return "INFORMATION_ONLY"
 
     @staticmethod
     def _read(report: Any, key: str, default: Any) -> Any:
@@ -111,95 +188,103 @@ class BranchBoss:
 
 
 class CommandingOfficer:
-    """CO verifies branch readiness and prepares one case file for AI_MASTER."""
+    """Cross-verifies branches and prepares one explainable case file."""
 
-    REQUIRED_BRANCHES = (
-        "DATA",
-        "OPTION",
-        "PRICE_ACTION",
-        "MARKET_BEHAVIOUR",
-        "SMART_MONEY",
-        "RISK",
-        "CANDIDATE",
-        "STRATEGY",
-    )
+    REQUIRED_BRANCHES = ("DATA","OPTION","PRICE_ACTION","MARKET_BEHAVIOUR","SMART_MONEY","RISK","CANDIDATE","STRATEGY")
 
-    def prepare_case_file(
-        self,
-        *,
-        snapshot_id: str,
-        data_quality_score: float,
-        branches: Iterable[BranchReport],
-    ) -> COCaseFile:
+    def prepare_case_file(self, *, snapshot_id: str, data_quality_score: float, branches: Iterable[BranchReport]) -> COCaseFile:
         branch_map = {branch.branch: branch for branch in branches}
         warnings: List[str] = []
         conflicts: List[str] = []
-        evidence: List[str] = []
+        missing_evidence: List[str] = []
 
         missing = [name for name in self.REQUIRED_BRANCHES if name not in branch_map]
         if missing:
             warnings.append("Missing branches: " + ", ".join(missing))
-
-        caution = [name for name, branch in branch_map.items() if branch.status != "READY"]
+        caution = [name for name,b in branch_map.items() if b.status != "READY"]
         if caution:
             warnings.append("Branches on caution: " + ", ".join(caution))
 
-        for name in self.REQUIRED_BRANCHES:
-            branch = branch_map.get(name)
-            if branch:
-                evidence.append(f"{name}: {branch.summary}")
-
-        # Lightweight conflict checks. CO does not make a trade decision.
-        price_text = self._branch_text(branch_map.get("PRICE_ACTION"))
-        option_text = self._branch_text(branch_map.get("OPTION"))
-        money_text = self._branch_text(branch_map.get("SMART_MONEY"))
-        strategy_text = self._branch_text(branch_map.get("STRATEGY"))
+        price_text=self._branch_text(branch_map.get("PRICE_ACTION"))
+        option_text=self._branch_text(branch_map.get("OPTION"))
+        money_text=self._branch_text(branch_map.get("SMART_MONEY"))
+        strategy_text=self._branch_text(branch_map.get("STRATEGY"))
+        behaviour_text=self._branch_text(branch_map.get("MARKET_BEHAVIOUR"))
 
         if "bullish" in price_text and ("bearish" in option_text or "selling" in money_text):
             conflicts.append("Bullish price action conflicts with option/money flow")
         if "bearish" in price_text and ("bullish" in option_text or "buying" in money_text):
             conflicts.append("Bearish price action conflicts with option/money flow")
+        if "breakout" in behaviour_text and "resistance" in option_text and "increasing" not in behaviour_text:
+            conflicts.append("Breakout thesis lacks confirming option pressure")
         if "wait" not in strategy_text and conflicts:
             conflicts.append("Strategy recommendation exists despite cross-branch conflict")
 
-        confidences = [
-            branch.confidence for branch in branch_map.values()
-            if branch.status == "READY" and branch.confidence > 0
-        ]
-        average_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        agreement_score = max(0.0, min(100.0, average_confidence - len(conflicts) * 12.0))
-        quality = max(0.0, min(100.0, float(data_quality_score or 0)))
+        all_evidence=[e for b in branch_map.values() for e in b.evidence]
+        accepted_evidence=[]; rejected_evidence=[]
+        for evidence in all_evidence:
+            witnesses=self._witnesses(evidence, branch_map)
+            statement=evidence.statement
+            if evidence.weight >= 55 and (witnesses or evidence.category == "CRITICAL"):
+                suffix=(" | verified by " + ", ".join(witnesses)) if witnesses else ""
+                accepted_evidence.append(f"{evidence.branch}: {statement}{suffix}")
+            else:
+                rejected_evidence.append(f"{evidence.branch}: {statement} (weak/unverified)")
 
-        accepted = (
-            bool(snapshot_id)
-            and not missing
-            and quality >= 60.0
-            and len(conflicts) <= 2
-        )
-        command_status = "CASE_FILE_READY" if accepted else "CASE_FILE_HOLD"
+        for name in self.REQUIRED_BRANCHES:
+            b=branch_map.get(name)
+            if b is None or not b.evidence:
+                missing_evidence.append(f"{name}: no structured evidence")
+
+        ready_count=sum(1 for name in self.REQUIRED_BRANCHES if branch_map.get(name) and branch_map[name].status=="READY")
+        readiness=ready_count/len(self.REQUIRED_BRANCHES)*100
+        confidences=[b.confidence for b in branch_map.values() if b.status=="READY" and b.confidence>0]
+        avg_conf=sum(confidences)/len(confidences) if confidences else 0.0
+        witness_score=min(100.0, len(accepted_evidence)/max(1,len(all_evidence))*100)
+        agreement=max(0.0,min(100.0,avg_conf-len(conflicts)*12.0))
+        quality=max(0.0,min(100.0,float(data_quality_score or 0)))
+        case_strength=max(0.0,min(100.0, quality*0.25 + agreement*0.30 + readiness*0.20 + witness_score*0.25 - len(conflicts)*5.0))
+
+        accepted=bool(snapshot_id) and not missing and quality>=60 and readiness>=75 and case_strength>=55 and len(conflicts)<=2
+        command_status="CASE_FILE_READY" if accepted else "CASE_FILE_HOLD"
+        case_id=f"NIFTY-{str(snapshot_id).replace(':','').replace('-','')[-18:]}"
+        court_brief=(f"{len(accepted_evidence)} evidence accepted, {len(rejected_evidence)} rejected, "
+                     f"{len(conflicts)} conflict(s); case strength {case_strength:.1f}%.")
+        consolidated=[f"{name}: {branch_map[name].summary}" for name in self.REQUIRED_BRANCHES if name in branch_map]
 
         return COCaseFile(
-            snapshot_id=snapshot_id or "UNKNOWN",
-            accepted=accepted,
-            command_status=command_status,
-            agreement_score=round(agreement_score, 1),
-            data_quality_score=round(quality, 1),
-            branch_reports=branch_map,
-            consolidated_evidence=evidence[:12],
-            conflicts=conflicts[:8],
-            warnings=warnings[:8],
+            snapshot_id=snapshot_id or "UNKNOWN", case_id=case_id, accepted=accepted,
+            command_status=command_status, agreement_score=round(agreement,1),
+            data_quality_score=round(quality,1), case_strength=round(case_strength,1),
+            department_readiness=round(readiness,1), witness_score=round(witness_score,1),
+            branch_reports=branch_map, consolidated_evidence=consolidated[:12],
+            accepted_evidence=accepted_evidence[:16], rejected_evidence=rejected_evidence[:12],
+            missing_evidence=missing_evidence[:8], conflicts=conflicts[:8], warnings=warnings[:8],
+            court_brief=court_brief,
         )
 
     @staticmethod
+    def _witnesses(evidence: EvidenceItem, branches: Mapping[str, BranchReport]) -> List[str]:
+        tokens={t for t in re_words(evidence.statement) if len(t)>4}
+        witnesses=[]
+        for name,b in branches.items():
+            if name==evidence.branch: continue
+            other=re_words(b.summary+" "+str(b.facts))
+            if tokens.intersection(other): witnesses.append(name)
+        return witnesses[:3]
+
+    @staticmethod
     def _branch_text(branch: Optional[BranchReport]) -> str:
-        if branch is None:
-            return ""
-        return (branch.summary + " " + str(branch.facts)).lower()
+        return "" if branch is None else (branch.summary+" "+str(branch.facts)).lower()
+
+
+def re_words(text: str) -> set[str]:
+    import re
+    return set(re.findall(r"[a-zA-Z_]+", str(text).lower()))
 
 
 class AIOrganizationController:
-    """One-shot orchestration: branches report -> CO case file -> sleep."""
-
+    """One-shot orchestration: branches report -> CO investigation file -> sleep."""
     BOSSES = {
         "DATA": BranchBoss("DATA", "DSP Data Intelligence", 60),
         "OPTION": BranchBoss("OPTION", "DSP Option Intelligence", 0),
@@ -210,20 +295,6 @@ class AIOrganizationController:
         "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),
         "STRATEGY": BranchBoss("STRATEGY", "DSP Strategy", 0),
     }
-
-    def build_case_file(
-        self,
-        *,
-        snapshot_id: str,
-        data_quality_score: float,
-        reports: Mapping[str, Any],
-    ) -> COCaseFile:
-        reviewed = [
-            boss.review(reports.get(name))
-            for name, boss in self.BOSSES.items()
-        ]
-        return CommandingOfficer().prepare_case_file(
-            snapshot_id=snapshot_id,
-            data_quality_score=data_quality_score,
-            branches=reviewed,
-        )
+    def build_case_file(self, *, snapshot_id: str, data_quality_score: float, reports: Mapping[str, Any]) -> COCaseFile:
+        reviewed=[boss.review(reports.get(name)) for name,boss in self.BOSSES.items()]
+        return CommandingOfficer().prepare_case_file(snapshot_id=snapshot_id,data_quality_score=data_quality_score,branches=reviewed)

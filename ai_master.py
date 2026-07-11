@@ -91,7 +91,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V24.0_AI_MASTER_AUTHORITY"
+    VERSION = "V30.0_AI_COURT_AUTHORITY"
 
     def decide(
         self,
@@ -105,9 +105,20 @@ class AIMaster:
         risk_report: Any,
         strategy_report: Any,
         candidate_report: Any,
+        co_case_file: Any = None,
     ) -> AIMasterDecision:
         warnings: List[str] = []
         evidence: List[str] = []
+
+        co_accepted = True
+        co_case_strength = 0.0
+        co_case_id = ""
+        if co_case_file is not None:
+            co_accepted = bool(getattr(co_case_file, "accepted", True))
+            co_case_strength = float(getattr(co_case_file, "case_strength", 0.0) or 0.0)
+            co_case_id = str(getattr(co_case_file, "case_id", ""))
+            if not co_accepted:
+                warnings.append("CO case file on HOLD")
 
         if not snapshot_id:
             warnings.append("Missing snapshot ID")
@@ -143,6 +154,7 @@ class AIMaster:
         # Trade permission is decided before candidate approval.
         trade_allowed = (
             data_quality_ok
+            and co_accepted
             and not risk_block
             and recommended in {"SELL CE", "SELL PE", "IRON CONDOR"}
             and top_score >= 65.0
@@ -175,6 +187,8 @@ class AIMaster:
             ),
             warnings=warnings,
         )
+        if co_case_file is not None:
+            confidence = round(max(0.0, min(100.0, confidence * 0.75 + co_case_strength * 0.25)), 1)
 
         reason = self._reason(
             action=action,
@@ -203,6 +217,9 @@ class AIMaster:
                 "top_strategy_score": top_score,
                 "data_quality_ok": bool(data_quality_ok),
                 "risk_block": risk_block,
+                "co_case_id": co_case_id,
+                "co_case_strength": co_case_strength,
+                "co_accepted": co_accepted,
             },
         )
 

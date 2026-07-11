@@ -165,6 +165,14 @@ def _render_v27_command_hierarchy(case_data):
     conflicts = list(case_data.get("conflicts", []) or [])
     warnings = list(case_data.get("warnings", []) or [])
     branches = case_data.get("branches", {}) or {}
+    case_id = str(case_data.get("case_id", "UNKNOWN"))
+    case_strength = float(case_data.get("case_strength", 0) or 0)
+    readiness = float(case_data.get("department_readiness", 0) or 0)
+    witness_score = float(case_data.get("witness_score", 0) or 0)
+    court_brief = str(case_data.get("court_brief", ""))
+    accepted_evidence = list(case_data.get("accepted_evidence", []) or [])
+    rejected_evidence = list(case_data.get("rejected_evidence", []) or [])
+    missing_evidence = list(case_data.get("missing_evidence", []) or [])
 
     co_icon = "✅" if accepted else "⛔"
     st.markdown(
@@ -172,6 +180,7 @@ def _render_v27_command_hierarchy(case_data):
         f"**Branch Agreement:** {agreement:.0f}% &nbsp; | &nbsp; "
         f"**Data Quality:** {quality:.0f}%"
     )
+    st.caption(f"Case ID: {case_id} | Case Strength: {case_strength:.0f}% | Readiness: {readiness:.0f}% | Witness: {witness_score:.0f}%")
 
     rows = []
     branch_order = [
@@ -194,10 +203,22 @@ def _render_v27_command_hierarchy(case_data):
             "Experience": str(branch.get("experience_count", 0)),
             "Reliability": f"{float(branch.get('reliability_score', 0) or 0):.0f}%",
             "Training": str(branch.get("training_status", "RECRUIT")),
+            "Evidence": str(branch.get("evidence_count", 0)),
+            "Recommendation": str(branch.get("recommendation", "INFORMATION_ONLY")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
     _render_safe_table(rows, max_rows=12)
 
+    if court_brief:
+        st.info("AI Court Brief: " + court_brief)
+    if accepted_evidence:
+        st.markdown("**Accepted Evidence**")
+        for item in accepted_evidence[:6]: st.write("✅ " + str(item))
+    if rejected_evidence:
+        with st.expander("Rejected / Weak Evidence"):
+            for item in rejected_evidence[:6]: st.write("❌ " + str(item))
+    if missing_evidence:
+        st.caption("Missing evidence: " + " | ".join(str(x) for x in missing_evidence[:4]))
     if conflicts:
         st.warning("CO conflicts: " + " | ".join(str(x) for x in conflicts[:4]))
     if warnings:
@@ -206,7 +227,7 @@ def _render_v27_command_hierarchy(case_data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V29.0 - BRANCH SERVICE ACADEMY
+# NIFTY SELLER AI DASHBOARD V30.0 - CO INVESTIGATION ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -5700,6 +5721,7 @@ try:
             behaviour_report=_v24_behaviour_report, smart_money_report=_v24_money_report,
             risk_report=_v24_risk_report, strategy_report=_v24_strategy_report,
             candidate_report=_v24_candidate_report,
+            co_case_file=_co_case_v26,
         )
 
         def _v24_candidate_plan(candidate, side, confidence_value):
@@ -5791,7 +5813,15 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V29_CO_BRANCH_SERVICE_ACADEMY",
+                "version": "V30_CO_INVESTIGATION_ENGINE",
+                "case_id": _co_case_v26.case_id,
+                "case_strength": _co_case_v26.case_strength,
+                "department_readiness": _co_case_v26.department_readiness,
+                "witness_score": _co_case_v26.witness_score,
+                "court_brief": _co_case_v26.court_brief,
+                "accepted_evidence": list(_co_case_v26.accepted_evidence),
+                "rejected_evidence": list(_co_case_v26.rejected_evidence),
+                "missing_evidence": list(_co_case_v26.missing_evidence),
                 "co_status": _co_case_v26.command_status,
                 "accepted": _co_case_v26.accepted,
                 "agreement_score": _co_case_v26.agreement_score,
@@ -5804,6 +5834,10 @@ try:
                         "status": _branch.status,
                         "confidence": _branch.confidence,
                         "summary": _branch.summary,
+                        "reasoning": _branch.reasoning,
+                        "risk_note": _branch.risk_note,
+                        "recommendation": _branch.recommendation,
+                        "evidence_count": len(_branch.evidence),
                         "sop_status": getattr(_training_reports_v28.get(_name), "sop_status", "NOT_TRAINED"),
                         "learning_state": getattr(_training_reports_v28.get(_name), "change_from_previous", "NO_MEMORY"),
                         "memory_count": getattr(_training_reports_v28.get(_name), "memory_count", 0),
