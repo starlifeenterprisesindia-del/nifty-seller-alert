@@ -122,26 +122,84 @@ def _safe_display_df(data):
 
 
 def _render_safe_table(data, *, max_rows=250):
-    """Render a table without PyArrow/native dataframe serialization."""
+    """Render mixed-type tables without Arrow and without showing raw HTML tags."""
     df = _safe_display_df(data).head(max_rows)
     if df.empty:
         st.caption("No rows available.")
         return
-    html = df.to_html(index=False, escape=True, border=0, classes="v25-safe-table")
-    st.markdown(
-        """
-        <style>
-        .v25-safe-table{width:100%;border-collapse:collapse;font-size:.86rem;display:block;overflow-x:auto;white-space:nowrap}
-        .v25-safe-table th,.v25-safe-table td{padding:7px 9px;border:1px solid rgba(128,128,128,.28);text-align:left}
-        .v25-safe-table th{font-weight:800;background:rgba(128,128,128,.12)}
-        </style>
-        """ + html,
-        unsafe_allow_html=True,
+
+    table_html = df.to_html(
+        index=False,
+        escape=True,
+        border=0,
+        classes="v27-safe-table",
     )
+    full_html = (
+        "<style>"
+        ".v27-table-wrap{width:100%;overflow-x:auto;margin:.35rem 0 1rem 0;}"
+        ".v27-safe-table{width:100%;border-collapse:collapse;font-size:.84rem;white-space:nowrap;}"
+        ".v27-safe-table th,.v27-safe-table td{padding:7px 9px;border:1px solid rgba(128,128,128,.28);text-align:left;}"
+        ".v27-safe-table th{font-weight:800;background:rgba(128,128,128,.14);position:sticky;top:0;}"
+        ".v27-safe-table tr:nth-child(even){background:rgba(128,128,128,.045);}"
+        "</style>"
+        "<div class='v27-table-wrap'>" + table_html + "</div>"
+    )
+    try:
+        st.html(full_html)
+    except Exception:
+        # No indentation before HTML: prevents Markdown from treating it as code.
+        st.markdown(full_html, unsafe_allow_html=True)
+
+
+def _render_v27_command_hierarchy(case_data):
+    """Compact visual organization: branches -> CO -> AI_MASTER."""
+    if not isinstance(case_data, dict):
+        st.info("CO command hierarchy report abhi available nahi hai.")
+        return
+
+    status = str(case_data.get("co_status", "CASE_FILE_HOLD"))
+    accepted = bool(case_data.get("accepted", False))
+    agreement = float(case_data.get("agreement_score", 0) or 0)
+    quality = float(case_data.get("data_quality_score", 0) or 0)
+    conflicts = list(case_data.get("conflicts", []) or [])
+    warnings = list(case_data.get("warnings", []) or [])
+    branches = case_data.get("branches", {}) or {}
+
+    co_icon = "✅" if accepted else "⛔"
+    st.markdown(
+        f"**🎖️ CO Case File:** {co_icon} `{status}` &nbsp; | &nbsp; "
+        f"**Branch Agreement:** {agreement:.0f}% &nbsp; | &nbsp; "
+        f"**Data Quality:** {quality:.0f}%"
+    )
+
+    rows = []
+    branch_order = [
+        "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
+        "SMART_MONEY", "RISK", "STRATEGY", "CANDIDATE",
+    ]
+    for branch_name in branch_order:
+        branch = branches.get(branch_name, {}) if isinstance(branches, dict) else {}
+        if not isinstance(branch, dict):
+            branch = {}
+        branch_status = str(branch.get("status", "MISSING"))
+        rows.append({
+            "Branch": branch_name.replace("_", " ").title(),
+            "Boss": branch.get("boss", "DSP Not Assigned"),
+            "Status": ("✅ " if branch_status == "READY" else "⚠️ ") + branch_status,
+            "Confidence": f"{float(branch.get('confidence', 0) or 0):.0f}%",
+            "Report": str(branch.get("summary", "No report"))[:140],
+        })
+    _render_safe_table(rows, max_rows=12)
+
+    if conflicts:
+        st.warning("CO conflicts: " + " | ".join(str(x) for x in conflicts[:4]))
+    if warnings:
+        st.caption("CO warnings: " + " | ".join(str(x) for x in warnings[:4]))
+    st.caption("Command flow: Verified Snapshot → Branch Specialists → DSP Bosses → CO Case File → AI_MASTER Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V25.0 - REFRESH SAFE PRODUCTION
+# NIFTY SELLER AI DASHBOARD V27.0 - CO COMMAND PRODUCTION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -2424,23 +2482,33 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("⚙️ V22.4 ZERO MALIK")
-st.sidebar.caption("V22.2: One Brain Authority Lock")
+st.sidebar.title("🏛️ V27 AI COMMAND")
+st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
+st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
+st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
+st.sidebar.caption("📡 DSP Data Intelligence")
+st.sidebar.caption("📊 DSP Option Intelligence")
+st.sidebar.caption("📈 DSP Price Action")
+st.sidebar.caption("🧭 DSP Market Behaviour")
+st.sidebar.caption("💰 DSP Smart Money")
+st.sidebar.caption("🛡️ DSP Risk")
+st.sidebar.caption("🎯 DSP Strategy")
+st.sidebar.caption("📋 DSP Candidate")
 
-# V21.6: duplicate Quick Refresh block removed. Use single Refresh Control below.
-
-try:
-    st.sidebar.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
-    st.sidebar.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
-    st.sidebar.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
-    st.sidebar.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
-    st.sidebar.caption("strategy_engine: " + ("READY / PLAN AUTHORITY" if V19_STRATEGY_ENGINE_READY else "MISSING"))
-    st.sidebar.caption("intelligence_engine: " + ("READY / EXPLAINER" if V19_INTELLIGENCE_ENGINE_READY else "MISSING"))
-    st.sidebar.caption("stability_engine: " + ("READY / LOCK" if V19_STABILITY_ENGINE_READY else "MISSING"))
-    st.sidebar.caption("memory_engine: " + ("READY / MEMORY" if V19_MEMORY_ENGINE_READY else "MISSING"))
-    st.sidebar.caption("oi_flow_engine: " + ("READY / OI FLOW" if V19_OI_FLOW_ENGINE_READY else "MISSING"))
-except Exception:
-    pass
+# Legacy engines remain available for compatibility, but do not clutter command view.
+with st.sidebar.expander("Legacy Engine Health", expanded=False):
+    try:
+        st.caption("snapshot_engine: " + ("READY / AUTHORITY" if V19_SNAPSHOT_ENGINE_READY else "MISSING"))
+        st.caption("ai_brain: " + ("READY" if V19_AI_BRAIN_READY else "FALLBACK"))
+        st.caption("risk_engine: " + ("READY" if V19_RISK_ENGINE_READY else "FALLBACK"))
+        st.caption("decision_engine: " + ("READY" if V19_DECISION_ENGINE_READY else "FALLBACK"))
+        st.caption("strategy_engine: " + ("READY / PLAN AUTHORITY" if V19_STRATEGY_ENGINE_READY else "MISSING"))
+        st.caption("intelligence_engine: " + ("READY / EXPLAINER" if V19_INTELLIGENCE_ENGINE_READY else "MISSING"))
+        st.caption("stability_engine: " + ("READY / LOCK" if V19_STABILITY_ENGINE_READY else "MISSING"))
+        st.caption("memory_engine: " + ("READY / MEMORY" if V19_MEMORY_ENGINE_READY else "MISSING"))
+        st.caption("oi_flow_engine: " + ("READY / OI FLOW" if V19_OI_FLOW_ENGINE_READY else "MISSING"))
+    except Exception:
+        st.caption("Legacy health unavailable")
 
 # V19.1 Sidebar Refresh Control Center
 st.sidebar.markdown("---")
@@ -6017,7 +6085,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.6 Data Ownership Lock</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V27 CO Command Organization</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -6059,7 +6127,7 @@ if developer_mode:
         pass
 
 st.markdown(
-    "<div class='sub-title'>Smart Seller Terminal: Snapshot Authority + AI Brain + Risk + Decision Engine</div>",
+    "<div class='sub-title'>AI Trading Organization: One Snapshot + Specialist Branches + CO Case File + AI_MASTER</div>",
     unsafe_allow_html=True,
 )
 
@@ -6187,6 +6255,14 @@ try:
         st.warning("⚠️ Brain Sync caution: " + " | ".join(_v204_brain_sync.get("stale_reasons", []) or ["Data freshness check failed"]))
 except Exception:
     pass
+
+# V27: Visible command hierarchy and CO consolidated case file.
+st.markdown("### 🏛️ AI Organization — CO Command Case File")
+try:
+    _co_ui_v27 = AI_MASTER.get("command_hierarchy", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v27_command_hierarchy(_co_ui_v27)
+except Exception as _co_ui_err_v27:
+    st.caption("CO command case file unavailable: " + str(_co_ui_err_v27))
 
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 📶 Signal Reliability Table")
