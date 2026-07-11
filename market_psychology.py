@@ -1,13 +1,13 @@
 """
 market_psychology.py
-Version: V36.2
+Version: V36.3
 Department: Market Psychology
-Status: Phase-2 — Retail Emotion + Conservative Trap-Risk Evidence
+Status: Phase-3 — Retail Emotion + Trap Risk + Liquidity Sweep Evidence
 
 Safety contract:
 - Evidence and interpretation only.
 - Never emits BUY, SELL CE, SELL PE, IRON CONDOR, or execution permission.
-- Never claims that a trap is confirmed from one snapshot.
+- Never claims that a trap or stop hunt is confirmed from one snapshot/candle.
 - Report must travel through DSP review -> CO case file -> AI_MASTER.
 - Uses existing department reports and the verified snapshot; no API calls,
   loops, timers, or background work.
@@ -401,10 +401,242 @@ class TrapDetectionSpecialist:
         }
 
 
+class LiquiditySweepSpecialist:
+    """Detect conservative liquidity-grab / stop-hunt *evidence*.
+
+    A real liquidity grab requires sequence confirmation across candles. This
+    foundation only checks whether the current verified candle swept a known
+    support/resistance area and closed back inside with rejection evidence.
+    It never labels market manipulation as a fact and never emits a trade.
+    """
+
+    @staticmethod
+    def _number(value: Any) -> Optional[float]:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number:
+            return None
+        return number
+
+    @staticmethod
+    def _text(mapping: Mapping[str, Any], *path: str) -> str:
+        current: Any = mapping
+        for key in path:
+            if not isinstance(current, Mapping):
+                return ""
+            current = current.get(key)
+        return str(current or "")
+
+    @staticmethod
+    def _clamp(value: float) -> float:
+        return max(0.0, min(100.0, float(value)))
+
+    def analyze(
+        self,
+        *,
+        price: Any,
+        candle_open: Any,
+        candle_high: Any,
+        candle_low: Any,
+        candle_close: Any,
+        support: Any,
+        resistance: Any,
+        atr: Any,
+        trap: Optional[Mapping[str, Any]] = None,
+        option_intelligence: Optional[Mapping[str, Any]] = None,
+        market_behaviour: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        trap = trap if isinstance(trap, Mapping) else {}
+        option_intelligence = option_intelligence if isinstance(option_intelligence, Mapping) else {}
+        market_behaviour = market_behaviour if isinstance(market_behaviour, Mapping) else {}
+
+        price_n = self._number(price)
+        open_n = self._number(candle_open)
+        high_n = self._number(candle_high)
+        low_n = self._number(candle_low)
+        close_n = self._number(candle_close)
+        support_n = self._number(support)
+        resistance_n = self._number(resistance)
+        atr_n = self._number(atr)
+
+        upper_score = 0.0
+        lower_score = 0.0
+        upper_evidence: List[str] = []
+        lower_evidence: List[str] = []
+        cautions: List[str] = []
+        available = 0
+        possible = 6
+
+        valid_candle = (
+            open_n is not None and high_n is not None and low_n is not None
+            and close_n is not None and high_n > low_n
+        )
+        if valid_candle:
+            available += 1
+            candle_range = max(high_n - low_n, 0.01)
+            body_high = max(open_n, close_n)
+            body_low = min(open_n, close_n)
+            upper_wick = max(high_n - body_high, 0.0)
+            lower_wick = max(body_low - low_n, 0.0)
+            upper_wick_pct = upper_wick / candle_range * 100.0
+            lower_wick_pct = lower_wick / candle_range * 100.0
+
+            if upper_wick_pct >= 35:
+                upper_score += 18 if upper_wick_pct < 55 else 25
+                upper_evidence.append(f"Large upper rejection wick ({upper_wick_pct:.0f}% of candle range)")
+            if lower_wick_pct >= 35:
+                lower_score += 18 if lower_wick_pct < 55 else 25
+                lower_evidence.append(f"Large lower rejection wick ({lower_wick_pct:.0f}% of candle range)")
+        else:
+            candle_range = None
+            upper_wick_pct = None
+            lower_wick_pct = None
+            cautions.append("Verified candle OHLC unavailable; sweep confidence reduced")
+
+        # Strongest evidence: price traded beyond a known barrier and closed back
+        # inside it. A touch without a close-back is only a break attempt.
+        upper_sweep = False
+        lower_sweep = False
+        if valid_candle and resistance_n is not None:
+            available += 1
+            if high_n > resistance_n and close_n < resistance_n:
+                upper_sweep = True
+                overshoot = high_n - resistance_n
+                upper_score += 38
+                upper_evidence.append(
+                    f"Candle swept {overshoot:.1f} points above resistance and closed back below"
+                )
+            elif high_n >= resistance_n:
+                upper_score += 8
+                cautions.append("Resistance tested but close-back rejection is not established")
+
+        if valid_candle and support_n is not None:
+            available += 1
+            if low_n < support_n and close_n > support_n:
+                lower_sweep = True
+                overshoot = support_n - low_n
+                lower_score += 38
+                lower_evidence.append(
+                    f"Candle swept {overshoot:.1f} points below support and closed back above"
+                )
+            elif low_n <= support_n:
+                lower_score += 8
+                cautions.append("Support tested but close-back rejection is not established")
+
+        # Overshoots that are enormous versus ATR may indicate stale/incorrect
+        # barriers. They remain visible but confidence is reduced.
+        if valid_candle and atr_n is not None and atr_n > 0:
+            available += 1
+            if upper_sweep and resistance_n is not None:
+                upper_overshoot_atr = (high_n - resistance_n) / atr_n
+                if upper_overshoot_atr <= 0.45:
+                    upper_score += 10
+                    upper_evidence.append("Upside sweep remained bounded relative to ATR")
+                elif upper_overshoot_atr > 1.0:
+                    upper_score -= 10
+                    cautions.append("Upside overshoot is unusually large versus ATR; barrier may be stale")
+            if lower_sweep and support_n is not None:
+                lower_overshoot_atr = (support_n - low_n) / atr_n
+                if lower_overshoot_atr <= 0.45:
+                    lower_score += 10
+                    lower_evidence.append("Downside sweep remained bounded relative to ATR")
+                elif lower_overshoot_atr > 1.0:
+                    lower_score -= 10
+                    cautions.append("Downside overshoot is unusually large versus ATR; barrier may be stale")
+
+        strike_pressure = self._text(option_intelligence, "strike", "pressure")
+        barrier_reaction = self._text(option_intelligence, "barrier", "barrier")
+        fake_breakout = self._text(market_behaviour, "fake_breakout", "fake_breakout")
+        if strike_pressure or barrier_reaction:
+            available += 1
+            if strike_pressure == "CE Resistance":
+                upper_score += 10
+                upper_evidence.append("CE resistance supports upside rejection evidence")
+            elif strike_pressure == "PE Support":
+                lower_score += 10
+                lower_evidence.append("PE support supports downside rejection evidence")
+            if barrier_reaction == "Rejection":
+                upper_score += 6
+                lower_score += 6
+                cautions.append("Option barrier specialist also reports rejection")
+
+        trap_state = str(trap.get("state", ""))
+        if trap_state:
+            available += 1
+            if trap_state == "POSSIBLE_BULL_TRAP_RISK":
+                upper_score += 10
+                upper_evidence.append("Bull-trap risk report supports upside sweep review")
+            elif trap_state == "POSSIBLE_BEAR_TRAP_RISK":
+                lower_score += 10
+                lower_evidence.append("Bear-trap risk report supports downside sweep review")
+            elif trap_state == "TWO_WAY_TRAP_RISK":
+                upper_score += 7
+                lower_score += 7
+
+        if fake_breakout == "Possible":
+            upper_score += 8
+            lower_score += 8
+            cautions.append("Possible fake-breakout evidence requires follow-through confirmation")
+
+        upper_score = self._clamp(upper_score)
+        lower_score = self._clamp(lower_score)
+
+        # Candidate status requires an actual barrier sweep + close-back. A wick
+        # alone may be rejection, but it is not enough to call a liquidity grab.
+        upper_candidate = bool(upper_sweep and upper_score >= 55)
+        lower_candidate = bool(lower_sweep and lower_score >= 55)
+
+        if upper_candidate and lower_candidate:
+            state = "TWO_SIDED_LIQUIDITY_SWEEP_RISK"
+            stop_hunt_watch = "BOTH_SHORT_AND_LONG_STOP_SWEEP_WATCH"
+        elif upper_candidate:
+            state = "POSSIBLE_UPSIDE_LIQUIDITY_GRAB"
+            stop_hunt_watch = "SHORT_STOP_SWEEP_WATCH"
+        elif lower_candidate:
+            state = "POSSIBLE_DOWNSIDE_LIQUIDITY_GRAB"
+            stop_hunt_watch = "LONG_STOP_SWEEP_WATCH"
+        elif max(upper_score, lower_score) >= 35:
+            state = "WATCH_FOR_SWEEP_CONFIRMATION"
+            stop_hunt_watch = "SEQUENCE_CONFIRMATION_REQUIRED"
+        else:
+            state = "LOW_LIQUIDITY_SWEEP_EVIDENCE"
+            stop_hunt_watch = "NO_ACTIVE_STOP_SWEEP_EVIDENCE"
+
+        coverage = self._clamp(available / possible * 100.0)
+        confidence = self._clamp(20.0 + coverage * 0.35 + min(max(upper_score, lower_score), 75.0) * 0.30)
+        confidence = min(confidence, 82.0)
+
+        return {
+            "state": state,
+            "upside_liquidity_grab_risk": {
+                "score": round(upper_score, 1),
+                "evidence": list(dict.fromkeys(upper_evidence))[:6],
+            },
+            "downside_liquidity_grab_risk": {
+                "score": round(lower_score, 1),
+                "evidence": list(dict.fromkeys(lower_evidence))[:6],
+            },
+            "stop_hunt_watch": stop_hunt_watch,
+            "shared_cautions": list(dict.fromkeys(cautions))[:6],
+            "candle_metrics": {
+                "range_points": round(candle_range, 2) if candle_range is not None else None,
+                "upper_wick_pct": round(upper_wick_pct, 1) if upper_wick_pct is not None else None,
+                "lower_wick_pct": round(lower_wick_pct, 1) if lower_wick_pct is not None else None,
+            },
+            "data_coverage": round(coverage, 1),
+            "confidence": round(confidence, 1),
+            "confirmation_status": "UNCONFIRMED_SINGLE_CANDLE_REQUIRES_NEXT_SNAPSHOT",
+            "authority": "EVIDENCE_ONLY_TO_CO",
+            "manipulation_claim": "NOT_ESTABLISHED",
+        }
+
+
 class MarketPsychologyDirector:
     """DSP Market Psychology: one report, no independent trade authority."""
 
-    VERSION = "V36.2_RETAIL_EMOTION_AND_TRAP_RISK_EVIDENCE"
+    VERSION = "V36.3_PSYCHOLOGY_TRAP_AND_LIQUIDITY_SWEEP_EVIDENCE"
 
     def build_report(
         self,
@@ -417,6 +649,13 @@ class MarketPsychologyDirector:
         day_high: Any,
         day_low: Any,
         pcr: Any = None,
+        candle_open: Any = None,
+        candle_high: Any = None,
+        candle_low: Any = None,
+        candle_close: Any = None,
+        support: Any = None,
+        resistance: Any = None,
+        atr: Any = None,
         price_action_details: Optional[Mapping[str, Any]] = None,
         option_details: Optional[Mapping[str, Any]] = None,
         behaviour_details: Optional[Mapping[str, Any]] = None,
@@ -439,6 +678,19 @@ class MarketPsychologyDirector:
             option_intelligence=option_details,
             market_behaviour=behaviour_details,
         )
+        liquidity = LiquiditySweepSpecialist().analyze(
+            price=price,
+            candle_open=candle_open,
+            candle_high=candle_high,
+            candle_low=candle_low,
+            candle_close=candle_close,
+            support=support,
+            resistance=resistance,
+            atr=atr,
+            trap=trap,
+            option_intelligence=option_details,
+            market_behaviour=behaviour_details,
+        )
 
         fear_score = float(emotion["retail_fear"]["score"])
         greed_score = float(emotion["retail_greed"]["score"])
@@ -447,17 +699,23 @@ class MarketPsychologyDirector:
         trap_state = str(trap["state"])
         bull_trap = float(trap["bull_trap_risk"]["score"])
         bear_trap = float(trap["bear_trap_risk"]["score"])
+        liquidity_state = str(liquidity["state"])
+        upper_liquidity = float(liquidity["upside_liquidity_grab_risk"]["score"])
+        lower_liquidity = float(liquidity["downside_liquidity_grab_risk"]["score"])
 
         details = {
             **emotion,
             "trap_detection": trap,
+            "liquidity_sweep": liquidity,
             "authority": "EVIDENCE_ONLY_TO_CO",
             "phase_control": "OBSERVATION_ONLY_NOT_IN_DIRECTIONAL_CONSENSUS",
         }
         summary = (
             f"Market psychology evidence: {state} | Fear {fear_score:.0f}/100 | "
-            f"Greed {greed_score:.0f}/100 | Trap review {trap_state} "
-            f"(Bull {bull_trap:.0f}, Bear {bear_trap:.0f}) | CO verification required"
+            f"Greed {greed_score:.0f}/100 | Trap {trap_state} "
+            f"(Bull {bull_trap:.0f}, Bear {bear_trap:.0f}) | "
+            f"Liquidity {liquidity_state} (Up {upper_liquidity:.0f}, Down {lower_liquidity:.0f}) | "
+            f"CO verification required"
         )
         return MarketPsychologyReport(
             summary=summary,

@@ -392,44 +392,50 @@ def _render_v27_command_hierarchy(case_data):
 
     psychology = case_data.get("market_psychology", {}) if isinstance(case_data, dict) else {}
     if isinstance(psychology, dict) and psychology:
-        with st.expander("🧠 V36 Market Psychology — Fear, Greed & Trap Risk", expanded=True):
+        with st.expander("🧠 V36 Market Psychology — Fear, Greed, Trap & Liquidity Sweep", expanded=True):
             _fear = psychology.get("retail_fear", {}) or {}
             _greed = psychology.get("retail_greed", {}) or {}
             _trap = psychology.get("trap_detection", {}) or {}
+            _liquidity = psychology.get("liquidity_sweep", {}) or {}
             _bull_trap = _trap.get("bull_trap_risk", {}) or {}
             _bear_trap = _trap.get("bear_trap_risk", {}) or {}
+            _up_liq = _liquidity.get("upside_liquidity_grab_risk", {}) or {}
+            _down_liq = _liquidity.get("downside_liquidity_grab_risk", {}) or {}
             st.markdown(
-                f"**Psychology State:** `{psychology.get('psychology_state','BALANCED')}` &nbsp; | &nbsp; "
-                f"**Trap Review:** `{_trap.get('state','LOW_TRAP_EVIDENCE')}` &nbsp; | &nbsp; "
-                f"**Emotion Confidence:** {float(psychology.get('confidence',0) or 0):.0f}% &nbsp; | &nbsp; "
-                f"**Trap Confidence:** {float(_trap.get('confidence',0) or 0):.0f}%"
+                f"**Psychology:** `{psychology.get('psychology_state','BALANCED')}` &nbsp; | &nbsp; "
+                f"**Trap:** `{_trap.get('state','LOW_TRAP_EVIDENCE')}` &nbsp; | &nbsp; "
+                f"**Liquidity:** `{_liquidity.get('state','LOW_LIQUIDITY_SWEEP_EVIDENCE')}` &nbsp; | &nbsp; "
+                f"**Liquidity Confidence:** {float(_liquidity.get('confidence',0) or 0):.0f}%"
             )
             _psych_rows = [{
                 "Retail Fear": f"{float(_fear.get('score',0) or 0):.0f}/100",
                 "Retail Greed": f"{float(_greed.get('score',0) or 0):.0f}/100",
-                "Bull-Trap Risk": f"{float(_bull_trap.get('score',0) or 0):.0f}/100",
-                "Bear-Trap Risk": f"{float(_bear_trap.get('score',0) or 0):.0f}/100",
-                "Trap Status": _trap.get("confirmation_status", "UNCONFIRMED_SINGLE_SNAPSHOT"),
-                "Authority": psychology.get("authority", "EVIDENCE_ONLY_TO_CO"),
+                "Bull-Trap": f"{float(_bull_trap.get('score',0) or 0):.0f}/100",
+                "Bear-Trap": f"{float(_bear_trap.get('score',0) or 0):.0f}/100",
+                "Upside Grab": f"{float(_up_liq.get('score',0) or 0):.0f}/100",
+                "Downside Grab": f"{float(_down_liq.get('score',0) or 0):.0f}/100",
             }]
             _render_safe_table(_psych_rows, max_rows=1)
-            for _item in list(_fear.get("evidence", []) or [])[:2]:
-                st.caption("Fear evidence: " + str(_item))
-            for _item in list(_greed.get("evidence", []) or [])[:2]:
-                st.caption("Greed evidence: " + str(_item))
-            for _item in list(_bull_trap.get("evidence", []) or [])[:3]:
-                st.caption("Bull-trap evidence: " + str(_item))
-            for _item in list(_bear_trap.get("evidence", []) or [])[:3]:
-                st.caption("Bear-trap evidence: " + str(_item))
-            for _item in list(_trap.get("shared_cautions", []) or [])[:3]:
-                st.caption("Trap caution: " + str(_item))
-            st.info("Trap abhi confirmed signal nahi hai. Market Psychology sirf evidence CO ko deta hai; final judgement AI_MASTER ka hai.")
+            st.caption(
+                "Stop-hunt watch: " + str(_liquidity.get("stop_hunt_watch", "NO_ACTIVE_STOP_SWEEP_EVIDENCE"))
+                + " | Authority: " + str(psychology.get("authority", "EVIDENCE_ONLY_TO_CO"))
+            )
+            for _item in list(_up_liq.get("evidence", []) or [])[:3]:
+                st.caption("Upside-liquidity evidence: " + str(_item))
+            for _item in list(_down_liq.get("evidence", []) or [])[:3]:
+                st.caption("Downside-liquidity evidence: " + str(_item))
+            for _item in list(_liquidity.get("shared_cautions", []) or [])[:3]:
+                st.caption("Liquidity caution: " + str(_item))
+            st.info(
+                "Liquidity grab/stop hunt abhi confirmed fact ya trade signal nahi hai. "
+                "Single candle evidence ko next snapshot confirmation chahiye; final judgement AI_MASTER ka hai."
+            )
 
     st.caption("Command flow: Verified Snapshot → Departments including Market Psychology → CO Case File → AI_MASTER → Case History → Pattern Probability → Market Journey → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V36.2 - TRAP DETECTION FOUNDATION
+# NIFTY SELLER AI DASHBOARD V36.3 - LIQUIDITY GRAB & STOP HUNT FOUNDATION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -450,7 +456,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V36.2 Trap Detection",
+    page_title="Nifty Seller AI V36.3 Liquidity Sweep",
     page_icon="🧠",
     layout="wide",
 )
@@ -2712,7 +2718,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V36.2 AI COMMAND")
+st.sidebar.title("🏛️ V36.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -5813,8 +5819,8 @@ try:
             _v24_price_report.details, _v24_option_report.details, datetime.now(IST).hour
         )
 
-        # V36.2 Market Psychology: Retail Emotion + conservative Trap Risk.
-        # It reads existing reports only, cannot confirm a trap from one snapshot,
+        # V36.3 Market Psychology: Retail Emotion + Trap Risk + Liquidity Sweep Evidence.
+        # It reads existing reports only, cannot confirm a trap/stop hunt from one snapshot,
         # cannot issue a trade, and must report through CO.
         _v36_psychology_report = MarketPsychologyDirector().build_report(
             price=float(price),
@@ -5825,6 +5831,13 @@ try:
             day_high=float(today_high),
             day_low=float(today_low),
             pcr=float(pcr),
+            candle_open=_open_px_v24,
+            candle_high=_high_px_v24,
+            candle_low=_low_px_v24,
+            candle_close=_close_px_v24,
+            support=_near_support,
+            resistance=_near_resistance,
+            atr=float(atr5),
             price_action_details=_v24_price_report.details,
             option_details=_v24_option_report.details,
             behaviour_details=_v24_behaviour_report.details,
@@ -6086,7 +6099,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V36_2_TRAP_DETECTION_FOUNDATION",
+                "version": "V36_3_LIQUIDITY_GRAB_STOP_HUNT_FOUNDATION",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6438,7 +6451,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V36.2 Trap Detection</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V36.3 Liquidity Sweep</div>", unsafe_allow_html=True)
 
 
 # =========================================================

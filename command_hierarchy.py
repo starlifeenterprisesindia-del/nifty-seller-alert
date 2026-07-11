@@ -295,7 +295,7 @@ class CommandingOfficer:
                 missing_evidence.append(f"{name}: no structured evidence")
 
         branch_votes = {name: branch.branch_vote for name, branch in branch_map.items()}
-        # V36.2 Psychology is evidence-only. CO records and displays it, but
+        # V36.3 Psychology is evidence-only. CO records and displays it, but
         # excludes it from directional consensus and execution case-strength
         # until live accuracy is validated after the V50 testing phase.
         _consensus_votes = {
