@@ -101,6 +101,7 @@ try:
     from command_hierarchy import AIOrganizationController
     from department_academy import DepartmentAcademy
     from communication_bus import DepartmentCommunicationBus
+    from case_history import CaseHistoryEngine
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -304,11 +305,45 @@ def _render_v27_command_hierarchy(case_data):
                 st.markdown("**Snapshot Timeline**")
                 _render_safe_table(timeline_rows, max_rows=24)
 
-    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Inbox → CO Case File → AI_MASTER Inbox → Final Authority")
+    history = case_data.get("case_history", {}) if isinstance(case_data, dict) else {}
+    if isinstance(history, dict) and history:
+        with st.expander("📚 V33 Case History & Pattern Match", expanded=False):
+            st.markdown(
+                f"**Status:** `{history.get('status','NA')}` &nbsp; | &nbsp; "
+                f"**Stored Cases:** {int(history.get('stored_cases',0) or 0)} &nbsp; | &nbsp; "
+                f"**Best Match:** {float(history.get('best_similarity',0) or 0):.0f}%"
+            )
+            _accuracy = history.get("historical_accuracy")
+            if _accuracy is not None:
+                st.caption(
+                    f"Completed matched cases: {int(history.get('matched_completed_cases',0) or 0)} | "
+                    f"Historical accuracy: {float(_accuracy):.1f}%"
+                )
+            else:
+                st.caption("Outcome learning pending: pattern similarity is descriptive, not a guarantee.")
+            _similar_rows = []
+            for _case in list(history.get("similar_cases", []) or [])[:5]:
+                if not isinstance(_case, dict):
+                    continue
+                _similar_rows.append({
+                    "Case ID": _case.get("case_id", "-"),
+                    "Similarity": f"{float(_case.get('similarity',0) or 0):.0f}%",
+                    "Action": _case.get("action", "-"),
+                    "Bias": _case.get("market_bias", "-"),
+                    "Case Strength": f"{float(_case.get('case_strength',0) or 0):.0f}%",
+                    "Outcome": _case.get("outcome", "PENDING"),
+                    "Shared Evidence": ", ".join(_case.get("shared_features", []) or [])[:240],
+                })
+            if _similar_rows:
+                _render_safe_table(_similar_rows, max_rows=5)
+            else:
+                st.info("Abhi enough similar cases collect nahi hue.")
+
+    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Inbox → CO Case File → AI_MASTER Inbox → Case History → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V32.0 - COMMUNICATION BUS
+# NIFTY SELLER AI DASHBOARD V33.0 - CASE HISTORY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -329,7 +364,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V32 Communication Bus",
+    page_title="Nifty Seller AI V33 Case History",
     page_icon="🧠",
     layout="wide",
 )
@@ -5812,6 +5847,22 @@ try:
             candidate_report=_v24_candidate_report,
             co_case_file=_co_case_v26,
         )
+        # V33 bounded case history. It stores compact case fingerprints only,
+        # matches similar prior snapshots, and never changes live AI weights.
+        _case_history_v33 = CaseHistoryEngine(max_cases=80, max_matches=5).process_case(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            case_id=_co_case_v26.case_id,
+            action=_v24_decision.action,
+            confidence=_v24_decision.confidence,
+            market_bias=_v24_decision.market_bias,
+            case_strength=_co_case_v26.case_strength,
+            consensus_direction=_co_case_v26.consensus_direction,
+            branch_votes=dict(_co_case_v26.branch_votes),
+            accepted_evidence=list(_co_case_v26.accepted_evidence),
+            warnings=list(_co_case_v26.warnings) + list(_v24_decision.warnings),
+        )
+        _case_history_trace_v33 = _case_history_v33.to_compact_dict()
 
         def _v24_candidate_plan(candidate, side, confidence_value):
             _c = candidate if isinstance(candidate, dict) else {}
@@ -5902,8 +5953,9 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V32_COMMUNICATION_BUS",
+                "version": "V33_CASE_HISTORY",
                 "communication_bus": _communication_trace_v32,
+                "case_history": _case_history_trace_v33,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
