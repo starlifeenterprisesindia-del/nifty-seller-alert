@@ -100,6 +100,7 @@ try:
     from learning_department import LearningDepartment
     from command_hierarchy import AIOrganizationController
     from department_academy import DepartmentAcademy
+    from communication_bus import DepartmentCommunicationBus
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -247,11 +248,67 @@ def _render_v27_command_hierarchy(case_data):
         st.warning("CO conflicts: " + " | ".join(str(x) for x in conflicts[:4]))
     if warnings:
         st.caption("CO warnings: " + " | ".join(str(x) for x in warnings[:4]))
-    st.caption("Command flow: Verified Snapshot → Branch Specialists → DSP Bosses → CO Case File → AI_MASTER Final Authority")
+
+    bus = case_data.get("communication_bus", {}) if isinstance(case_data, dict) else {}
+    if isinstance(bus, dict) and bus:
+        with st.expander("📡 V32 Department Communication Bus", expanded=False):
+            st.markdown(
+                f"**Bus Health:** `{bus.get('health','NA')}` &nbsp; | &nbsp; "
+                f"**Readiness:** {float(bus.get('readiness_score',0) or 0):.0f}% &nbsp; | &nbsp; "
+                f"**Urgent:** {int(bus.get('urgent_count',0) or 0)} &nbsp; | &nbsp; "
+                f"**Pending Verification:** {int(bus.get('pending_verification_count',0) or 0)}"
+            )
+            inbox_rows = []
+            for msg in list(bus.get("co_inbox", []) or [])[:16]:
+                if not isinstance(msg, dict):
+                    continue
+                inbox_rows.append({
+                    "Priority": msg.get("priority", "-"),
+                    "Department": msg.get("department", "-"),
+                    "Boss": msg.get("boss", "-"),
+                    "State": msg.get("state", "-"),
+                    "Confidence": f"{float(msg.get('confidence',0) or 0):.0f}%",
+                    "Verified By": ", ".join(msg.get("verified_by", []) or []) or "Pending",
+                    "Subject": msg.get("subject", "-"),
+                    "Recommendation": msg.get("recommendation", "-"),
+                })
+            if inbox_rows:
+                st.markdown("**CO Inbox**")
+                _render_safe_table(inbox_rows, max_rows=16)
+
+            ai_rows = []
+            for msg in list(bus.get("ai_master_inbox", []) or [])[:4]:
+                if isinstance(msg, dict):
+                    ai_rows.append({
+                        "Type": msg.get("message_type", "-"),
+                        "Priority": msg.get("priority", "-"),
+                        "State": msg.get("state", "-"),
+                        "Confidence": f"{float(msg.get('confidence',0) or 0):.0f}%",
+                        "Recommendation": msg.get("recommendation", "-"),
+                        "Message": str(msg.get("body", "-"))[:220],
+                    })
+            if ai_rows:
+                st.markdown("**AI_MASTER Inbox**")
+                _render_safe_table(ai_rows, max_rows=4)
+
+            timeline_rows = []
+            for event in list(bus.get("timeline", []) or [])[-24:]:
+                if isinstance(event, dict):
+                    timeline_rows.append({
+                        "Seq": event.get("sequence", "-"),
+                        "Actor": event.get("actor", "-"),
+                        "State": event.get("state", "-"),
+                        "Event": event.get("event", "-"),
+                    })
+            if timeline_rows:
+                st.markdown("**Snapshot Timeline**")
+                _render_safe_table(timeline_rows, max_rows=24)
+
+    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Inbox → CO Case File → AI_MASTER Inbox → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V31.0 - CO CROSS-EXAMINATION ACADEMY
+# NIFTY SELLER AI DASHBOARD V32.0 - COMMUNICATION BUS
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -272,7 +329,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V29 Branch Service Academy",
+    page_title="Nifty Seller AI V32 Communication Bus",
     page_icon="🧠",
     layout="wide",
 )
@@ -5734,6 +5791,14 @@ try:
             snapshot_id=_snapshot_id_v24,
             branch_reports=_co_case_v26.branch_reports,
         )
+        # V32 one-shot communication bus. It creates compact branch messages,
+        # CO inbox, AI_MASTER inbox, state lifecycle, and a bounded timeline.
+        _communication_batch_v32 = DepartmentCommunicationBus().build_batch(
+            snapshot_id=_snapshot_id_v24,
+            branch_reports=_co_case_v26.branch_reports,
+            co_case_file=_co_case_v26,
+        )
+        _communication_trace_v32 = _communication_batch_v32.to_compact_dict()
         _data_quality_ok_v24 = bool(
             _did_snapshot_v24.quality_score >= 60
             and option_analysis.get("success", False)
@@ -5837,7 +5902,8 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V31_CO_CROSS_EXAMINATION_ACADEMY",
+                "version": "V32_COMMUNICATION_BUS",
+                "communication_bus": _communication_trace_v32,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
