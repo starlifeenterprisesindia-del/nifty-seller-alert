@@ -216,7 +216,7 @@ class StrategyScoringSpecialist:
 
         result: Dict[str, StrategyScore] = {}
         for name, raw_score in scores.items():
-            final_score = round(max(0.0, min(100.0, raw_score)), 1)
+            final_score = round(max(0.0, min(95.0, raw_score)), 1)
 
             if final_score >= 75:
                 status = "Strong"

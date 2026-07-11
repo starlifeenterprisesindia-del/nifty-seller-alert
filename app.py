@@ -85,9 +85,42 @@ try:
 except Exception:
     V21_ADVISOR_ENGINE_READY = False
 
+# V24 Department Architecture imports.
+try:
+    from option_intelligence import OptionIntelligenceDirector
+    from price_action import PriceActionDirector
+    from market_behaviour import MarketBehaviourDirector
+    from smart_money import SmartMoneyDirector
+    from risk_department import RiskDirector
+    from candidate_department import CandidateDirector
+    from strategy_department import StrategyDirector
+    from ai_master import AIMaster
+    from market_memory import MarketMemory
+    from learning_department import LearningDepartment
+    from core.data_intelligence import SnapshotManager, DataDistributor
+    V24_DEPARTMENT_ARCHITECTURE_READY = True
+except Exception as _v24_import_error:
+    V24_DEPARTMENT_ARCHITECTURE_READY = False
+    V24_DEPARTMENT_IMPORT_ERROR = str(_v24_import_error)
+
+
+def _safe_arrow_df(data):
+    """Return a Streamlit/Arrow-safe DataFrame without mixed object columns."""
+    df = data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame(data)
+    for col in df.columns:
+        series = df[col]
+        if str(series.dtype) == "object":
+            non_null = series.dropna()
+            type_names = {type(v).__name__ for v in non_null.head(200)}
+            if len(type_names) > 1 or any(isinstance(v, (dict, list, tuple, set)) for v in non_null.head(200)):
+                df[col] = series.map(lambda v: "-" if v is None else str(v))
+            else:
+                df[col] = series.fillna("-")
+    return df
+
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V21.1 - DEEP ARCHITECTURE CLEANUP
+# NIFTY SELLER AI DASHBOARD V24.0 - DEPARTMENT AI MASTER INTEGRATION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -108,7 +141,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V21.6 Safe Refresh",
+    page_title="Nifty Seller AI V24 Department Edition",
     page_icon="🧠",
     layout="wide",
 )
@@ -2377,7 +2410,7 @@ except Exception:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 🔄 Refresh Control")
 st.sidebar.markdown("<div class='sidebar-refresh-note'>Primary refresh control. Use this when scrolled down.</div>", unsafe_allow_html=True)
-if st.sidebar.button("🔄 Refresh Live Data", key="v191_sidebar_refresh_btn", use_container_width=True):
+if st.sidebar.button("🔄 Refresh Live Data", key="v191_sidebar_refresh_btn", width="stretch"):
     v215_unified_refresh("sidebar_control", do_rerun=True)
 
 _interval_options_v191 = ["10 sec", "20 sec", "30 sec", "60 sec"]
@@ -5390,6 +5423,221 @@ except Exception as _v221_master_error:
     st.stop()
 
 
+# =========================================================
+# V24.0 DEPARTMENT PIPELINE — ONE SNAPSHOT / ONE FINAL OWNER
+# =========================================================
+# This block adapts the existing live data into the new department hierarchy.
+# Old engines remain compatibility/evidence providers only. Final UI authority
+# is overwritten by the V24 AI_MASTER when the department pipeline succeeds.
+try:
+    if V24_DEPARTMENT_ARCHITECTURE_READY:
+        _v24_rows = option_analysis.get("rows", []) if isinstance(option_analysis, dict) else []
+        _v24_total_volume = sum(
+            float(r.get("ce_volume", 0) or 0) + float(r.get("pe_volume", 0) or 0)
+            for r in _v24_rows if isinstance(r, dict)
+        )
+        _v24_volume_hist = list(st.session_state.get("v24_option_volume_history", []))[-4:]
+        _v24_avg_volume = (sum(_v24_volume_hist) / len(_v24_volume_hist)) if _v24_volume_hist else max(_v24_total_volume, 1.0)
+        if _v24_total_volume > 0:
+            _v24_volume_hist.append(_v24_total_volume)
+            st.session_state["v24_option_volume_history"] = _v24_volume_hist[-5:]
+
+        _near_support = float(nearest_support if "nearest_support" in globals() else 0)
+        _near_resistance = float(nearest_resistance if "nearest_resistance" in globals() else 0)
+        _barrier_touched = min(abs(float(price) - _near_support), abs(_near_resistance - float(price))) <= 20
+        _barrier_respected = (_near_support <= float(price) <= _near_resistance)
+
+        _v24_option_report = OptionIntelligenceDirector().build_report(
+            price_change=float(nifty_change if "nifty_change" in globals() else 0),
+            oi_change=float(put_oi_change - call_oi_change),
+            current_volume=float(_v24_total_volume),
+            average_volume=float(_v24_avg_volume),
+            ce_change=float(call_oi_change),
+            pe_change=float(put_oi_change),
+            pcr=float(pcr),
+            ce_oi=float(total_call_oi),
+            pe_oi=float(total_put_oi),
+            barrier_touched=bool(_barrier_touched),
+            barrier_respected=bool(_barrier_respected),
+        )
+
+        _open_px_v24 = float(locals().get("candle15_open", float(price) - float(nifty_change or 0)))
+        _high_px_v24 = float(locals().get("candle15_high", today_high))
+        _low_px_v24 = float(locals().get("candle15_low", today_low))
+        _close_px_v24 = float(locals().get("candle15_close", price))
+        _v24_price_report = PriceActionDirector().build_report(
+            price=float(price), ema20=float(ema20), ema50=float(ema50), vwap=float(vwap),
+            current_range=max(float(today_high) - float(today_low), 0.0), atr=float(atr5),
+            support=_near_support, resistance=_near_resistance,
+            open_price=_open_px_v24, high=_high_px_v24, low=_low_px_v24, close=_close_px_v24,
+            points_moved_from_open=float(price) - _open_px_v24,
+            day_high=float(today_high), day_low=float(today_low),
+        )
+
+        _v24_behaviour_report = MarketBehaviourDirector().build_report(
+            _v24_price_report.details, _v24_option_report.details, datetime.now(IST).hour
+        )
+
+        _hw_rows_v24 = heavy_analysis.get("rows", []) if isinstance(heavy_analysis, dict) else []
+        _adv_hw_v24 = sum(1 for r in _hw_rows_v24 if float(r.get("change_pct", 0) or 0) > 0)
+        _dec_hw_v24 = sum(1 for r in _hw_rows_v24 if float(r.get("change_pct", 0) or 0) < 0)
+        _v24_money_report = SmartMoneyDirector().build_report(
+            float(fii_today), float(dii_today), _adv_hw_v24, _dec_hw_v24, _adv_hw_v24, _dec_hw_v24
+        )
+
+        _v24_risk_report = RiskDirector().build_report(
+            float(vix), bool(news.get("score", 0) >= 65), bool(is_expiry_mode),
+            str(news.get("label", "") if isinstance(news, dict) else ""),
+            float(nifty_change_pct),
+        )
+
+        _candidate_rows_input_v24 = []
+        for _r in _v24_rows:
+            if not isinstance(_r, dict):
+                continue
+            for _side in ("CE", "PE"):
+                _prefix = _side.lower()
+                _candidate_rows_input_v24.append({
+                    "option_type": _side,
+                    "strike": _r.get("strike", 0),
+                    "premium": _r.get(f"{_prefix}_ltp", 0),
+                    "volume": _r.get(f"{_prefix}_volume", 0),
+                    "oi": _r.get(f"{_prefix}_oi", 0),
+                    "oi_change": _r.get(f"{_prefix}_oi_change", 0),
+                    "bid_ask_spread": _r.get(f"{_prefix}_spread_pct", 0),
+                })
+        _v24_candidate_report = CandidateDirector().build_report(
+            _candidate_rows_input_v24, float(price), float(atr5), _near_support, _near_resistance
+        )
+        _v24_strategy_report = StrategyDirector().build_report(
+            _v24_price_report, _v24_option_report, _v24_behaviour_report, _v24_money_report, _v24_risk_report
+        )
+
+        _did_payload_v24 = {
+            "market": {"price": price, "change": nifty_change, "change_pct": nifty_change_pct, "vix": vix, "pcr": pcr},
+            "price_action": {"ema20": ema20, "ema50": ema50, "vwap": vwap, "atr": atr5, "support": _near_support, "resistance": _near_resistance},
+            "option": {"snapshot_id": option_analysis.get("snapshot_id", ""), "rows": _v24_rows, "call_oi": total_call_oi, "put_oi": total_put_oi, "call_oi_change": call_oi_change, "put_oi_change": put_oi_change},
+            "money": {"fii_today": fii_today, "dii_today": dii_today, "heavyweights": _hw_rows_v24},
+            "risk": {"news": news, "expiry": selected_expiry, "market_mode": market_mode},
+        }
+        _did_quality_v24 = int(max(0, min(100, data_quality)))
+        _did_snapshot_v24 = SnapshotManager().create_snapshot(_did_payload_v24, [], _did_quality_v24)
+        _did_distributor_v24 = DataDistributor(_did_snapshot_v24)
+        _snapshot_id_v24 = _did_distributor_v24.snapshot_id
+        _data_quality_ok_v24 = bool(_did_snapshot_v24.quality_score >= 60 and option_analysis.get("success", False))
+        _v24_decision = AIMaster().decide(
+            snapshot_id=_snapshot_id_v24, data_quality_ok=_data_quality_ok_v24,
+            price_report=_v24_price_report, option_report=_v24_option_report,
+            behaviour_report=_v24_behaviour_report, smart_money_report=_v24_money_report,
+            risk_report=_v24_risk_report, strategy_report=_v24_strategy_report,
+            candidate_report=_v24_candidate_report,
+        )
+
+        def _v24_candidate_plan(candidate, side, confidence_value):
+            _c = candidate if isinstance(candidate, dict) else {}
+            _strike = _v221_int(_c.get("strike", 0), 0)
+            _row = _v221_current_option_row(option_analysis, _strike) if _strike else None
+            _plan = _v221_side_plan(side, _row or {}, confidence_value)
+            if _c.get("hedge_strike"):
+                _plan["hedge"] = f"{_v221_int(_c.get('hedge_strike'))} {side}"
+            _plan["candidate_score"] = _v221_num(_c.get("score", 0))
+            _plan["candidate_status"] = _c.get("status", "Watchlist")
+            _plan["source"] = "V24_DEPARTMENT_CANDIDATE"
+            return _plan
+
+        _watch_v24 = _v24_decision.watchlist or {}
+        _ce_plan_v24 = _v24_candidate_plan(_watch_v24.get("best_ce"), "CE", _v24_decision.confidence)
+        _pe_plan_v24 = _v24_candidate_plan(_watch_v24.get("best_pe"), "PE", _v24_decision.confidence)
+        _exec_v24 = "APPROVED" if _v24_decision.trade_allowed and bool(_market_open_v1951) else ("PREVIEW_ONLY" if _v24_decision.trade_allowed else "WAIT")
+
+        _score_map_v24 = {k: float(v) for k, v in (_v24_decision.strategy_scores or {}).items()}
+        def _v24_strategy_rows():
+            _rows = []
+            for _name in ("SELL CE", "SELL PE", "IRON CONDOR", "WAIT"):
+                _is_selected = _v24_decision.action == _name
+                _rows.append({
+                    "Strategy": _name,
+                    "Confidence %": round(_score_map_v24.get(_name, 0.0), 1),
+                    "Status": "SELECTED" if _is_selected else ("WATCH" if _score_map_v24.get(_name, 0) >= 60 else "WEAK"),
+                    "Sell CE": _ce_plan_v24.get("strike", "-") if _name in ("SELL CE", "IRON CONDOR") else "-",
+                    "Buy CE Hedge": _ce_plan_v24.get("hedge", "-") if _name in ("SELL CE", "IRON CONDOR") else "-",
+                    "Sell PE": _pe_plan_v24.get("strike", "-") if _name in ("SELL PE", "IRON CONDOR") else "-",
+                    "Buy PE Hedge": _pe_plan_v24.get("hedge", "-") if _name in ("SELL PE", "IRON CONDOR") else "-",
+                    "Entry/Credit": (round(_v221_num(_ce_plan_v24.get("entry")) + _v221_num(_pe_plan_v24.get("entry")), 2) if _name == "IRON CONDOR" else _ce_plan_v24.get("entry", 0) if _name == "SELL CE" else _pe_plan_v24.get("entry", 0) if _name == "SELL PE" else 0),
+                    "SL": (f"CE {_ce_plan_v24.get('sl',0)} / PE {_pe_plan_v24.get('sl',0)}" if _name == "IRON CONDOR" else _ce_plan_v24.get("sl", 0) if _name == "SELL CE" else _pe_plan_v24.get("sl", 0) if _name == "SELL PE" else "No trade"),
+                    "Target": (f"CE {_ce_plan_v24.get('target',0)} / PE {_pe_plan_v24.get('target',0)}" if _name == "IRON CONDOR" else _ce_plan_v24.get("target", 0) if _name == "SELL CE" else _pe_plan_v24.get("target", 0) if _name == "SELL PE" else "No trade"),
+                })
+            return _rows
+
+        def _v24_candidate_rows():
+            _rows = []
+            for _label, _side, _plan, _candidate in (
+                ("Best CE", "CE", _ce_plan_v24, _watch_v24.get("best_ce")),
+                ("Best PE", "PE", _pe_plan_v24, _watch_v24.get("best_pe")),
+            ):
+                _candidate = _candidate if isinstance(_candidate, dict) else {}
+                _approved = _v24_decision.trade_allowed and (_v24_decision.action in (f"SELL {_side}", "IRON CONDOR"))
+                _rows.append({
+                    "Candidate": _label,
+                    "AI Status": "APPROVED" if _approved else "WATCHLIST / WAITING CONFIRMATION",
+                    "Confidence %": round(_v221_num(_candidate.get("score", 0)), 1),
+                    "Strike": _plan.get("strike", "-"),
+                    "Entry": _plan.get("entry", 0),
+                    "SL": _plan.get("sl", 0),
+                    "Target": _plan.get("target", 0),
+                    "Hedge": _plan.get("hedge", "-"),
+                    "Source": "V24 AI_MASTER",
+                })
+            return _rows
+
+        AI_MASTER.update({
+            "version": "V24.0_DEPARTMENT_AI_MASTER",
+            "final_action": _v24_decision.action,
+            "execution_status": _exec_v24,
+            "confidence": _v24_decision.confidence,
+            "strategy": {"type": _v24_decision.action, "plan_source": "V24_DEPARTMENT_PIPELINE"},
+            "reasons": [_v24_decision.reason] + list(_v24_decision.evidence[:3]),
+            "warnings": list(_v24_decision.warnings),
+            "advice": _v24_decision.reason,
+            "source_of_truth": "ONE_SNAPSHOT_DEPARTMENTS_THEN_AI_MASTER",
+            "data_flow_status": "FRESH" if _data_quality_ok_v24 else "CAUTION",
+            "ce_plan": _ce_plan_v24,
+            "pe_plan": _pe_plan_v24,
+            "strategy_scores": _score_map_v24,
+            "strategy_rows": _v24_strategy_rows(),
+            "candidate_rows": _v24_candidate_rows(),
+            "data_department": {"snapshot_id": _did_snapshot_v24.snapshot_id, "quality_score": _did_snapshot_v24.quality_score, "raw_signature": _did_snapshot_v24.raw_signature},
+            "department_reports": {
+                "price_action": _v24_price_report,
+                "option": _v24_option_report,
+                "behaviour": _v24_behaviour_report,
+                "smart_money": _v24_money_report,
+                "risk": _v24_risk_report,
+                "strategy": _v24_strategy_report,
+                "candidate": _v24_candidate_report,
+            },
+            "v24_trace": _v24_decision.trace,
+        })
+
+        if "v24_market_memory" not in st.session_state:
+            st.session_state["v24_market_memory"] = MarketMemory(max_snapshots=5, max_decisions=20, max_events=30)
+        _v24_memory = st.session_state["v24_market_memory"]
+        _v24_memory.remember_snapshot(_snapshot_id_v24, {
+            "price": price, "vix": vix, "pcr": pcr, "option_bias": option_bias,
+            "price_action_bias": price_action_bias, "smart_money_bias": smart_money_bias,
+        })
+        _v24_memory.remember_decision(_v24_decision)
+        AI_MASTER["memory_stats"] = _v24_memory.stats()
+        AI_MASTER["decision_flip_count"] = _v24_memory.decision_flip_count(8)
+
+        if "v24_learning_department" not in st.session_state:
+            st.session_state["v24_learning_department"] = LearningDepartment(max_records=200)
+    else:
+        AI_MASTER.setdefault("warnings", []).append("V24 department imports unavailable: " + str(globals().get("V24_DEPARTMENT_IMPORT_ERROR", "unknown")))
+except Exception as _v24_pipeline_error:
+    # Fail-safe: retain the proven V22.6 AI_MASTER instead of crashing the app.
+    AI_MASTER.setdefault("warnings", []).append("V24 department pipeline fallback: " + str(_v24_pipeline_error))
+    AI_MASTER["v24_pipeline_status"] = "FALLBACK_TO_V22_6"
 
 
 # =========================================================
@@ -5653,7 +5901,7 @@ st.markdown("<div class='main-title'>🧠 Nifty Seller AI V22.6 Data Ownership L
 try:
     _rcol1, _rcol2 = st.columns([1, 5])
     with _rcol1:
-        if st.button("🔄 Refresh", key="v216_top_safe_refresh", use_container_width=True):
+        if st.button("🔄 Refresh", key="v216_top_safe_refresh", width="stretch"):
             v215_unified_refresh("top_safe", do_rerun=True)
 except Exception:
     pass
@@ -5820,7 +6068,7 @@ st.markdown("### 📶 Signal Reliability Table")
 try:
     _v20_rel_rows = _v20_signal_reliability_rows()
     if _v20_rel_rows:
-        st.dataframe(pd.DataFrame(_v20_rel_rows), use_container_width=True, hide_index=True)
+        st.dataframe(_safe_arrow_df(_v20_rel_rows), width="stretch", hide_index=True)
         st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot + Single Advisor. Ye table sirf evidence dikhata hai; advice AI Final Authority se aati hai.")
     else:
         st.info("Signal reliability rows abhi available nahi hain.")
@@ -5831,7 +6079,7 @@ st.markdown("### 🎯 Smart Strategy Matrix — AI_MASTER Strategy Routing")
 try:
     _strategy_rows_v221 = AI_MASTER.get("strategy_rows", []) if isinstance(AI_MASTER, dict) else []
     if _strategy_rows_v221:
-        st.dataframe(pd.DataFrame(_strategy_rows_v221), width="stretch", hide_index=True)
+        st.dataframe(_safe_arrow_df(_strategy_rows_v221), width="stretch", hide_index=True)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -5894,7 +6142,7 @@ st.markdown("### 📋 AI Candidate Matrix")
 try:
     _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
     if _cand_rows_v221:
-        st.dataframe(pd.DataFrame(_cand_rows_v221), width="stretch", hide_index=True)
+        st.dataframe(_safe_arrow_df(_cand_rows_v221), width="stretch", hide_index=True)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -5935,7 +6183,7 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
         pc2.metric("Total P/L", f"₹{_total_pnl:,.0f}")
         pc3.metric("Portfolio Risk", "HIGH" if max(gamma_score_v7, shock_score_v7) >= 70 else "MEDIUM" if max(gamma_score_v7, shock_score_v7) >= 45 else "LOW")
         pc4.metric("Fresh Entry", "Allowed" if _signal_gate_v162.get("allowed") else "Blocked")
-        st.dataframe(pd.DataFrame(_rows), width="stretch", hide_index=True)
+        st.dataframe(_safe_arrow_df(_rows), width="stretch", hide_index=True)
         st.caption("AI Action har refresh par live premium + hedge + risk ke hisab se update hota hai. Current price zero aaye to option chain range/strike check karo.")
         with st.expander("Position Actions — mark exit", expanded=False):
             _exit_id = st.selectbox("Position ID", list(_active_pf["Position ID"].astype(str)), key="v162_exit_id")

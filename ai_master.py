@@ -412,7 +412,7 @@ class AIMaster:
         base -= len(warnings) * 3.0
         if action == "WAIT":
             base = max(base, top_score)
-        return round(max(0.0, min(100.0, base)), 1)
+        return round(max(0.0, min(95.0, base)), 1)
 
     def _reason(
         self,
