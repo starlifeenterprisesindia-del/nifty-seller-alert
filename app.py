@@ -102,6 +102,7 @@ try:
     from department_academy import DepartmentAcademy
     from communication_bus import DepartmentCommunicationBus
     from case_history import CaseHistoryEngine
+    from pattern_probability import PatternProbabilityEngine
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -339,11 +340,33 @@ def _render_v27_command_hierarchy(case_data):
             else:
                 st.info("Abhi enough similar cases collect nahi hue.")
 
-    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Inbox → CO Case File → AI_MASTER Inbox → Case History → Final Authority")
+    probability = case_data.get("pattern_probability", {}) if isinstance(case_data, dict) else {}
+    if isinstance(probability, dict) and probability:
+        with st.expander("📊 V34 Pattern Probability & Calibration", expanded=False):
+            _hist_acc = probability.get("historical_accuracy")
+            _match_acc = probability.get("matched_accuracy")
+            st.markdown(
+                f"**Status:** `{probability.get('status','NA')}` &nbsp; | &nbsp; "
+                f"**Context Cases:** {int(probability.get('sample_size',0) or 0)} &nbsp; | &nbsp; "
+                f"**Matched Completed:** {int(probability.get('matched_sample_size',0) or 0)}"
+            )
+            st.caption(str(probability.get("probability_label", "Insufficient evidence")))
+            _prob_rows = [{
+                "Action": probability.get("action", "-"),
+                "Bias": probability.get("market_bias", "-"),
+                "Historical Accuracy": f"{float(_hist_acc):.1f}%" if _hist_acc is not None else "Collecting",
+                "Matched Accuracy": f"{float(_match_acc):.1f}%" if _match_acc is not None else "Collecting",
+                "Confidence Gap": f"{float(probability.get('confidence_gap')):+.1f}" if probability.get("confidence_gap") is not None else "NA",
+            }]
+            _render_safe_table(_prob_rows, max_rows=1)
+            for _warning in list(probability.get("warnings", []) or [])[:4]:
+                st.warning(str(_warning))
+
+    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V33.0 - CASE HISTORY
+# NIFTY SELLER AI DASHBOARD V34.0 - PATTERN PROBABILITY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -364,7 +387,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V33 Case History",
+    page_title="Nifty Seller AI V34 Pattern Probability",
     page_icon="🧠",
     layout="wide",
 )
@@ -5863,6 +5886,18 @@ try:
             warnings=list(_co_case_v26.warnings) + list(_v24_decision.warnings),
         )
         _case_history_trace_v33 = _case_history_v33.to_compact_dict()
+        # V34 historical probability and calibration. Descriptive only;
+        # it never changes AI weights or overrides AI_MASTER.
+        _pattern_probability_v34 = PatternProbabilityEngine(
+            minimum_samples=8, strong_samples=20
+        ).evaluate(
+            state=st.session_state,
+            action=_v24_decision.action,
+            market_bias=_v24_decision.market_bias,
+            current_confidence=_v24_decision.confidence,
+            similar_cases=_case_history_trace_v33.get("similar_cases", []),
+        )
+        _pattern_probability_trace_v34 = _pattern_probability_v34.to_compact_dict()
 
         def _v24_candidate_plan(candidate, side, confidence_value):
             _c = candidate if isinstance(candidate, dict) else {}
@@ -5953,9 +5988,10 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V33_CASE_HISTORY",
+                "version": "V34_PATTERN_PROBABILITY",
                 "communication_bus": _communication_trace_v32,
                 "case_history": _case_history_trace_v33,
+                "pattern_probability": _pattern_probability_trace_v34,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
