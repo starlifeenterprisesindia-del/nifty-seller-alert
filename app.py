@@ -198,7 +198,8 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "SMART_MONEY", "RISK", "STRATEGY", "CANDIDATE",
+        "MARKET_PSYCHOLOGY", "MARKET_JOURNEY", "SMART_MONEY",
+        "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
         branch = branches.get(branch_name, {}) if isinstance(branches, dict) else {}
@@ -366,45 +367,74 @@ def _render_v27_command_hierarchy(case_data):
 
     journey = case_data.get("market_journey", {}) if isinstance(case_data, dict) else {}
     if isinstance(journey, dict) and journey:
-        with st.expander("🧭 V35 Market Journey & Barrier Intelligence", expanded=True):
+        with st.expander("🧭 V37.3 Move Remaining & Reversal Intelligence", expanded=True):
             _zone_low = float(journey.get("expected_zone_low", 0) or 0)
             _zone_high = float(journey.get("expected_zone_high", 0) or 0)
+            _primary_direction = str(journey.get("primary_direction", journey.get("direction", "RANGE")))
+            _primary_signed = float(journey.get("primary_signed_points", 0) or 0)
+            _primary_text = f"{_primary_signed:+.0f} pts" if _primary_direction in {"UP", "DOWN"} else "Two-sided range"
             st.markdown(
-                f"**Direction:** `{journey.get('direction','RANGE')}` &nbsp; | &nbsp; "
-                f"**Stage:** `{journey.get('move_stage','Unknown')}` &nbsp; | &nbsp; "
-                f"**Energy:** `{journey.get('market_energy','Unknown')}`"
+                f"**Primary Estimate:** `{_primary_text}` &nbsp; | &nbsp; "
+                f"**Direction:** `{_primary_direction}` &nbsp; | &nbsp; "
+                f"**Reversal Risk:** `{journey.get('reversal_risk','MODERATE')}` &nbsp; | &nbsp; "
+                f"**Confidence:** `{float(journey.get('estimate_confidence',0) or 0):.0f}%`"
             )
             _journey_rows = [{
                 "Expected Zone": f"{_zone_low:.1f} – {_zone_high:.1f}",
-                "Remaining Move": f"{float(journey.get('remaining_points_low',0) or 0):.0f}–{float(journey.get('remaining_points_high',0) or 0):.0f} pts",
+                "Upside Room": f"+{float(journey.get('upside_remaining_points',0) or 0):.0f} pts",
+                "Downside Room": f"-{float(journey.get('downside_remaining_points',0) or 0):.0f} pts",
+                "Before Reversal": f"{float(journey.get('before_reversal_points',0) or 0):.0f} pts",
                 "Breakout Chance": f"{float(journey.get('breakout_probability',0) or 0):.0f}%",
                 "Reversal Chance": f"{float(journey.get('reversal_probability',0) or 0):.0f}%",
                 "Barrier": f"{journey.get('barrier_type','NONE')} {journey.get('barrier_level') or '-'}",
+                "Barrier Distance": f"{float(journey.get('barrier_distance_points',0) or 0):.0f} pts" if journey.get('barrier_distance_points') is not None else "NA",
+                "Barrier Adjustment": f"-{float(journey.get('barrier_adjustment_points',0) or 0):.0f} pts",
                 "Touches": int(journey.get('barrier_touch_count',0) or 0),
                 "Barrier State": journey.get('barrier_strength','BALANCED'),
+                "Stage": journey.get('move_stage','Unknown'),
+                "Energy": journey.get('market_energy','Unknown'),
                 "Time Phase": journey.get('time_phase','Normal Session'),
             }]
             _render_safe_table(_journey_rows, max_rows=1)
-            for _reason in list(journey.get("reasons", []) or [])[:4]:
+            st.caption(
+                "Psychology context: " + str(journey.get("psychology_case_state", "BALANCED_OBSERVATION"))
+                + " | Authority: " + str(journey.get("authority", "EVIDENCE_ONLY_TO_CO"))
+                + " | Execution: " + str(journey.get("execution_instruction", "NONE"))
+            )
+            for _reason in list(journey.get("reasons", []) or [])[:5]:
                 st.caption("• " + str(_reason))
-            for _warning in list(journey.get("warnings", []) or [])[:3]:
+            for _warning in list(journey.get("warnings", []) or [])[:4]:
                 st.warning(str(_warning))
+            st.info(
+                "Move Remaining ek bounded estimate hai, target ya trade signal nahi. "
+                "Har fresh snapshot par ATR, barrier, OI/volume aur psychology evidence ke saath dobara calculate hota hai; final judgement AI_MASTER ka hai."
+            )
 
     psychology = case_data.get("market_psychology", {}) if isinstance(case_data, dict) else {}
     if isinstance(psychology, dict) and psychology:
-        with st.expander("🧠 V36 Market Psychology — Fear, Trap, Panic & Participation", expanded=True):
+        with st.expander("🧠 V36.6 Market Psychology — Consolidated Case Report", expanded=True):
             _fear = psychology.get("retail_fear", {}) or {}
             _greed = psychology.get("retail_greed", {}) or {}
             _trap = psychology.get("trap_detection", {}) or {}
             _liquidity = psychology.get("liquidity_sweep", {}) or {}
             _panic = psychology.get("panic_selling", {}) or {}
             _participation = psychology.get("upside_participation", {}) or {}
+            _case_report = psychology.get("psychology_case_report", {}) or {}
+            _dominant = _case_report.get("dominant_evidence", {}) or {}
             _short_cover = _participation.get("short_covering", {}) or {}
             _long_build = _participation.get("long_build_up", {}) or {}
             _bull_trap = _trap.get("bull_trap_risk", {}) or {}
             _bear_trap = _trap.get("bear_trap_risk", {}) or {}
             _up_liq = _liquidity.get("upside_liquidity_grab_risk", {}) or {}
             _down_liq = _liquidity.get("downside_liquidity_grab_risk", {}) or {}
+            st.markdown(
+                f"**CO Case View:** `{_case_report.get('case_state','BALANCED_OBSERVATION')}` &nbsp; | &nbsp; "
+                f"**Priority:** `{_case_report.get('alert_priority','LOW_WATCH')}` &nbsp; | &nbsp; "
+                f"**Dominant:** `{_dominant.get('name','No dominant evidence')} "
+                f"{float(_dominant.get('score',0) or 0):.0f}/100`"
+            )
+            if _case_report.get("department_conclusion"):
+                st.caption("Department conclusion: " + str(_case_report.get("department_conclusion")))
             st.markdown(
                 f"**Psychology:** `{psychology.get('psychology_state','BALANCED')}` &nbsp; | &nbsp; "
                 f"**Trap:** `{_trap.get('state','LOW_TRAP_EVIDENCE')}` &nbsp; | &nbsp; "
@@ -444,16 +474,20 @@ def _render_v27_command_hierarchy(case_data):
                 st.caption("Long-build-up evidence: " + str(_item))
             for _item in list(_participation.get("cautions", []) or [])[:3]:
                 st.caption("Participation caution: " + str(_item))
+            for _conflict in list(_case_report.get("conflicts", []) or [])[:3]:
+                st.warning("Psychology conflict: " + str(_conflict))
+            for _check in list(_case_report.get("next_confirmation_required", []) or [])[:3]:
+                st.caption("Next confirmation: " + str(_check))
             st.info(
                 "Trap, liquidity grab, panic, short covering aur long build-up abhi confirmed fact ya trade signal nahi hain. "
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Departments including Market Psychology → CO Case File → AI_MASTER → Case History → Pattern Probability → Market Journey → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Psychology + Move Remaining Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V36.5 - SHORT COVERING & LONG BUILD-UP EVIDENCE FOUNDATION
+# NIFTY SELLER AI DASHBOARD V37.3 - MOVE REMAINING + PSYCHOLOGY BUNDLE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -474,7 +508,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V36.5 Participation Evidence",
+    page_title="Nifty Seller AI V37.3 Move Remaining",
     page_icon="🧠",
     layout="wide",
 )
@@ -2736,7 +2770,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V36.5 AI COMMAND")
+st.sidebar.title("🏛️ V37.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -5837,7 +5871,7 @@ try:
             _v24_price_report.details, _v24_option_report.details, datetime.now(IST).hour
         )
 
-        # V36.5 Market Psychology: Emotion + Trap + Liquidity + Panic + Upside Participation Evidence.
+        # V36.6 Market Psychology: consolidated evidence case report for CO.
         # It reads existing reports only and cannot confirm psychology events from one snapshot,
         # cannot issue a trade, and must report through CO.
         _v36_psychology_report = MarketPsychologyDirector().build_report(
@@ -5867,6 +5901,26 @@ try:
         _v24_money_report = SmartMoneyDirector().build_report(
             float(fii_today), float(dii_today), _adv_hw_v24, _dec_hw_v24, _adv_hw_v24, _dec_hw_v24
         )
+
+        # V37.1-V37.3: upgrade the existing Market Journey investigator.
+        # It estimates independent upside/downside room, then applies psychology,
+        # barrier and reversal-risk adjustments. The department is evidence-only
+        # and its report must enter the CO case file before AI_MASTER judgement.
+        _market_journey_v37 = MarketJourneyEngine().evaluate(
+            state=st.session_state,
+            price=float(price),
+            atr=float(atr5),
+            support=_near_support,
+            resistance=_near_resistance,
+            price_report=_v24_price_report,
+            option_report=_v24_option_report,
+            behaviour_report=_v24_behaviour_report,
+            smart_money_report=_v24_money_report,
+            psychology_report=_v36_psychology_report,
+            hour=datetime.now(IST).hour,
+        )
+        _market_journey_trace_v37 = _market_journey_v37.to_compact_dict()
+        _market_journey_department_v37 = _market_journey_v37.to_department_report()
 
         _v24_risk_report = RiskDirector().build_report(
             float(vix), bool(news.get("score", 0) >= 65), bool(is_expiry_mode),
@@ -5945,6 +5999,7 @@ try:
             "PRICE_ACTION": _v24_price_report,
             "MARKET_BEHAVIOUR": _v24_behaviour_report,
             "MARKET_PSYCHOLOGY": _v36_psychology_report,
+            "MARKET_JOURNEY": _market_journey_department_v37,
             "SMART_MONEY": _v24_money_report,
             "RISK": _v24_risk_report,
             "CANDIDATE": _v24_candidate_report,
@@ -6011,22 +6066,6 @@ try:
             similar_cases=_case_history_trace_v33.get("similar_cases", []),
         )
         _pattern_probability_trace_v34 = _pattern_probability_v34.to_compact_dict()
-        # V35 market journey intelligence: remaining move, barrier pressure,
-        # breakout vs reversal probability. Descriptive only; AI_MASTER remains final authority.
-        _market_journey_v35 = MarketJourneyEngine().evaluate(
-            state=st.session_state,
-            price=float(price),
-            atr=float(atr5),
-            support=_near_support,
-            resistance=_near_resistance,
-            price_report=_v24_price_report,
-            option_report=_v24_option_report,
-            behaviour_report=_v24_behaviour_report,
-            smart_money_report=_v24_money_report,
-            hour=datetime.now(IST).hour,
-        )
-        _market_journey_trace_v35 = _market_journey_v35.to_compact_dict()
-
         def _v24_candidate_plan(candidate, side, confidence_value):
             _c = candidate if isinstance(candidate, dict) else {}
             _strike = _v221_int(_c.get("strike", 0), 0)
@@ -6110,6 +6149,7 @@ try:
                 "option": {"summary": _v24_option_report.summary, "confidence": _v24_option_report.confidence},
                 "behaviour": {"summary": _v24_behaviour_report.summary, "confidence": _v24_behaviour_report.confidence},
                 "market_psychology": {"summary": _v36_psychology_report.summary, "confidence": _v36_psychology_report.confidence},
+                "market_journey": {"summary": _market_journey_department_v37["summary"], "confidence": _market_journey_department_v37["confidence"]},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
@@ -6117,7 +6157,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V36_5_SHORT_COVERING_LONG_BUILDUP_EVIDENCE_FOUNDATION",
+                "version": "V37_3_MOVE_REMAINING_PSYCHOLOGY_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6126,7 +6166,7 @@ try:
                 "communication_bus": _communication_trace_v32,
                 "case_history": _case_history_trace_v33,
                 "pattern_probability": _pattern_probability_trace_v34,
-                "market_journey": _market_journey_trace_v35,
+                "market_journey": _market_journey_trace_v37,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -6469,7 +6509,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V36.5 Participation Evidence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V37.3 Move Remaining Intelligence</div>", unsafe_allow_html=True)
 
 
 # =========================================================

@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V31.0
+Version: V37.3
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -12,6 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional
+
+
+OBSERVATION_ONLY_BRANCHES = {"MARKET_PSYCHOLOGY", "MARKET_JOURNEY"}
 
 
 @dataclass(frozen=True)
@@ -218,7 +221,7 @@ class BranchBoss:
         if isinstance(value, Mapping):
             result: Dict[str, Any] = {}
             for index, (key, item) in enumerate(value.items()):
-                if index >= 20:
+                if index >= 28:
                     break
                 result[str(key)] = self._compact(item, depth + 1)
             return result
@@ -232,7 +235,8 @@ class CommandingOfficer:
 
     REQUIRED_BRANCHES = (
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "SMART_MONEY", "RISK", "CANDIDATE", "STRATEGY",
+        "MARKET_PSYCHOLOGY", "MARKET_JOURNEY", "SMART_MONEY",
+        "RISK", "CANDIDATE", "STRATEGY",
     )
 
     def prepare_case_file(self, *, snapshot_id: str, data_quality_score: float, branches: Iterable[BranchReport]) -> COCaseFile:
@@ -271,11 +275,11 @@ class CommandingOfficer:
         all_evidence = [evidence for branch in branch_map.values() for evidence in branch.evidence]
         accepted_evidence: List[str] = []
         rejected_evidence: List[str] = []
-        # V36 psychology remains an observation branch during foundation testing.
-        # Its evidence is visible in the CO file, but cannot silently improve or
-        # weaken execution case-strength scores before live validation.
+        # V36 Psychology and V37 Move Remaining remain observation-only branches
+        # during live validation. Their evidence is visible in the CO file, but
+        # cannot silently improve or weaken execution case-strength scores.
         scoring_evidence_count = sum(
-            1 for evidence in all_evidence if evidence.branch != "MARKET_PSYCHOLOGY"
+            1 for evidence in all_evidence if evidence.branch not in OBSERVATION_ONLY_BRANCHES
         )
         scoring_accepted_count = 0
         for evidence in all_evidence:
@@ -284,7 +288,7 @@ class CommandingOfficer:
             if evidence.weight >= 55 and (witnesses or evidence.category == "CRITICAL"):
                 suffix = (" | verified by " + ", ".join(witnesses)) if witnesses else ""
                 accepted_evidence.append(f"{evidence.branch}: {statement}{suffix}")
-                if evidence.branch != "MARKET_PSYCHOLOGY":
+                if evidence.branch not in OBSERVATION_ONLY_BRANCHES:
                     scoring_accepted_count += 1
             else:
                 rejected_evidence.append(f"{evidence.branch}: {statement} (weak/unverified)")
@@ -295,12 +299,12 @@ class CommandingOfficer:
                 missing_evidence.append(f"{name}: no structured evidence")
 
         branch_votes = {name: branch.branch_vote for name, branch in branch_map.items()}
-        # V36.5 Psychology is evidence-only. CO records and displays it, but
-        # excludes it from directional consensus and execution case-strength
-        # until live accuracy is validated after the V50 testing phase.
+        # Psychology and Move Remaining are evidence-only. CO records and
+        # displays them, but excludes them from directional consensus and
+        # execution case-strength until post-V50 live validation.
         _consensus_votes = {
             name: vote for name, vote in branch_votes.items()
-            if name != "MARKET_PSYCHOLOGY"
+            if name not in OBSERVATION_ONLY_BRANCHES
         }
         consensus_direction, vote_agreement = self._consensus(_consensus_votes)
         ready_count = sum(1 for name in self.REQUIRED_BRANCHES if branch_map.get(name) and branch_map[name].status == "READY")
@@ -308,7 +312,7 @@ class CommandingOfficer:
         confidences = [
             branch.confidence
             for name, branch in branch_map.items()
-            if name != "MARKET_PSYCHOLOGY" and branch.status == "READY" and branch.confidence > 0
+            if name not in OBSERVATION_ONLY_BRANCHES and branch.status == "READY" and branch.confidence > 0
         ]
         avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
         witness_score = min(100.0, scoring_accepted_count / max(1, scoring_evidence_count) * 100)
@@ -445,6 +449,10 @@ class CommandingOfficer:
         for name, branch in branches.items():
             if name == evidence.branch:
                 continue
+            # Observation-only branches may be displayed in the CO file, but
+            # cannot act as scoring witnesses for another branch.
+            if name in OBSERVATION_ONLY_BRANCHES:
+                continue
             other = re_words(branch.summary + " " + str(branch.facts))
             if tokens.intersection(other):
                 witnesses.append(name)
@@ -469,6 +477,7 @@ class AIOrganizationController:
         "PRICE_ACTION": BranchBoss("PRICE_ACTION", "DSP Price Action", 0),
         "MARKET_BEHAVIOUR": BranchBoss("MARKET_BEHAVIOUR", "DSP Market Behaviour", 0),
         "MARKET_PSYCHOLOGY": BranchBoss("MARKET_PSYCHOLOGY", "DSP Market Psychology", 0),
+        "MARKET_JOURNEY": BranchBoss("MARKET_JOURNEY", "DSP Move Remaining Intelligence", 0),
         "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money", 0),
         "RISK": BranchBoss("RISK", "DSP Risk", 0),
         "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),

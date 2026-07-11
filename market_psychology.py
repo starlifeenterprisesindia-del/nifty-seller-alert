@@ -1,8 +1,8 @@
 """
 market_psychology.py
-Version: V36.5
+Version: V36.6
 Department: Market Psychology
-Status: Phase-5 — Retail Emotion + Trap + Liquidity + Panic + Upside Participation Evidence
+Status: Phase-6 — Consolidated Market Psychology Case Report
 
 Safety contract:
 - Evidence and interpretation only.
@@ -1203,10 +1203,204 @@ class UpsideParticipationSpecialist:
         }
 
 
+class PsychologyCaseConsolidator:
+    """Convert specialist findings into one bounded DSP case view.
+
+    This is not a second decision engine. It only removes duplicate narration,
+    identifies contradictions, and tells CO what evidence needs confirmation on
+    the next snapshot. Directional voting and execution remain disabled.
+    """
+
+    VERSION = "V36.6_SINGLE_PSYCHOLOGY_CASE_REPORT"
+
+    @staticmethod
+    def _number(value: Any) -> float:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        if number != number:
+            return 0.0
+        return max(0.0, min(100.0, number))
+
+    @staticmethod
+    def _unique(items: List[str], limit: int = 6) -> List[str]:
+        return list(dict.fromkeys(str(item) for item in items if str(item).strip()))[:limit]
+
+    def consolidate(
+        self,
+        *,
+        emotion: Mapping[str, Any],
+        trap: Mapping[str, Any],
+        liquidity: Mapping[str, Any],
+        panic: Mapping[str, Any],
+        participation: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        fear = self._number((emotion.get("retail_fear") or {}).get("score"))
+        greed = self._number((emotion.get("retail_greed") or {}).get("score"))
+        bull_trap = self._number((trap.get("bull_trap_risk") or {}).get("score"))
+        bear_trap = self._number((trap.get("bear_trap_risk") or {}).get("score"))
+        upside_grab = self._number((liquidity.get("upside_liquidity_grab_risk") or {}).get("score"))
+        downside_grab = self._number((liquidity.get("downside_liquidity_grab_risk") or {}).get("score"))
+        panic_score = self._number(panic.get("score"))
+        short_cover = self._number((participation.get("short_covering") or {}).get("score"))
+        long_build = self._number((participation.get("long_build_up") or {}).get("score"))
+
+        emotion_state = str(emotion.get("psychology_state", "BALANCED"))
+        trap_state = str(trap.get("state", "LOW_TRAP_EVIDENCE"))
+        liquidity_state = str(liquidity.get("state", "LOW_LIQUIDITY_SWEEP_EVIDENCE"))
+        panic_state = str(panic.get("state", "LOW_PANIC_EVIDENCE"))
+        participation_state = str(participation.get("state", "LOW_UPMOVE_PARTICIPATION_EVIDENCE"))
+
+        score_map = {
+            "Retail Fear": fear,
+            "Retail Greed": greed,
+            "Bull-Trap Risk": bull_trap,
+            "Bear-Trap Risk": bear_trap,
+            "Upside Liquidity Grab": upside_grab,
+            "Downside Liquidity Grab": downside_grab,
+            "Panic Selling": panic_score,
+            "Short Covering": short_cover,
+            "Long Build-up": long_build,
+        }
+        dominant_label, dominant_score = max(score_map.items(), key=lambda item: item[1])
+
+        conflicts: List[str] = []
+        if fear >= 45 and max(short_cover, long_build) >= 58:
+            conflicts.append("Retail fear coexists with a strong upside participation mechanism")
+        if greed >= 45 and panic_score >= 48:
+            conflicts.append("Retail greed conflicts with active panic-selling evidence")
+        if long_build >= 58 and bull_trap >= 52:
+            conflicts.append("Fresh long build-up coexists with bull-trap risk")
+        if max(short_cover, long_build) >= 58 and upside_grab >= 52:
+            conflicts.append("Upside participation may include a liquidity/stop sweep")
+        if panic_score >= 58 and bear_trap >= 52:
+            conflicts.append("Panic participation coexists with bear-trap reversal risk")
+        if panic_score >= 58 and downside_grab >= 52:
+            conflicts.append("Panic move may include a downside liquidity grab")
+        if bull_trap >= 52 and bear_trap >= 52:
+            conflicts.append("Both-side trap evidence is active; market intent is unresolved")
+
+        # Case state uses already-computed specialist states. It never creates a
+        # fresh market direction or execution recommendation.
+        if panic_state == "PANIC_EXHAUSTION_OR_STOP_SWEEP_WATCH" or (
+            downside_grab >= 58 and bear_trap >= 52
+        ):
+            case_state = "DOWNSIDE_STOP_SWEEP_REVERSAL_WATCH"
+        elif participation_state in {"SHORT_COVERING_EXHAUSTION_WATCH", "LONG_BUILDUP_AT_BARRIER_WATCH"} or (
+            upside_grab >= 58 and bull_trap >= 52
+        ):
+            case_state = "UPMOVE_EXHAUSTION_TRAP_WATCH"
+        elif panic_state == "POSSIBLE_PANIC_SELLING" and emotion_state == "FEAR_DOMINANT":
+            case_state = "FEAR_WITH_PANIC_PARTICIPATION"
+        elif participation_state == "POSSIBLE_SHORT_COVERING":
+            case_state = "SHORT_COVERING_OBSERVED"
+        elif participation_state == "POSSIBLE_LONG_BUILDUP":
+            case_state = "LONG_BUILDUP_OBSERVED"
+        elif emotion_state == "GREED_DOMINANT" and bull_trap >= 52:
+            case_state = "GREED_WITH_BULL_TRAP_RISK"
+        elif emotion_state == "FEAR_DOMINANT" and bear_trap >= 52:
+            case_state = "FEAR_WITH_BEAR_TRAP_RISK"
+        elif emotion_state == "MIXED_EMOTION" or len(conflicts) >= 2:
+            case_state = "MIXED_PSYCHOLOGY_CONFLICT"
+        elif emotion_state in {"FEAR_DOMINANT", "GREED_DOMINANT"}:
+            case_state = emotion_state
+        else:
+            case_state = "BALANCED_OBSERVATION"
+
+        high_watch_states = {
+            "DOWNSIDE_STOP_SWEEP_REVERSAL_WATCH",
+            "UPMOVE_EXHAUSTION_TRAP_WATCH",
+            "FEAR_WITH_PANIC_PARTICIPATION",
+            "MIXED_PSYCHOLOGY_CONFLICT",
+        }
+        active_specialist_state = any(
+            state not in {
+                "LOW_TRAP_EVIDENCE",
+                "LOW_LIQUIDITY_SWEEP_EVIDENCE",
+                "LOW_PANIC_EVIDENCE",
+                "LOW_UPMOVE_PARTICIPATION_EVIDENCE",
+                "BALANCED",
+            }
+            for state in (trap_state, liquidity_state, panic_state, participation_state, emotion_state)
+        )
+        if case_state in high_watch_states or dominant_score >= 72:
+            alert_priority = "HIGH_WATCH"
+        elif active_specialist_state or dominant_score >= 45:
+            alert_priority = "MODERATE_WATCH"
+        else:
+            alert_priority = "LOW_WATCH"
+
+        confirmations: List[str] = []
+        if "TRAP" in case_state or bull_trap >= 52 or bear_trap >= 52:
+            confirmations.append("Check next candle acceptance/rejection beyond the relevant barrier")
+        if "SWEEP" in case_state or max(upside_grab, downside_grab) >= 52:
+            confirmations.append("Verify whether price returns inside the swept support/resistance zone")
+        if panic_score >= 48:
+            confirmations.append("Check whether a fresh low holds with volume and OI follow-through")
+        if max(short_cover, long_build) >= 48:
+            confirmations.append("Verify the same price-OI mechanism on the next snapshot")
+        if not confirmations:
+            confirmations.append("Continue observation; no high-priority psychology mechanism is established")
+
+        coverages = [
+            self._number(emotion.get("data_coverage")),
+            self._number(trap.get("data_coverage")),
+            self._number(liquidity.get("data_coverage")),
+            self._number(panic.get("data_coverage")),
+            self._number(participation.get("data_coverage")),
+        ]
+        available_coverages = [value for value in coverages if value > 0]
+        evidence_coverage = sum(available_coverages) / len(available_coverages) if available_coverages else 0.0
+        case_confidence = max(
+            20.0,
+            min(86.0, evidence_coverage * 0.45 + dominant_score * 0.40 - len(conflicts) * 4.0 + 12.0),
+        )
+
+        conclusion_map = {
+            "DOWNSIDE_STOP_SWEEP_REVERSAL_WATCH": "Downside emotion is active, but stop-sweep/reversal evidence requires immediate next-snapshot verification.",
+            "UPMOVE_EXHAUSTION_TRAP_WATCH": "Upside participation is visible, but barrier, trap or liquidity evidence weakens clean continuation.",
+            "FEAR_WITH_PANIC_PARTICIPATION": "Retail fear and panic participation are aligned; continuation still requires OI-volume confirmation.",
+            "SHORT_COVERING_OBSERVED": "Price-up/OI-down behaviour is visible as possible short covering, not yet confirmed.",
+            "LONG_BUILDUP_OBSERVED": "Price-up/OI-up behaviour is visible as possible long build-up, not yet confirmed.",
+            "GREED_WITH_BULL_TRAP_RISK": "Retail greed is elevated while bull-trap risk is also active.",
+            "FEAR_WITH_BEAR_TRAP_RISK": "Retail fear is elevated while bear-trap reversal risk is also active.",
+            "MIXED_PSYCHOLOGY_CONFLICT": "Psychology witnesses conflict; CO should treat the branch as unresolved.",
+            "FEAR_DOMINANT": "Retail fear is the dominant psychology witness without a stronger confirmed mechanism.",
+            "GREED_DOMINANT": "Retail greed is the dominant psychology witness without a stronger confirmed mechanism.",
+            "BALANCED_OBSERVATION": "No dominant psychology mechanism is established in the current snapshot.",
+        }
+
+        return {
+            "case_state": case_state,
+            "alert_priority": alert_priority,
+            "dominant_evidence": {
+                "name": dominant_label,
+                "score": round(dominant_score, 1),
+            },
+            "department_conclusion": conclusion_map.get(case_state, "Psychology evidence requires CO verification."),
+            "conflicts": self._unique(conflicts, 6),
+            "next_confirmation_required": self._unique(confirmations, 4),
+            "evidence_coverage": round(evidence_coverage, 1),
+            "case_confidence": round(case_confidence, 1),
+            "component_states": {
+                "emotion": emotion_state,
+                "trap": trap_state,
+                "liquidity": liquidity_state,
+                "panic": panic_state,
+                "participation": participation_state,
+            },
+            "validation_status": "UNCONFIRMED_REQUIRES_NEXT_SNAPSHOT",
+            "authority": "EVIDENCE_ONLY_TO_CO",
+            "decision_impact": "EXCLUDED_FROM_DIRECTIONAL_CONSENSUS_UNTIL_LIVE_VALIDATION",
+            "execution_instruction": "NONE",
+        }
+
+
 class MarketPsychologyDirector:
     """DSP Market Psychology: one report, no independent trade authority."""
 
-    VERSION = "V36.5_PSYCHOLOGY_WITH_UPSIDE_PARTICIPATION_EVIDENCE"
+    VERSION = "V36.6_CONSOLIDATED_PSYCHOLOGY_CASE_REPORT"
 
     def build_report(
         self,
@@ -1290,6 +1484,13 @@ class MarketPsychologyDirector:
             option_intelligence=option_details,
             market_behaviour=behaviour_details,
         )
+        case_report = PsychologyCaseConsolidator().consolidate(
+            emotion=emotion,
+            trap=trap,
+            liquidity=liquidity,
+            panic=panic,
+            participation=participation,
+        )
 
         fear_score = float(emotion["retail_fear"]["score"])
         greed_score = float(emotion["retail_greed"]["score"])
@@ -1313,16 +1514,15 @@ class MarketPsychologyDirector:
             "liquidity_sweep": liquidity,
             "panic_selling": panic,
             "upside_participation": participation,
+            "psychology_case_report": case_report,
             "authority": "EVIDENCE_ONLY_TO_CO",
             "phase_control": "OBSERVATION_ONLY_NOT_IN_DIRECTIONAL_CONSENSUS",
         }
         summary = (
-            f"Market psychology evidence: {state} | Fear {fear_score:.0f}/100 | "
-            f"Greed {greed_score:.0f}/100 | Trap {trap_state} "
-            f"(Bull {bull_trap:.0f}, Bear {bear_trap:.0f}) | "
-            f"Liquidity {liquidity_state} (Up {upper_liquidity:.0f}, Down {lower_liquidity:.0f}) | "
-            f"Panic {panic_state} ({panic_score:.0f}/100) | "
-            f"Participation {participation_state} (SC {short_cover_score:.0f}, LB {long_build_score:.0f}) | "
+            f"Psychology case: {case_report['case_state']} | "
+            f"Priority {case_report['alert_priority']} | "
+            f"Dominant {case_report['dominant_evidence']['name']} "
+            f"{case_report['dominant_evidence']['score']:.0f}/100 | "
             f"CO verification required"
         )
         return MarketPsychologyReport(
