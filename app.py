@@ -1,4 +1,5 @@
 import os
+import gc
 from io import StringIO
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -120,7 +121,7 @@ def _safe_arrow_df(data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V24.0 - DEPARTMENT AI MASTER INTEGRATION
+# NIFTY SELLER AI DASHBOARD V24.1 - MEMORY SAFE DEPARTMENT INTEGRATION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -141,7 +142,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V24 Department Edition",
+    page_title="Nifty Seller AI V24.1 Stability Edition",
     page_icon="🧠",
     layout="wide",
 )
@@ -162,6 +163,11 @@ if "auto_refresh_interval" not in st.session_state:
 if "last_manual_refresh" not in st.session_state:
     st.session_state["last_manual_refresh"] = ""
 
+# V24.1 migration cleanup: older builds stored custom department objects in
+# session_state. Remove them once; compact plain-dict history is used now.
+for _legacy_v24_key in ("v24_market_memory", "v24_learning_department"):
+    st.session_state.pop(_legacy_v24_key, None)
+
 # V21.6: ONE SAFE REFRESH CONTROLLER
 # Manual button, floating button and auto-refresh all come through this same function.
 def v215_unified_refresh(source="manual", do_rerun=True):
@@ -169,9 +175,19 @@ def v215_unified_refresh(source="manual", do_rerun=True):
     st.session_state["manual_refresh_tick"] = st.session_state.get("manual_refresh_tick", 0) + 1
     st.session_state["last_manual_refresh"] = datetime.now(IST).strftime("%H:%M:%S")
     st.session_state["last_refresh_source"] = str(source)
-    # Single cache clear path: prevents old OC / CE-PE / matrix data from staying in one route.
+    # V24.1 stability: do NOT clear the complete Streamlit cache on every refresh.
+    # Global cache clearing creates a large temporary memory spike because all
+    # Yahoo/Dhan/DataFrame objects are rebuilt together. Short TTL caches will
+    # refresh naturally; the refresh tick still forces the app rerun.
     try:
-        st.cache_data.clear()
+        # Remove only transient V24 objects; keep bounded history and UI state.
+        for _key in (
+            "v24_last_department_reports",
+            "v24_last_candidate_payload",
+            "v24_last_strategy_payload",
+        ):
+            st.session_state.pop(_key, None)
+        gc.collect()
     except Exception:
         pass
     if do_rerun:
@@ -5513,12 +5529,33 @@ try:
             _v24_price_report, _v24_option_report, _v24_behaviour_report, _v24_money_report, _v24_risk_report
         )
 
+        # V24.1 memory-safe snapshot: store only compact authoritative summaries.
+        # Full option rows/heavyweight rows already exist in the current script
+        # and must not be deep-copied again into Department 0.
         _did_payload_v24 = {
             "market": {"price": price, "change": nifty_change, "change_pct": nifty_change_pct, "vix": vix, "pcr": pcr},
             "price_action": {"ema20": ema20, "ema50": ema50, "vwap": vwap, "atr": atr5, "support": _near_support, "resistance": _near_resistance},
-            "option": {"snapshot_id": option_analysis.get("snapshot_id", ""), "rows": _v24_rows, "call_oi": total_call_oi, "put_oi": total_put_oi, "call_oi_change": call_oi_change, "put_oi_change": put_oi_change},
-            "money": {"fii_today": fii_today, "dii_today": dii_today, "heavyweights": _hw_rows_v24},
-            "risk": {"news": news, "expiry": selected_expiry, "market_mode": market_mode},
+            "option": {
+                "snapshot_id": option_analysis.get("snapshot_id", ""),
+                "rows_count": len(_v24_rows),
+                "call_oi": total_call_oi,
+                "put_oi": total_put_oi,
+                "call_oi_change": call_oi_change,
+                "put_oi_change": put_oi_change,
+            },
+            "money": {
+                "fii_today": fii_today,
+                "dii_today": dii_today,
+                "heavyweight_count": len(_hw_rows_v24),
+                "advancing_heavyweights": _adv_hw_v24,
+                "declining_heavyweights": _dec_hw_v24,
+            },
+            "risk": {
+                "news_score": news.get("score", 0) if isinstance(news, dict) else 0,
+                "news_label": news.get("label", "") if isinstance(news, dict) else "",
+                "expiry": str(selected_expiry),
+                "market_mode": str(market_mode),
+            },
         }
         _did_quality_v24 = int(max(0, min(100, data_quality)))
         _did_snapshot_v24 = SnapshotManager().create_snapshot(_did_payload_v24, [], _did_quality_v24)
@@ -5591,7 +5628,7 @@ try:
             return _rows
 
         AI_MASTER.update({
-            "version": "V24.0_DEPARTMENT_AI_MASTER",
+            "version": "V24.1_STABILITY_AI_MASTER",
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
@@ -5607,31 +5644,44 @@ try:
             "strategy_rows": _v24_strategy_rows(),
             "candidate_rows": _v24_candidate_rows(),
             "data_department": {"snapshot_id": _did_snapshot_v24.snapshot_id, "quality_score": _did_snapshot_v24.quality_score, "raw_signature": _did_snapshot_v24.raw_signature},
+            # Compact UI trace only. Rich dataclass reports are intentionally not
+            # retained inside AI_MASTER because final_decision also references
+            # AI_MASTER and Streamlit reruns would otherwise retain duplicate
+            # candidate/report graphs during the refresh handover.
             "department_reports": {
-                "price_action": _v24_price_report,
-                "option": _v24_option_report,
-                "behaviour": _v24_behaviour_report,
-                "smart_money": _v24_money_report,
-                "risk": _v24_risk_report,
-                "strategy": _v24_strategy_report,
-                "candidate": _v24_candidate_report,
+                "price_action": {"summary": _v24_price_report.summary, "confidence": _v24_price_report.confidence},
+                "option": {"summary": _v24_option_report.summary, "confidence": _v24_option_report.confidence},
+                "behaviour": {"summary": _v24_behaviour_report.summary, "confidence": _v24_behaviour_report.confidence},
+                "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
+                "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
+                "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
+                "candidate": {"summary": _v24_candidate_report.summary, "confidence": _v24_candidate_report.confidence},
             },
             "v24_trace": _v24_decision.trace,
         })
 
-        if "v24_market_memory" not in st.session_state:
-            st.session_state["v24_market_memory"] = MarketMemory(max_snapshots=5, max_decisions=20, max_events=30)
-        _v24_memory = st.session_state["v24_market_memory"]
-        _v24_memory.remember_snapshot(_snapshot_id_v24, {
-            "price": price, "vix": vix, "pcr": pcr, "option_bias": option_bias,
-            "price_action_bias": price_action_bias, "smart_money_bias": smart_money_bias,
+        # V24.1 lightweight session memory. Store plain compact dictionaries,
+        # not custom class instances, to reduce retained object graphs on rerun.
+        _v24_hist = list(st.session_state.get("v24_compact_decision_history", []))[-7:]
+        _v24_hist.append({
+            "snapshot_id": _snapshot_id_v24,
+            "action": _v24_decision.action,
+            "confidence": _v24_decision.confidence,
+            "price": round(float(price), 2),
         })
-        _v24_memory.remember_decision(_v24_decision)
-        AI_MASTER["memory_stats"] = _v24_memory.stats()
-        AI_MASTER["decision_flip_count"] = _v24_memory.decision_flip_count(8)
+        _v24_hist = _v24_hist[-8:]
+        st.session_state["v24_compact_decision_history"] = _v24_hist
+        _v24_actions = [str(_x.get("action", "")) for _x in _v24_hist]
+        AI_MASTER["memory_stats"] = {"snapshots": len(_v24_hist), "decisions": len(_v24_hist), "events": 0}
+        AI_MASTER["decision_flip_count"] = sum(
+            1 for _a, _b in zip(_v24_actions, _v24_actions[1:]) if _a and _b and _a != _b
+        )
 
-        if "v24_learning_department" not in st.session_state:
-            st.session_state["v24_learning_department"] = LearningDepartment(max_records=200)
+        # Drop large transient V24 lists before the UI phase. They are recreated
+        # from the next verified snapshot and should not survive the rerun.
+        _candidate_rows_input_v24.clear()
+        del _candidate_rows_input_v24, _v24_rows, _hw_rows_v24
+        gc.collect()
     else:
         AI_MASTER.setdefault("warnings", []).append("V24 department imports unavailable: " + str(globals().get("V24_DEPARTMENT_IMPORT_ERROR", "unknown")))
 except Exception as _v24_pipeline_error:
@@ -6341,10 +6391,12 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
         _oc_df = pd.DataFrame(table_rows)
         try:
             _atm_strike = int(round(float(price) / 50.0) * 50)
-            st.caption(f"Current/ATM Strike Highlight: {_atm_strike}")
-            st.dataframe(_oc_df.style.apply(_highlight_atm, axis=1), width="stretch", hide_index=True)
+            st.caption(f"Current/ATM Strike: {_atm_strike}")
         except Exception:
-            st.dataframe(_oc_df, width="stretch", hide_index=True)
+            pass
+        # V24.1 stability: avoid Pandas Styler on every rerun. Styler builds a
+        # large HTML representation and increases the refresh memory peak.
+        st.dataframe(_safe_arrow_df(_oc_df), width="stretch", hide_index=True)
 
         st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
