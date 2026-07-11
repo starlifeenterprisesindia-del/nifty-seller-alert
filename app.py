@@ -191,6 +191,9 @@ def _render_v27_command_hierarchy(case_data):
             "SOP": str(branch.get("sop_status", "NOT_TRAINED")),
             "Learning": str(branch.get("learning_state", "NO_MEMORY")),
             "Memory": str(branch.get("memory_count", 0)),
+            "Experience": str(branch.get("experience_count", 0)),
+            "Reliability": f"{float(branch.get('reliability_score', 0) or 0):.0f}%",
+            "Training": str(branch.get("training_status", "RECRUIT")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
     _render_safe_table(rows, max_rows=12)
@@ -203,7 +206,7 @@ def _render_v27_command_hierarchy(case_data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V28.0 - BRANCH ACADEMY
+# NIFTY SELLER AI DASHBOARD V29.0 - BRANCH SERVICE ACADEMY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -224,7 +227,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V28 Branch Academy",
+    page_title="Nifty Seller AI V29 Branch Service Academy",
     page_icon="🧠",
     layout="wide",
 )
@@ -5681,7 +5684,7 @@ try:
         )
         # V28 Academy: every DSP branch gets an SOP check and bounded diary.
         # It learns observations only; it cannot alter weights or issue trades.
-        _academy_v28 = DepartmentAcademy(st.session_state, memory_limit=6)
+        _academy_v28 = DepartmentAcademy(st.session_state, memory_limit=8)
         _training_reports_v28 = _academy_v28.train_once(
             snapshot_id=_snapshot_id_v24,
             branch_reports=_co_case_v26.branch_reports,
@@ -5788,7 +5791,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V28_CO_BRANCH_ACADEMY",
+                "version": "V29_CO_BRANCH_SERVICE_ACADEMY",
                 "co_status": _co_case_v26.command_status,
                 "accepted": _co_case_v26.accepted,
                 "agreement_score": _co_case_v26.agreement_score,
@@ -5804,6 +5807,9 @@ try:
                         "sop_status": getattr(_training_reports_v28.get(_name), "sop_status", "NOT_TRAINED"),
                         "learning_state": getattr(_training_reports_v28.get(_name), "change_from_previous", "NO_MEMORY"),
                         "memory_count": getattr(_training_reports_v28.get(_name), "memory_count", 0),
+                        "experience_count": getattr(_training_reports_v28.get(_name), "experience_count", 0),
+                        "reliability_score": getattr(_training_reports_v28.get(_name), "reliability_score", 0),
+                        "training_status": getattr(_training_reports_v28.get(_name), "training_status", "RECRUIT"),
                         "lesson": (getattr(_training_reports_v28.get(_name), "lessons", []) or [""])[0],
                     }
                     for _name, _branch in _co_case_v26.branch_reports.items()

@@ -1,13 +1,14 @@
 """
 department_academy.py
-Version: V28.0
-Role: Branch SOP, bounded observation memory, and controlled learning review.
+Version: V29.0
+Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
 - Never issues WAIT / SELL CE / SELL PE / IRON CONDOR.
 - Never changes production weights automatically.
 - Never starts loops, threads, timers, or API calls.
 - Stores only compact plain dictionaries with strict limits.
+- Reliability is observation consistency, NOT trading accuracy.
 """
 from __future__ import annotations
 
@@ -24,6 +25,9 @@ class BranchTrainingReport:
     observation: str
     change_from_previous: str
     memory_count: int
+    experience_count: int
+    reliability_score: float
+    training_status: str
     lessons: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
@@ -55,10 +59,10 @@ class DepartmentSOP:
 class BranchObservationMemory:
     """Bounded per-branch diary stored as plain dictionaries."""
 
-    def __init__(self, storage: MutableMapping[str, Any], *, key: str = "v28_branch_memory", limit: int = 6):
+    def __init__(self, storage: MutableMapping[str, Any], *, key: str = "v29_branch_memory", limit: int = 8):
         self.storage = storage
         self.key = key
-        self.limit = max(2, min(int(limit), 12))
+        self.limit = max(3, min(int(limit), 15))
         if not isinstance(self.storage.get(self.key), dict):
             self.storage[self.key] = {}
 
@@ -92,8 +96,73 @@ class BranchObservationMemory:
         return str(value)[:160]
 
 
+class BranchServiceBook:
+    """
+    Compact service book for every DSP branch.
+
+    It records experience and consistency only. It does not claim outcome accuracy
+    until actual market outcomes are separately validated by the Learning Department.
+    """
+
+    def __init__(self, storage: MutableMapping[str, Any], *, key: str = "v29_branch_service_book"):
+        self.storage = storage
+        self.key = key
+        if not isinstance(self.storage.get(self.key), dict):
+            self.storage[self.key] = {}
+
+    def update(self, branch: str, *, sop_status: str, change: str, confidence: float) -> Dict[str, Any]:
+        books = self.storage[self.key]
+        book = dict(books.get(branch, {})) if isinstance(books.get(branch), Mapping) else {}
+
+        book.setdefault("observations", 0)
+        book.setdefault("sop_passes", 0)
+        book.setdefault("stable", 0)
+        book.setdefault("changed", 0)
+        book.setdefault("rising", 0)
+        book.setdefault("falling", 0)
+        book.setdefault("confidence_total", 0.0)
+
+        book["observations"] += 1
+        book["confidence_total"] += max(0.0, min(100.0, float(confidence)))
+        if sop_status == "SOP_PASS":
+            book["sop_passes"] += 1
+        if change == "STABLE":
+            book["stable"] += 1
+        elif change == "CONFIDENCE_RISING":
+            book["rising"] += 1
+        elif change == "CONFIDENCE_FALLING":
+            book["falling"] += 1
+        elif change == "OBSERVATION_CHANGED":
+            book["changed"] += 1
+
+        observations = max(1, int(book["observations"]))
+        sop_rate = book["sop_passes"] / observations
+        avg_conf = book["confidence_total"] / observations
+        consistency_events = book["stable"] + book["rising"] + book["falling"] + book["changed"]
+        if consistency_events:
+            controlled_rate = (book["stable"] + 0.75 * book["rising"] + 0.55 * book["changed"] + 0.35 * book["falling"]) / consistency_events
+        else:
+            controlled_rate = 0.5
+
+        reliability = max(0.0, min(100.0, sop_rate * 40 + controlled_rate * 35 + avg_conf * 0.25))
+        if observations < 5:
+            training = "RECRUIT / COLLECTING EXPERIENCE"
+        elif reliability >= 80:
+            training = "PROFICIENT"
+        elif reliability >= 65:
+            training = "ACTIVE TRAINING"
+        else:
+            training = "RETRAINING REQUIRED"
+
+        book["reliability_score"] = round(reliability, 1)
+        book["training_status"] = training
+        books[branch] = book
+        self.storage[self.key] = books
+        return dict(book)
+
+
 class DepartmentAcademy:
-    """One-shot branch training review: SOP -> memory -> learning note -> sleep."""
+    """One-shot branch review: SOP -> memory -> service book -> lesson -> sleep."""
 
     BOSSES = {
         "DATA": "DSP Data Intelligence",
@@ -106,16 +175,12 @@ class DepartmentAcademy:
         "CANDIDATE": "DSP Candidate",
     }
 
-    def __init__(self, storage: MutableMapping[str, Any], *, memory_limit: int = 6):
+    def __init__(self, storage: MutableMapping[str, Any], *, memory_limit: int = 8):
         self.sop = DepartmentSOP()
         self.memory = BranchObservationMemory(storage, limit=memory_limit)
+        self.service_book = BranchServiceBook(storage)
 
-    def train_once(
-        self,
-        *,
-        snapshot_id: str,
-        branch_reports: Mapping[str, Any],
-    ) -> Dict[str, BranchTrainingReport]:
+    def train_once(self, *, snapshot_id: str, branch_reports: Mapping[str, Any]) -> Dict[str, BranchTrainingReport]:
         output: Dict[str, BranchTrainingReport] = {}
         for branch, report in branch_reports.items():
             facts = self._read(report, "facts", {})
@@ -137,6 +202,12 @@ class DepartmentAcademy:
                 "sop_status": sop_status,
             })
             memory_count = len(self.memory.history(branch))
+            service = self.service_book.update(
+                branch,
+                sop_status=sop_status,
+                change=change,
+                confidence=confidence,
+            )
 
             output[branch] = BranchTrainingReport(
                 branch=branch,
@@ -146,6 +217,9 @@ class DepartmentAcademy:
                 observation=summary,
                 change_from_previous=change,
                 memory_count=memory_count,
+                experience_count=int(service.get("observations", 0)),
+                reliability_score=float(service.get("reliability_score", 0.0)),
+                training_status=str(service.get("training_status", "RECRUIT")),
                 lessons=lessons[:3],
                 warnings=warnings[:3],
             )
