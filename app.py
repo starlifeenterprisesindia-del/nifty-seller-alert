@@ -103,6 +103,7 @@ try:
     from communication_bus import DepartmentCommunicationBus
     from case_history import CaseHistoryEngine
     from pattern_probability import PatternProbabilityEngine
+    from market_journey import MarketJourneyEngine
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -362,11 +363,37 @@ def _render_v27_command_hierarchy(case_data):
             for _warning in list(probability.get("warnings", []) or [])[:4]:
                 st.warning(str(_warning))
 
-    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    journey = case_data.get("market_journey", {}) if isinstance(case_data, dict) else {}
+    if isinstance(journey, dict) and journey:
+        with st.expander("🧭 V35 Market Journey & Barrier Intelligence", expanded=True):
+            _zone_low = float(journey.get("expected_zone_low", 0) or 0)
+            _zone_high = float(journey.get("expected_zone_high", 0) or 0)
+            st.markdown(
+                f"**Direction:** `{journey.get('direction','RANGE')}` &nbsp; | &nbsp; "
+                f"**Stage:** `{journey.get('move_stage','Unknown')}` &nbsp; | &nbsp; "
+                f"**Energy:** `{journey.get('market_energy','Unknown')}`"
+            )
+            _journey_rows = [{
+                "Expected Zone": f"{_zone_low:.1f} – {_zone_high:.1f}",
+                "Remaining Move": f"{float(journey.get('remaining_points_low',0) or 0):.0f}–{float(journey.get('remaining_points_high',0) or 0):.0f} pts",
+                "Breakout Chance": f"{float(journey.get('breakout_probability',0) or 0):.0f}%",
+                "Reversal Chance": f"{float(journey.get('reversal_probability',0) or 0):.0f}%",
+                "Barrier": f"{journey.get('barrier_type','NONE')} {journey.get('barrier_level') or '-'}",
+                "Touches": int(journey.get('barrier_touch_count',0) or 0),
+                "Barrier State": journey.get('barrier_strength','BALANCED'),
+                "Time Phase": journey.get('time_phase','Normal Session'),
+            }]
+            _render_safe_table(_journey_rows, max_rows=1)
+            for _reason in list(journey.get("reasons", []) or [])[:4]:
+                st.caption("• " + str(_reason))
+            for _warning in list(journey.get("warnings", []) or [])[:3]:
+                st.warning(str(_warning))
+
+    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Case File → AI_MASTER → Case History → Pattern Probability → Market Journey → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V34.0 - PATTERN PROBABILITY
+# NIFTY SELLER AI DASHBOARD V35.0 - MARKET JOURNEY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -387,7 +414,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V34 Pattern Probability",
+    page_title="Nifty Seller AI V35 Market Journey",
     page_icon="🧠",
     layout="wide",
 )
@@ -5898,6 +5925,21 @@ try:
             similar_cases=_case_history_trace_v33.get("similar_cases", []),
         )
         _pattern_probability_trace_v34 = _pattern_probability_v34.to_compact_dict()
+        # V35 market journey intelligence: remaining move, barrier pressure,
+        # breakout vs reversal probability. Descriptive only; AI_MASTER remains final authority.
+        _market_journey_v35 = MarketJourneyEngine().evaluate(
+            state=st.session_state,
+            price=float(price),
+            atr=float(atr5),
+            support=_near_support,
+            resistance=_near_resistance,
+            price_report=_v24_price_report,
+            option_report=_v24_option_report,
+            behaviour_report=_v24_behaviour_report,
+            smart_money_report=_v24_money_report,
+            hour=datetime.now(IST).hour,
+        )
+        _market_journey_trace_v35 = _market_journey_v35.to_compact_dict()
 
         def _v24_candidate_plan(candidate, side, confidence_value):
             _c = candidate if isinstance(candidate, dict) else {}
@@ -5988,10 +6030,11 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V34_PATTERN_PROBABILITY",
+                "version": "V35_MARKET_JOURNEY",
                 "communication_bus": _communication_trace_v32,
                 "case_history": _case_history_trace_v33,
                 "pattern_probability": _pattern_probability_trace_v34,
+                "market_journey": _market_journey_trace_v35,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
