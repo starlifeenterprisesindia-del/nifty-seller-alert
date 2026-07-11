@@ -1,13 +1,13 @@
 """
 market_psychology.py
-Version: V36.3
+Version: V36.4
 Department: Market Psychology
-Status: Phase-3 — Retail Emotion + Trap Risk + Liquidity Sweep Evidence
+Status: Phase-4 — Retail Emotion + Trap + Liquidity Sweep + Panic Evidence
 
 Safety contract:
 - Evidence and interpretation only.
 - Never emits BUY, SELL CE, SELL PE, IRON CONDOR, or execution permission.
-- Never claims that a trap or stop hunt is confirmed from one snapshot/candle.
+- Never claims that a trap, stop hunt, or panic event is confirmed from one snapshot/candle.
 - Report must travel through DSP review -> CO case file -> AI_MASTER.
 - Uses existing department reports and the verified snapshot; no API calls,
   loops, timers, or background work.
@@ -633,10 +633,285 @@ class LiquiditySweepSpecialist:
         }
 
 
+class PanicSellingSpecialist:
+    """Detect conservative panic-selling *evidence* from one verified snapshot.
+
+    Panic is not inferred from a red candle alone. The foundation requires a
+    downward move plus several independent witnesses such as a strong bearish
+    candle closing near its low, elevated volume, bearish trend/VWAP placement,
+    fear concentration, volatility, or OI behaviour. Late/exhausted moves and
+    downside stop sweeps are reported as reversal cautions rather than treated
+    as clean continuation evidence.
+    """
+
+    @staticmethod
+    def _number(value: Any) -> Optional[float]:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
+        if number != number:
+            return None
+        return number
+
+    @staticmethod
+    def _text(mapping: Mapping[str, Any], *path: str) -> str:
+        current: Any = mapping
+        for key in path:
+            if not isinstance(current, Mapping):
+                return ""
+            current = current.get(key)
+        return str(current or "")
+
+    @staticmethod
+    def _clamp(value: float) -> float:
+        return max(0.0, min(100.0, float(value)))
+
+    def analyze(
+        self,
+        *,
+        change_pct: Any,
+        vix: Any,
+        candle_open: Any,
+        candle_high: Any,
+        candle_low: Any,
+        candle_close: Any,
+        atr: Any,
+        emotion: Optional[Mapping[str, Any]] = None,
+        trap: Optional[Mapping[str, Any]] = None,
+        liquidity: Optional[Mapping[str, Any]] = None,
+        price_action: Optional[Mapping[str, Any]] = None,
+        option_intelligence: Optional[Mapping[str, Any]] = None,
+        market_behaviour: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        emotion = emotion if isinstance(emotion, Mapping) else {}
+        trap = trap if isinstance(trap, Mapping) else {}
+        liquidity = liquidity if isinstance(liquidity, Mapping) else {}
+        price_action = price_action if isinstance(price_action, Mapping) else {}
+        option_intelligence = option_intelligence if isinstance(option_intelligence, Mapping) else {}
+        market_behaviour = market_behaviour if isinstance(market_behaviour, Mapping) else {}
+
+        change_n = self._number(change_pct)
+        vix_n = self._number(vix)
+        open_n = self._number(candle_open)
+        high_n = self._number(candle_high)
+        low_n = self._number(candle_low)
+        close_n = self._number(candle_close)
+        atr_n = self._number(atr)
+        fear_score = self._number((emotion.get("retail_fear") or {}).get("score")) or 0.0
+        day_position = self._number(emotion.get("day_range_position_pct"))
+
+        score = 0.0
+        evidence: List[str] = []
+        cautions: List[str] = []
+        available = 0
+        possible = 8
+
+        # 1) A real downward impulse is mandatory. Without it, bearish context
+        # cannot be labelled as panic-selling evidence.
+        downward_impulse = False
+        if change_n is not None:
+            available += 1
+            if change_n <= -1.25:
+                score += 32
+                downward_impulse = True
+                evidence.append(f"Extreme negative move {change_n:.2f}%")
+            elif change_n <= -0.75:
+                score += 25
+                downward_impulse = True
+                evidence.append(f"Sharp negative move {change_n:.2f}%")
+            elif change_n <= -0.35:
+                score += 15
+                downward_impulse = True
+                evidence.append(f"Broad negative move {change_n:.2f}%")
+            elif change_n < 0:
+                score += 4
+                cautions.append(f"Negative move is limited ({change_n:.2f}%)")
+
+        # 2) Candle anatomy: a large red body and a close near the candle low are
+        # stronger witnesses than colour alone.
+        valid_candle = (
+            open_n is not None and high_n is not None and low_n is not None
+            and close_n is not None and high_n > low_n
+        )
+        if valid_candle:
+            available += 1
+            candle_range = max(high_n - low_n, 0.01)
+            body_ratio = abs(close_n - open_n) / candle_range
+            close_position = self._clamp((close_n - low_n) / candle_range * 100.0)
+            if close_n < open_n and body_ratio >= 0.72:
+                score += 22
+                downward_impulse = True
+                evidence.append(f"Large bearish candle body ({body_ratio * 100:.0f}% of range)")
+            elif close_n < open_n and body_ratio >= 0.55:
+                score += 14
+                downward_impulse = True
+                evidence.append(f"Strong bearish candle body ({body_ratio * 100:.0f}% of range)")
+            elif close_n >= open_n:
+                cautions.append("Current candle is not bearish")
+
+            if close_position <= 15:
+                score += 15
+                evidence.append(f"Candle closed near its low ({close_position:.0f}% of range)")
+            elif close_position <= 30:
+                score += 8
+                evidence.append(f"Candle closed in lower range ({close_position:.0f}%)")
+
+            if atr_n is not None and atr_n > 0:
+                candle_atr_ratio = candle_range / atr_n
+                if candle_atr_ratio >= 1.0:
+                    score += 12
+                    evidence.append(f"Single candle expanded to {candle_atr_ratio:.2f} ATR")
+                elif candle_atr_ratio >= 0.65:
+                    score += 7
+                    evidence.append(f"Single candle expanded to {candle_atr_ratio:.2f} ATR")
+            else:
+                candle_atr_ratio = None
+        else:
+            candle_range = None
+            body_ratio = None
+            close_position = None
+            candle_atr_ratio = None
+            cautions.append("Verified candle OHLC unavailable")
+
+        # 3) Retail emotion and day placement.
+        if fear_score > 0 or day_position is not None:
+            available += 1
+            if fear_score >= 65:
+                score += 14
+                evidence.append(f"Retail fear is extreme ({fear_score:.0f}/100)")
+            elif fear_score >= 45:
+                score += 9
+                evidence.append(f"Retail fear is elevated ({fear_score:.0f}/100)")
+            if day_position is not None and day_position <= 15:
+                score += 10
+                evidence.append(f"Price is pinned near day low ({day_position:.0f}% of range)")
+            elif day_position is not None and day_position <= 25:
+                score += 6
+                evidence.append(f"Price remains in lower day range ({day_position:.0f}%)")
+
+        # 4) Price-action alignment.
+        trend = self._text(price_action, "trend", "trend")
+        vwap_status = self._text(price_action, "vwap", "vwap_status")
+        move_stage = self._text(price_action, "move_stage", "stage")
+        if trend or vwap_status:
+            available += 1
+            if "Bearish" in trend:
+                score += 10
+                evidence.append(f"Price-action trend: {trend}")
+            if vwap_status == "Below VWAP":
+                score += 7
+                evidence.append("Price trading below VWAP")
+
+        # 5) Participation witness from option volume.
+        volume_status = self._text(option_intelligence, "volume", "status")
+        if volume_status:
+            available += 1
+            if volume_status == "Spike":
+                score += 17
+                evidence.append("Option volume spike confirms urgent participation")
+            elif volume_status == "High":
+                score += 11
+                evidence.append("High option volume supports broad participation")
+            elif volume_status == "Weak":
+                score -= 8
+                cautions.append("Weak option volume does not confirm panic participation")
+
+        # 6) OI behaviour helps distinguish fresh shorts from position exits.
+        oi_signal = self._text(option_intelligence, "oi", "signal")
+        if oi_signal:
+            available += 1
+            if oi_signal == "Short Build-up":
+                score += 12
+                evidence.append("OI indicates fresh short build-up")
+            elif oi_signal == "Long Unwinding":
+                score += 10
+                evidence.append("OI indicates long unwinding")
+            elif oi_signal == "Short Covering":
+                score -= 8
+                cautions.append("Short covering conflicts with clean panic-selling evidence")
+
+        # 7) Volatility regime is a witness, never a standalone panic label.
+        if vix_n is not None and vix_n > 0:
+            available += 1
+            if vix_n >= 22:
+                score += 12
+                evidence.append(f"Very high volatility regime, VIX {vix_n:.2f}")
+            elif vix_n >= 17:
+                score += 7
+                evidence.append(f"Elevated volatility regime, VIX {vix_n:.2f}")
+
+        # 8) Sequence-risk context. A late/exhausted move, possible bear trap, or
+        # downside liquidity grab may be capitulation/stop sweep rather than safe
+        # downside continuation.
+        liquidity_state = str(liquidity.get("state", ""))
+        trap_state = str(trap.get("state", ""))
+        reversal_risk = self._text(market_behaviour, "reversal", "reversal_risk")
+        if move_stage or liquidity_state or trap_state or reversal_risk:
+            available += 1
+
+        exhaustion_caution = move_stage in {"Late Move", "Exhaustion Move"} or reversal_risk == "High"
+        stop_sweep_caution = liquidity_state in {
+            "POSSIBLE_DOWNSIDE_LIQUIDITY_GRAB",
+            "TWO_SIDED_LIQUIDITY_SWEEP_RISK",
+        }
+        bear_trap_caution = trap_state in {"POSSIBLE_BEAR_TRAP_RISK", "TWO_WAY_TRAP_RISK"}
+
+        if exhaustion_caution:
+            score += 5
+            cautions.append(f"{move_stage or 'Late move'} may represent panic exhaustion/reversal risk")
+        if stop_sweep_caution:
+            score += 4
+            cautions.append("Downside liquidity sweep may be capitulation or a stop hunt")
+        if bear_trap_caution:
+            cautions.append("Bear-trap evidence conflicts with clean downside continuation")
+
+        score = self._clamp(score)
+        panic_candidate = bool(downward_impulse and score >= 58)
+
+        if panic_candidate and (exhaustion_caution or stop_sweep_caution or bear_trap_caution):
+            state = "PANIC_EXHAUSTION_OR_STOP_SWEEP_WATCH"
+            continuation_quality = "UNCERTAIN_REVERSAL_RISK"
+        elif panic_candidate:
+            state = "POSSIBLE_PANIC_SELLING"
+            continuation_quality = "DOWNSIDE_PARTICIPATION_VISIBLE"
+        elif downward_impulse and score >= 35:
+            state = "PANIC_SELLING_WATCH"
+            continuation_quality = "MORE_CONFIRMATION_REQUIRED"
+        else:
+            state = "LOW_PANIC_EVIDENCE"
+            continuation_quality = "NOT_ESTABLISHED"
+
+        coverage = self._clamp(available / possible * 100.0)
+        confidence = self._clamp(20.0 + coverage * 0.35 + min(score, 75.0) * 0.30)
+        confidence = min(confidence, 84.0)
+
+        return {
+            "state": state,
+            "score": round(score, 1),
+            "evidence": list(dict.fromkeys(evidence))[:8],
+            "cautions": list(dict.fromkeys(cautions))[:8],
+            "continuation_quality": continuation_quality,
+            "metrics": {
+                "candle_body_ratio": round(body_ratio, 2) if body_ratio is not None else None,
+                "candle_close_position_pct": round(close_position, 1) if close_position is not None else None,
+                "candle_atr_ratio": round(candle_atr_ratio, 2) if candle_atr_ratio is not None else None,
+                "move_stage": move_stage or "Unknown",
+                "volume_status": volume_status or "Unknown",
+                "oi_signal": oi_signal or "Unknown",
+            },
+            "data_coverage": round(coverage, 1),
+            "confidence": round(confidence, 1),
+            "confirmation_status": "UNCONFIRMED_SINGLE_SNAPSHOT_REQUIRES_FOLLOW_THROUGH",
+            "authority": "EVIDENCE_ONLY_TO_CO",
+            "execution_instruction": "NONE",
+        }
+
+
 class MarketPsychologyDirector:
     """DSP Market Psychology: one report, no independent trade authority."""
 
-    VERSION = "V36.3_PSYCHOLOGY_TRAP_AND_LIQUIDITY_SWEEP_EVIDENCE"
+    VERSION = "V36.4_PSYCHOLOGY_TRAP_LIQUIDITY_AND_PANIC_EVIDENCE"
 
     def build_report(
         self,
@@ -691,6 +966,21 @@ class MarketPsychologyDirector:
             option_intelligence=option_details,
             market_behaviour=behaviour_details,
         )
+        panic = PanicSellingSpecialist().analyze(
+            change_pct=change_pct,
+            vix=vix,
+            candle_open=candle_open,
+            candle_high=candle_high,
+            candle_low=candle_low,
+            candle_close=candle_close,
+            atr=atr,
+            emotion=emotion,
+            trap=trap,
+            liquidity=liquidity,
+            price_action=price_action_details,
+            option_intelligence=option_details,
+            market_behaviour=behaviour_details,
+        )
 
         fear_score = float(emotion["retail_fear"]["score"])
         greed_score = float(emotion["retail_greed"]["score"])
@@ -702,11 +992,14 @@ class MarketPsychologyDirector:
         liquidity_state = str(liquidity["state"])
         upper_liquidity = float(liquidity["upside_liquidity_grab_risk"]["score"])
         lower_liquidity = float(liquidity["downside_liquidity_grab_risk"]["score"])
+        panic_state = str(panic["state"])
+        panic_score = float(panic["score"])
 
         details = {
             **emotion,
             "trap_detection": trap,
             "liquidity_sweep": liquidity,
+            "panic_selling": panic,
             "authority": "EVIDENCE_ONLY_TO_CO",
             "phase_control": "OBSERVATION_ONLY_NOT_IN_DIRECTIONAL_CONSENSUS",
         }
@@ -715,13 +1008,14 @@ class MarketPsychologyDirector:
             f"Greed {greed_score:.0f}/100 | Trap {trap_state} "
             f"(Bull {bull_trap:.0f}, Bear {bear_trap:.0f}) | "
             f"Liquidity {liquidity_state} (Up {upper_liquidity:.0f}, Down {lower_liquidity:.0f}) | "
-            f"CO verification required"
+            f"Panic {panic_state} ({panic_score:.0f}/100) | CO verification required"
         )
         return MarketPsychologyReport(
             summary=summary,
             # Overall branch confidence remains the validated V36.1 emotion
-            # confidence. Trap confidence is displayed separately and cannot
-            # silently increase CO case strength during foundation testing.
+            # confidence. Trap, liquidity, and panic confidence are displayed
+            # separately and cannot silently change CO case strength during
+            # foundation testing.
             confidence=confidence,
             details=details,
         )
