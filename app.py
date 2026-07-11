@@ -104,6 +104,7 @@ try:
     from case_history import CaseHistoryEngine
     from pattern_probability import PatternProbabilityEngine
     from market_journey import MarketJourneyEngine
+    from market_psychology import MarketPsychologyDirector
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -197,7 +198,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "SMART_MONEY", "RISK", "STRATEGY", "CANDIDATE",
+        "MARKET_PSYCHOLOGY", "SMART_MONEY", "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
         branch = branches.get(branch_name, {}) if isinstance(branches, dict) else {}
@@ -389,11 +390,35 @@ def _render_v27_command_hierarchy(case_data):
             for _warning in list(journey.get("warnings", []) or [])[:3]:
                 st.warning(str(_warning))
 
-    st.caption("Command flow: Verified Snapshot → Branch Message Bus → CO Case File → AI_MASTER → Case History → Pattern Probability → Market Journey → Final Authority")
+    psychology = case_data.get("market_psychology", {}) if isinstance(case_data, dict) else {}
+    if isinstance(psychology, dict) and psychology:
+        with st.expander("🧠 V36 Market Psychology — Retail Fear & Greed", expanded=True):
+            _fear = psychology.get("retail_fear", {}) or {}
+            _greed = psychology.get("retail_greed", {}) or {}
+            st.markdown(
+                f"**Psychology State:** `{psychology.get('psychology_state','BALANCED')}` &nbsp; | &nbsp; "
+                f"**Evidence Confidence:** {float(psychology.get('confidence',0) or 0):.0f}% &nbsp; | &nbsp; "
+                f"**Data Coverage:** {float(psychology.get('data_coverage',0) or 0):.0f}%"
+            )
+            _psych_rows = [{
+                "Retail Fear": f"{float(_fear.get('score',0) or 0):.0f}/100",
+                "Retail Greed": f"{float(_greed.get('score',0) or 0):.0f}/100",
+                "Day Range Position": (f"{float(psychology.get('day_range_position_pct')):.0f}%" if psychology.get('day_range_position_pct') is not None else "NA"),
+                "PCR Context": psychology.get("pcr_context", "NA"),
+                "Authority": psychology.get("authority", "EVIDENCE_ONLY_TO_CO"),
+            }]
+            _render_safe_table(_psych_rows, max_rows=1)
+            for _item in list(_fear.get("evidence", []) or [])[:3]:
+                st.caption("Fear evidence: " + str(_item))
+            for _item in list(_greed.get("evidence", []) or [])[:3]:
+                st.caption("Greed evidence: " + str(_item))
+            st.info("Market Psychology sirf evidence deta hai; final judgement CO ke baad AI_MASTER ka hai.")
+
+    st.caption("Command flow: Verified Snapshot → Departments including Market Psychology → CO Case File → AI_MASTER → Case History → Pattern Probability → Market Journey → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V35.0 - MARKET JOURNEY
+# NIFTY SELLER AI DASHBOARD V36.1 - MARKET PSYCHOLOGY PHASE-1
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -414,7 +439,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V35 Market Journey",
+    page_title="Nifty Seller AI V36.1 Market Psychology",
     page_icon="🧠",
     layout="wide",
 )
@@ -2676,7 +2701,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V27 AI COMMAND")
+st.sidebar.title("🏛️ V36.1 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -5776,6 +5801,19 @@ try:
             _v24_price_report.details, _v24_option_report.details, datetime.now(IST).hour
         )
 
+        # V36.1 Market Psychology Phase-1: evidence-only Retail Fear/Greed.
+        # This branch cannot issue a trade and must report through CO.
+        _v36_psychology_report = MarketPsychologyDirector().build_report(
+            price=float(price),
+            change_pct=float(nifty_change_pct),
+            vix=float(vix),
+            ema20=float(ema20),
+            vwap=float(vwap),
+            day_high=float(today_high),
+            day_low=float(today_low),
+            pcr=float(pcr),
+        )
+
         _hw_rows_v24 = heavy_analysis.get("rows", []) if isinstance(heavy_analysis, dict) else []
         _adv_hw_v24 = sum(1 for r in _hw_rows_v24 if float(r.get("change_pct", 0) or 0) > 0)
         _dec_hw_v24 = sum(1 for r in _hw_rows_v24 if float(r.get("change_pct", 0) or 0) < 0)
@@ -5859,6 +5897,7 @@ try:
             "OPTION": _v24_option_report,
             "PRICE_ACTION": _v24_price_report,
             "MARKET_BEHAVIOUR": _v24_behaviour_report,
+            "MARKET_PSYCHOLOGY": _v36_psychology_report,
             "SMART_MONEY": _v24_money_report,
             "RISK": _v24_risk_report,
             "CANDIDATE": _v24_candidate_report,
@@ -6023,6 +6062,7 @@ try:
                 "price_action": {"summary": _v24_price_report.summary, "confidence": _v24_price_report.confidence},
                 "option": {"summary": _v24_option_report.summary, "confidence": _v24_option_report.confidence},
                 "behaviour": {"summary": _v24_behaviour_report.summary, "confidence": _v24_behaviour_report.confidence},
+                "market_psychology": {"summary": _v36_psychology_report.summary, "confidence": _v36_psychology_report.confidence},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
@@ -6030,7 +6070,12 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V35_MARKET_JOURNEY",
+                "version": "V36_1_MARKET_PSYCHOLOGY",
+                "market_psychology": {
+                    "summary": _v36_psychology_report.summary,
+                    "confidence": _v36_psychology_report.confidence,
+                    **dict(_v36_psychology_report.details),
+                },
                 "communication_bus": _communication_trace_v32,
                 "case_history": _case_history_trace_v33,
                 "pattern_probability": _pattern_probability_trace_v34,
@@ -6377,7 +6422,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V31 CO Command Organization</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V36.1 Market Psychology</div>", unsafe_allow_html=True)
 
 
 # =========================================================

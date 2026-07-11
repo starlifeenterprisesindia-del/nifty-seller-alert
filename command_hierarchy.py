@@ -232,7 +232,7 @@ class CommandingOfficer:
 
     REQUIRED_BRANCHES = (
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "SMART_MONEY", "RISK", "CANDIDATE", "STRATEGY",
+        "MARKET_PSYCHOLOGY", "SMART_MONEY", "RISK", "CANDIDATE", "STRATEGY",
     )
 
     def prepare_case_file(self, *, snapshot_id: str, data_quality_score: float, branches: Iterable[BranchReport]) -> COCaseFile:
@@ -286,7 +286,13 @@ class CommandingOfficer:
                 missing_evidence.append(f"{name}: no structured evidence")
 
         branch_votes = {name: branch.branch_vote for name, branch in branch_map.items()}
-        consensus_direction, vote_agreement = self._consensus(branch_votes)
+        # V36.1 Psychology is evidence-only during Phase-1. CO records it, but it
+        # cannot tilt directional consensus until live accuracy is validated.
+        _consensus_votes = {
+            name: vote for name, vote in branch_votes.items()
+            if name != "MARKET_PSYCHOLOGY"
+        }
+        consensus_direction, vote_agreement = self._consensus(_consensus_votes)
         ready_count = sum(1 for name in self.REQUIRED_BRANCHES if branch_map.get(name) and branch_map[name].status == "READY")
         readiness = ready_count / len(self.REQUIRED_BRANCHES) * 100
         confidences = [branch.confidence for branch in branch_map.values() if branch.status == "READY" and branch.confidence > 0]
@@ -448,6 +454,7 @@ class AIOrganizationController:
         "OPTION": BranchBoss("OPTION", "DSP Option Intelligence", 0),
         "PRICE_ACTION": BranchBoss("PRICE_ACTION", "DSP Price Action", 0),
         "MARKET_BEHAVIOUR": BranchBoss("MARKET_BEHAVIOUR", "DSP Market Behaviour", 0),
+        "MARKET_PSYCHOLOGY": BranchBoss("MARKET_PSYCHOLOGY", "DSP Market Psychology", 0),
         "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money", 0),
         "RISK": BranchBoss("RISK", "DSP Risk", 0),
         "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),

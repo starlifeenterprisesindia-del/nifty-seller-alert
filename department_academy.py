@@ -40,6 +40,7 @@ class DepartmentSOP:
         "OPTION": ("oi", "volume", "pcr", "strike"),
         "PRICE_ACTION": ("trend", "barrier", "move_stage", "range"),
         "MARKET_BEHAVIOUR": ("barrier", "breakout", "reversal", "energy"),
+        "MARKET_PSYCHOLOGY": ("psychology_state", "retail_fear", "retail_greed", "data_coverage"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
@@ -169,6 +170,7 @@ class DepartmentAcademy:
         "OPTION": "DSP Option Intelligence",
         "PRICE_ACTION": "DSP Price Action",
         "MARKET_BEHAVIOUR": "DSP Market Behaviour",
+        "MARKET_PSYCHOLOGY": "DSP Market Psychology",
         "SMART_MONEY": "DSP Smart Money",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
@@ -273,4 +275,6 @@ class DepartmentAcademy:
             lessons.append("OI and volume evidence available for combined interpretation.")
         if branch == "MARKET_BEHAVIOUR" and "barrier" in facts:
             lessons.append("Barrier response available for breakout/reversal learning.")
+        if branch == "MARKET_PSYCHOLOGY" and "psychology_state" in facts:
+            lessons.append("Fear/greed evidence recorded; outcome validation required before directional use.")
         return lessons or ["Observation recorded for future validation."]
