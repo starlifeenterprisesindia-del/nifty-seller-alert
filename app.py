@@ -169,6 +169,10 @@ def _render_v27_command_hierarchy(case_data):
     case_strength = float(case_data.get("case_strength", 0) or 0)
     readiness = float(case_data.get("department_readiness", 0) or 0)
     witness_score = float(case_data.get("witness_score", 0) or 0)
+    cross_exam_score = float(case_data.get("cross_exam_score", 0) or 0)
+    consensus_direction = str(case_data.get("consensus_direction", "NEUTRAL"))
+    cross_examinations = list(case_data.get("cross_examinations", []) or [])
+    branch_votes = dict(case_data.get("branch_votes", {}) or {})
     court_brief = str(case_data.get("court_brief", ""))
     accepted_evidence = list(case_data.get("accepted_evidence", []) or [])
     rejected_evidence = list(case_data.get("rejected_evidence", []) or [])
@@ -180,7 +184,11 @@ def _render_v27_command_hierarchy(case_data):
         f"**Branch Agreement:** {agreement:.0f}% &nbsp; | &nbsp; "
         f"**Data Quality:** {quality:.0f}%"
     )
-    st.caption(f"Case ID: {case_id} | Case Strength: {case_strength:.0f}% | Readiness: {readiness:.0f}% | Witness: {witness_score:.0f}%")
+    st.caption(
+        f"Case ID: {case_id} | Case Strength: {case_strength:.0f}% | "
+        f"Readiness: {readiness:.0f}% | Witness: {witness_score:.0f}% | "
+        f"Cross Exam: {cross_exam_score:.0f}% | Consensus: {consensus_direction}"
+    )
 
     rows = []
     branch_order = [
@@ -204,6 +212,7 @@ def _render_v27_command_hierarchy(case_data):
             "Reliability": f"{float(branch.get('reliability_score', 0) or 0):.0f}%",
             "Training": str(branch.get("training_status", "RECRUIT")),
             "Evidence": str(branch.get("evidence_count", 0)),
+            "Vote": str(branch.get("branch_vote", branch_votes.get(branch_name, "NEUTRAL"))),
             "Recommendation": str(branch.get("recommendation", "INFORMATION_ONLY")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
@@ -211,6 +220,21 @@ def _render_v27_command_hierarchy(case_data):
 
     if court_brief:
         st.info("AI Court Brief: " + court_brief)
+    if cross_examinations:
+        with st.expander("🗣️ CO Cross Examination", expanded=False):
+            _cross_rows = []
+            for _item in cross_examinations[:12]:
+                if not isinstance(_item, dict):
+                    continue
+                _cross_rows.append({
+                    "From": _item.get("question_from", "-"),
+                    "To": _item.get("question_to", "-"),
+                    "Question": _item.get("question", "-"),
+                    "Verdict": _item.get("verdict", "-"),
+                    "Score": f"{float(_item.get('score', 0) or 0):.0f}%",
+                    "Answer": str(_item.get("answer", "-"))[:180],
+                })
+            _render_safe_table(_cross_rows, max_rows=12)
     if accepted_evidence:
         st.markdown("**Accepted Evidence**")
         for item in accepted_evidence[:6]: st.write("✅ " + str(item))
@@ -227,7 +251,7 @@ def _render_v27_command_hierarchy(case_data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V30.0 - CO INVESTIGATION ENGINE
+# NIFTY SELLER AI DASHBOARD V31.0 - CO CROSS-EXAMINATION ACADEMY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -5813,11 +5837,25 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V30_CO_INVESTIGATION_ENGINE",
+                "version": "V31_CO_CROSS_EXAMINATION_ACADEMY",
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
                 "witness_score": _co_case_v26.witness_score,
+                "cross_exam_score": _co_case_v26.cross_exam_score,
+                "consensus_direction": _co_case_v26.consensus_direction,
+                "branch_votes": dict(_co_case_v26.branch_votes),
+                "cross_examinations": [
+                    {
+                        "question_from": _x.question_from,
+                        "question_to": _x.question_to,
+                        "question": _x.question,
+                        "answer": _x.answer,
+                        "verdict": _x.verdict,
+                        "score": _x.score,
+                    }
+                    for _x in _co_case_v26.cross_examinations
+                ],
                 "court_brief": _co_case_v26.court_brief,
                 "accepted_evidence": list(_co_case_v26.accepted_evidence),
                 "rejected_evidence": list(_co_case_v26.rejected_evidence),
@@ -5837,6 +5875,7 @@ try:
                         "reasoning": _branch.reasoning,
                         "risk_note": _branch.risk_note,
                         "recommendation": _branch.recommendation,
+                        "branch_vote": _branch.branch_vote,
                         "evidence_count": len(_branch.evidence),
                         "sop_status": getattr(_training_reports_v28.get(_name), "sop_status", "NOT_TRAINED"),
                         "learning_state": getattr(_training_reports_v28.get(_name), "change_from_previous", "NO_MEMORY"),
@@ -6141,7 +6180,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V27 CO Command Organization</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V31 CO Command Organization</div>", unsafe_allow_html=True)
 
 
 # =========================================================
