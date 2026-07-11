@@ -99,6 +99,7 @@ try:
     from market_memory import MarketMemory
     from learning_department import LearningDepartment
     from command_hierarchy import AIOrganizationController
+    from department_academy import DepartmentAcademy
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -187,6 +188,9 @@ def _render_v27_command_hierarchy(case_data):
             "Boss": branch.get("boss", "DSP Not Assigned"),
             "Status": ("✅ " if branch_status == "READY" else "⚠️ ") + branch_status,
             "Confidence": f"{float(branch.get('confidence', 0) or 0):.0f}%",
+            "SOP": str(branch.get("sop_status", "NOT_TRAINED")),
+            "Learning": str(branch.get("learning_state", "NO_MEMORY")),
+            "Memory": str(branch.get("memory_count", 0)),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
     _render_safe_table(rows, max_rows=12)
@@ -199,7 +203,7 @@ def _render_v27_command_hierarchy(case_data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V27.0 - CO COMMAND PRODUCTION
+# NIFTY SELLER AI DASHBOARD V28.0 - BRANCH ACADEMY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -220,7 +224,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V25 Refresh Safe",
+    page_title="Nifty Seller AI V28 Branch Academy",
     page_icon="🧠",
     layout="wide",
 )
@@ -5660,19 +5664,27 @@ try:
                 "rows_count": len(option_analysis.get("rows", [])) if isinstance(option_analysis, dict) else 0,
             },
         }
+        _branch_source_reports_v28 = {
+            "DATA": _data_branch_report_v26,
+            "OPTION": _v24_option_report,
+            "PRICE_ACTION": _v24_price_report,
+            "MARKET_BEHAVIOUR": _v24_behaviour_report,
+            "SMART_MONEY": _v24_money_report,
+            "RISK": _v24_risk_report,
+            "CANDIDATE": _v24_candidate_report,
+            "STRATEGY": _v24_strategy_report,
+        }
         _co_case_v26 = AIOrganizationController().build_case_file(
             snapshot_id=_snapshot_id_v24,
             data_quality_score=float(_did_snapshot_v24.quality_score),
-            reports={
-                "DATA": _data_branch_report_v26,
-                "OPTION": _v24_option_report,
-                "PRICE_ACTION": _v24_price_report,
-                "MARKET_BEHAVIOUR": _v24_behaviour_report,
-                "SMART_MONEY": _v24_money_report,
-                "RISK": _v24_risk_report,
-                "CANDIDATE": _v24_candidate_report,
-                "STRATEGY": _v24_strategy_report,
-            },
+            reports=_branch_source_reports_v28,
+        )
+        # V28 Academy: every DSP branch gets an SOP check and bounded diary.
+        # It learns observations only; it cannot alter weights or issue trades.
+        _academy_v28 = DepartmentAcademy(st.session_state, memory_limit=6)
+        _training_reports_v28 = _academy_v28.train_once(
+            snapshot_id=_snapshot_id_v24,
+            branch_reports=_co_case_v26.branch_reports,
         )
         _data_quality_ok_v24 = bool(
             _did_snapshot_v24.quality_score >= 60
@@ -5776,7 +5788,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V26_CO_COMMAND_CONTROL",
+                "version": "V28_CO_BRANCH_ACADEMY",
                 "co_status": _co_case_v26.command_status,
                 "accepted": _co_case_v26.accepted,
                 "agreement_score": _co_case_v26.agreement_score,
@@ -5789,6 +5801,10 @@ try:
                         "status": _branch.status,
                         "confidence": _branch.confidence,
                         "summary": _branch.summary,
+                        "sop_status": getattr(_training_reports_v28.get(_name), "sop_status", "NOT_TRAINED"),
+                        "learning_state": getattr(_training_reports_v28.get(_name), "change_from_previous", "NO_MEMORY"),
+                        "memory_count": getattr(_training_reports_v28.get(_name), "memory_count", 0),
+                        "lesson": (getattr(_training_reports_v28.get(_name), "lessons", []) or [""])[0],
                     }
                     for _name, _branch in _co_case_v26.branch_reports.items()
                 },
