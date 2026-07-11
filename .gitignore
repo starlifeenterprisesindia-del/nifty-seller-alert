@@ -6,3 +6,8 @@ data/*.csv
 
 __pycache__/
 *.pyc
+
+# Python runtime
+.venv/
+__pycache__/
+*.pyc

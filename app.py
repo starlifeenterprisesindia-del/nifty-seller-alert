@@ -105,23 +105,42 @@ except Exception as _v24_import_error:
     V24_DEPARTMENT_IMPORT_ERROR = str(_v24_import_error)
 
 
-def _safe_arrow_df(data):
-    """Return a Streamlit/Arrow-safe DataFrame without mixed object columns."""
+def _safe_display_df(data):
+    """Return a compact, mixed-type-safe DataFrame for HTML rendering.
+
+    V25 deliberately avoids Streamlit's Arrow dataframe transport because the
+    deployed Python 3.14 + PyArrow process was segfaulting on browser reconnect.
+    """
     df = data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame(data)
+    df = df.head(250).copy()
     for col in df.columns:
-        series = df[col]
-        if str(series.dtype) == "object":
-            non_null = series.dropna()
-            type_names = {type(v).__name__ for v in non_null.head(200)}
-            if len(type_names) > 1 or any(isinstance(v, (dict, list, tuple, set)) for v in non_null.head(200)):
-                df[col] = series.map(lambda v: "-" if v is None else str(v))
-            else:
-                df[col] = series.fillna("-")
+        df[col] = df[col].map(
+            lambda v: "-" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+        )
     return df
 
 
+def _render_safe_table(data, *, max_rows=250):
+    """Render a table without PyArrow/native dataframe serialization."""
+    df = _safe_display_df(data).head(max_rows)
+    if df.empty:
+        st.caption("No rows available.")
+        return
+    html = df.to_html(index=False, escape=True, border=0, classes="v25-safe-table")
+    st.markdown(
+        """
+        <style>
+        .v25-safe-table{width:100%;border-collapse:collapse;font-size:.86rem;display:block;overflow-x:auto;white-space:nowrap}
+        .v25-safe-table th,.v25-safe-table td{padding:7px 9px;border:1px solid rgba(128,128,128,.28);text-align:left}
+        .v25-safe-table th{font-weight:800;background:rgba(128,128,128,.12)}
+        </style>
+        """ + html,
+        unsafe_allow_html=True,
+    )
+
+
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V24.1 - MEMORY SAFE DEPARTMENT INTEGRATION
+# NIFTY SELLER AI DASHBOARD V25.0 - REFRESH SAFE PRODUCTION
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -142,7 +161,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V24.1 Stability Edition",
+    page_title="Nifty Seller AI V25 Refresh Safe",
     page_icon="🧠",
     layout="wide",
 )
@@ -6118,7 +6137,7 @@ st.markdown("### 📶 Signal Reliability Table")
 try:
     _v20_rel_rows = _v20_signal_reliability_rows()
     if _v20_rel_rows:
-        st.dataframe(_safe_arrow_df(_v20_rel_rows), width="stretch", hide_index=True)
+        _render_safe_table(_v20_rel_rows)
         st.caption(f"Brain Sync: SNAP {_v204_brain_sync.get('short_id','NA')} | {_v204_brain_sync.get('data_flow_status','NA')} | Same snapshot + Single Advisor. Ye table sirf evidence dikhata hai; advice AI Final Authority se aati hai.")
     else:
         st.info("Signal reliability rows abhi available nahi hain.")
@@ -6129,7 +6148,7 @@ st.markdown("### 🎯 Smart Strategy Matrix — AI_MASTER Strategy Routing")
 try:
     _strategy_rows_v221 = AI_MASTER.get("strategy_rows", []) if isinstance(AI_MASTER, dict) else []
     if _strategy_rows_v221:
-        st.dataframe(_safe_arrow_df(_strategy_rows_v221), width="stretch", hide_index=True)
+        _render_safe_table(_strategy_rows_v221)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -6192,7 +6211,7 @@ st.markdown("### 📋 AI Candidate Matrix")
 try:
     _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
     if _cand_rows_v221:
-        st.dataframe(_safe_arrow_df(_cand_rows_v221), width="stretch", hide_index=True)
+        _render_safe_table(_cand_rows_v221)
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
@@ -6233,7 +6252,7 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
         pc2.metric("Total P/L", f"₹{_total_pnl:,.0f}")
         pc3.metric("Portfolio Risk", "HIGH" if max(gamma_score_v7, shock_score_v7) >= 70 else "MEDIUM" if max(gamma_score_v7, shock_score_v7) >= 45 else "LOW")
         pc4.metric("Fresh Entry", "Allowed" if _signal_gate_v162.get("allowed") else "Blocked")
-        st.dataframe(_safe_arrow_df(_rows), width="stretch", hide_index=True)
+        _render_safe_table(_rows)
         st.caption("AI Action har refresh par live premium + hedge + risk ke hisab se update hota hai. Current price zero aaye to option chain range/strike check karo.")
         with st.expander("Position Actions — mark exit", expanded=False):
             _exit_id = st.selectbox("Position ID", list(_active_pf["Position ID"].astype(str)), key="v162_exit_id")
@@ -6396,7 +6415,7 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
             pass
         # V24.1 stability: avoid Pandas Styler on every rerun. Styler builds a
         # large HTML representation and increases the refresh memory peak.
-        st.dataframe(_safe_arrow_df(_oc_df), width="stretch", hide_index=True)
+        _render_safe_table(_oc_df, max_rows=80)
 
         st.info("Best CE/PE candidate cards are shown near the top in V13 Live Candidate Cards. Yahan sirf option-chain table rakha gaya hai, taaki duplicate sections na hon.")
 
@@ -6439,7 +6458,7 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False
                 "Est. Nifty pts": round(price * (r["weight"] / 100) * (r["change_pct"] / 100), 1),
             })
         hw_table = pd.DataFrame(hw_rows)
-        st.dataframe(hw_table, width="stretch", hide_index=True)
+        _render_safe_table(hw_table)
         st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
 
         if final_trade == "SELL CE" and heavy_bias > 35:
@@ -6498,7 +6517,7 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
         st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
     st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
     if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
-        st.dataframe(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10), width="stretch", hide_index=True)
+        _render_safe_table(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10))
 
 
 with st.expander("💰 Position & Risk Manager", expanded=False):
