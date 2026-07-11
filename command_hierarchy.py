@@ -271,12 +271,21 @@ class CommandingOfficer:
         all_evidence = [evidence for branch in branch_map.values() for evidence in branch.evidence]
         accepted_evidence: List[str] = []
         rejected_evidence: List[str] = []
+        # V36 psychology remains an observation branch during foundation testing.
+        # Its evidence is visible in the CO file, but cannot silently improve or
+        # weaken execution case-strength scores before live validation.
+        scoring_evidence_count = sum(
+            1 for evidence in all_evidence if evidence.branch != "MARKET_PSYCHOLOGY"
+        )
+        scoring_accepted_count = 0
         for evidence in all_evidence:
             witnesses = self._witnesses(evidence, branch_map)
             statement = evidence.statement
             if evidence.weight >= 55 and (witnesses or evidence.category == "CRITICAL"):
                 suffix = (" | verified by " + ", ".join(witnesses)) if witnesses else ""
                 accepted_evidence.append(f"{evidence.branch}: {statement}{suffix}")
+                if evidence.branch != "MARKET_PSYCHOLOGY":
+                    scoring_accepted_count += 1
             else:
                 rejected_evidence.append(f"{evidence.branch}: {statement} (weak/unverified)")
 
@@ -286,8 +295,9 @@ class CommandingOfficer:
                 missing_evidence.append(f"{name}: no structured evidence")
 
         branch_votes = {name: branch.branch_vote for name, branch in branch_map.items()}
-        # V36.1 Psychology is evidence-only during Phase-1. CO records it, but it
-        # cannot tilt directional consensus until live accuracy is validated.
+        # V36.2 Psychology is evidence-only. CO records and displays it, but
+        # excludes it from directional consensus and execution case-strength
+        # until live accuracy is validated after the V50 testing phase.
         _consensus_votes = {
             name: vote for name, vote in branch_votes.items()
             if name != "MARKET_PSYCHOLOGY"
@@ -295,9 +305,13 @@ class CommandingOfficer:
         consensus_direction, vote_agreement = self._consensus(_consensus_votes)
         ready_count = sum(1 for name in self.REQUIRED_BRANCHES if branch_map.get(name) and branch_map[name].status == "READY")
         readiness = ready_count / len(self.REQUIRED_BRANCHES) * 100
-        confidences = [branch.confidence for branch in branch_map.values() if branch.status == "READY" and branch.confidence > 0]
+        confidences = [
+            branch.confidence
+            for name, branch in branch_map.items()
+            if name != "MARKET_PSYCHOLOGY" and branch.status == "READY" and branch.confidence > 0
+        ]
         avg_conf = sum(confidences) / len(confidences) if confidences else 0.0
-        witness_score = min(100.0, len(accepted_evidence) / max(1, len(all_evidence)) * 100)
+        witness_score = min(100.0, scoring_accepted_count / max(1, scoring_evidence_count) * 100)
         cross_exam_score = self._cross_exam_score(cross_examinations)
         agreement = max(0.0, min(100.0, avg_conf * 0.65 + vote_agreement * 0.35 - len(conflicts) * 8.0))
         quality = max(0.0, min(100.0, float(data_quality_score or 0)))
