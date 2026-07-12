@@ -1,6 +1,6 @@
 """
 self_review.py
-Version: V44.3
+Version: V45.3
 Role: Session-bounded AI self review and department performance evidence.
 
 Architecture and safety:
@@ -228,7 +228,7 @@ class SelfReviewEngine:
             if not isinstance(snapshots, Mapping):
                 continue
             for branch, item in snapshots.items():
-                if branch == "SELF_REVIEW" or not isinstance(item, Mapping):
+                if branch in {"SELF_REVIEW", "PROMOTION_BOARD"} or not isinstance(item, Mapping):
                     continue
                 row = aggregate.setdefault(str(branch), {
                     "supported": 0,

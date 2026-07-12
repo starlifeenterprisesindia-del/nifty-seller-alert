@@ -110,6 +110,7 @@ try:
     from news_intelligence import NewsIntelligenceDirector
     from experience_engine import ExperienceEngine
     from self_review import SelfReviewEngine
+    from promotion_system import PromotionSystem
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -203,7 +204,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE", "SELF_REVIEW",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE", "SELF_REVIEW", "PROMOTION_BOARD",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -505,6 +506,68 @@ def _render_v27_command_hierarchy(case_data):
             st.info(
                 "Self Review sirf completed cases se department performance evaluate karti hai. "
                 "Ye production rules, confidence thresholds, promotion, demotion ya retraining automatically apply nahi karti; final authority AI_MASTER aur manual live validation ki hai."
+            )
+
+    promotion_board = case_data.get("promotion_board", {}) if isinstance(case_data, dict) else {}
+    if isinstance(promotion_board, dict) and promotion_board:
+        with st.expander("🎖️ V45.3 Promotion System — Service & Training Board", expanded=True):
+            st.markdown(
+                f"**Board:** `{promotion_board.get('board_state','COLLECTING_SERVICE_EVIDENCE')}` &nbsp; | &nbsp; "
+                f"**Scope:** `{promotion_board.get('review_scope','LIVE_PROVISIONAL_BOARD')}` &nbsp; | &nbsp; "
+                f"**Date:** `{promotion_board.get('review_date','NA')}`"
+            )
+            _promotion_summary_rows = [{
+                "Profiles": int(promotion_board.get("officers_reviewed", 0) or 0),
+                "Promotion Review": len(list(promotion_board.get("promotion_eligible", []) or [])),
+                "Retain": len(list(promotion_board.get("retain_current_grade", []) or [])),
+                "Training": len(list(promotion_board.get("training_required", []) or [])),
+                "Probation": len(list(promotion_board.get("probation_review", []) or [])),
+                "Demotion Review": len(list(promotion_board.get("demotion_review", []) or [])),
+                "Collecting": len(list(promotion_board.get("collecting_evidence", []) or [])),
+                "Board Confidence": f"{float(promotion_board.get('confidence',0) or 0):.0f}%",
+            }]
+            _render_safe_table(_promotion_summary_rows, max_rows=1)
+
+            _promotion_rows = []
+            for _item in list(promotion_board.get("officer_profiles", []) or [])[:18]:
+                if not isinstance(_item, dict):
+                    continue
+                _accuracy = _item.get("accuracy")
+                _promotion_rows.append({
+                    "Department": str(_item.get("branch", "-")).replace("_", " ").title(),
+                    "Current / Evidence Grade": f"{_item.get('current_grade','RECRUIT')} / {_item.get('recommended_grade','RECRUIT')}",
+                    "Observations": int(_item.get("observations", 0) or 0),
+                    "Validated": int(_item.get("validated_cases", 0) or 0),
+                    "Reliability": f"{float(_item.get('reliability_score',0) or 0):.1f}%",
+                    "Accuracy": f"{float(_accuracy):.1f}%" if _accuracy is not None else "Collecting",
+                    "SOP": f"{float(_item.get('sop_pass_rate',0) or 0):.1f}%",
+                    "Competency": f"{float(_item.get('competency_score',0) or 0):.1f}/100",
+                    "Maturity": _item.get("evidence_maturity", "COLLECTING"),
+                    "Board Recommendation": _item.get("board_recommendation", "COLLECTING_EVIDENCE"),
+                    "Training Plan": ", ".join(list(_item.get("training_plan", []) or [])[:2]),
+                })
+            if _promotion_rows:
+                _render_safe_table(_promotion_rows, max_rows=18)
+
+            _promotion = list(promotion_board.get("promotion_eligible", []) or [])
+            _training = list(promotion_board.get("training_required", []) or [])
+            _probation = list(promotion_board.get("probation_review", []) or [])
+            _demotion = list(promotion_board.get("demotion_review", []) or [])
+            if _promotion:
+                st.success("Promotion eligibility review: " + ", ".join(_promotion))
+            if _training:
+                st.warning("Training review required: " + ", ".join(_training))
+            if _probation:
+                st.warning("Probation review: " + ", ".join(_probation))
+            if _demotion:
+                st.error("Demotion review recommendation only: " + ", ".join(_demotion))
+            for _item in list(promotion_board.get("top_service_records", []) or [])[:5]:
+                st.caption("Service record: " + str(_item))
+            for _warning in list(promotion_board.get("warnings", []) or [])[:5]:
+                st.warning(str(_warning))
+            st.info(
+                "Promotion System Academy competency grade recommend karti hai; command hierarchy ka DSP rank change nahi karti. "
+                "Promotion, demotion, training, AI weights aur rules automatically apply nahi hote—manual approval aur live validation zaroori hai."
             )
 
     time_intelligence = case_data.get("time_intelligence", {}) if isinstance(case_data, dict) else {}
@@ -6503,9 +6566,22 @@ try:
         )
         _self_review_trace_v44 = _self_review_v44.to_compact_dict()
         _self_review_department_v44 = _self_review_v44.to_department_report()
+        # V45.1-V45.3 Personnel Board combines Academy service records with
+        # validated Self Review outcomes. It can recommend review/training only;
+        # command ranks, production weights, and trading rules are never changed.
+        _promotion_board_v45 = PromotionSystem().evaluate(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
+            market_open=bool(_market_open_v1951),
+            self_review=_self_review_trace_v44,
+        )
+        _promotion_board_trace_v45 = _promotion_board_v45.to_compact_dict()
+        _promotion_board_department_v45 = _promotion_board_v45.to_department_report()
         _branch_source_reports_v28 = {
             **_branch_source_reports_v44_base,
             "SELF_REVIEW": _self_review_department_v44,
+            "PROMOTION_BOARD": _promotion_board_department_v45,
         }
         _co_case_v26 = AIOrganizationController().build_case_file(
             snapshot_id=_snapshot_id_v24,
@@ -6692,13 +6768,14 @@ try:
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "experience": {"summary": _experience_department_v43["summary"], "confidence": _experience_department_v43["confidence"]},
                 "self_review": {"summary": _self_review_department_v44["summary"], "confidence": _self_review_department_v44["confidence"]},
+                "promotion_board": {"summary": _promotion_board_department_v45["summary"], "confidence": _promotion_board_department_v45["confidence"]},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
                 "candidate": {"summary": _v24_candidate_report.summary, "confidence": _v24_candidate_report.confidence},
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V44_3_SELF_REVIEW_BUNDLE",
+                "version": "V45_3_PROMOTION_SYSTEM_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6714,6 +6791,7 @@ try:
                 "institutional_behaviour": _institutional_trace_v42,
                 "experience_engine": _experience_trace_v43,
                 "self_review": _self_review_trace_v44,
+                "promotion_board": _promotion_board_trace_v45,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
