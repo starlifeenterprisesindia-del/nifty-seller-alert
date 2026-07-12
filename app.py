@@ -570,6 +570,57 @@ def _render_v27_command_hierarchy(case_data):
                 "Promotion, demotion, training, AI weights aur rules automatically apply nahi hote—manual approval aur live validation zaroori hai."
             )
 
+    true_learning = case_data.get("true_learning", {}) if isinstance(case_data, dict) else {}
+    if isinstance(true_learning, dict) and true_learning:
+        with st.expander("🎓 V46.3 True Learning — Improvement Recommendations", expanded=True):
+            st.markdown(
+                f"**State:** `{true_learning.get('learning_state','COLLECTING_COMPLETED_CASE_EVIDENCE')}` &nbsp; | &nbsp; "
+                f"**Scope:** `{true_learning.get('review_scope','LIVE_PROVISIONAL_LEARNING')}` &nbsp; | &nbsp; "
+                f"**Date:** `{true_learning.get('review_date','NA')}`"
+            )
+            _learning_summary_rows = [{
+                "Completed Cases": int(true_learning.get("completed_cases_seen", 0) or 0),
+                "Branches": int(true_learning.get("branches_observed", 0) or 0),
+                "Recommendations": int(true_learning.get("recommendations_count", 0) or 0),
+                "AI_MASTER Review Ready": int(true_learning.get("review_ready_count", 0) or 0),
+                "Collecting": int(true_learning.get("collecting_count", 0) or 0),
+                "Preserve": int(true_learning.get("preserve_count", 0) or 0),
+                "Evidence Confidence": f"{float(true_learning.get('confidence',0) or 0):.0f}%",
+                "Auto Apply": "DISABLED",
+            }]
+            _render_safe_table(_learning_summary_rows, max_rows=1)
+
+            _learning_rows = []
+            for _item in list(true_learning.get("recommendations", []) or [])[:18]:
+                if not isinstance(_item, dict):
+                    continue
+                _learning_rows.append({
+                    "Department": str(_item.get("branch", "SYSTEM")).replace("_", " ").title(),
+                    "Recommendation Type": _item.get("recommendation_type", "MANUAL_REVIEW"),
+                    "Status": _item.get("status", "COLLECTING_EVIDENCE"),
+                    "Validated": int(_item.get("validated_samples", 0) or 0),
+                    "Evidence": f"{float(_item.get('evidence_score',0) or 0):.0f}/100",
+                    "Evidence Updates": int(_item.get("occurrences", 0) or 0),
+                    "Recommendation": str(_item.get("recommendation", "-") or "-")[:190],
+                    "Reason": str(_item.get("reason", "-") or "-")[:170],
+                })
+            if _learning_rows:
+                _render_safe_table(_learning_rows, max_rows=18)
+
+            for _item in list(true_learning.get("priority_recommendations", []) or [])[:6]:
+                st.warning("AI_MASTER manual review: " + str(_item))
+            for _item in list(true_learning.get("preserved_behaviours", []) or [])[:5]:
+                st.success("Preserve evidence process: " + str(_item))
+            for _item in list(true_learning.get("rejected_automation", []) or [])[:4]:
+                st.caption("Safety lock: " + str(_item))
+            for _warning in list(true_learning.get("warnings", []) or [])[:5]:
+                st.warning(str(_warning))
+            st.info(
+                "True Learning sirf improvement hypothesis banati hai. Recommendation review-ready ho sakti hai, "
+                "lekin rule, weight, threshold, SOP, training, promotion, demotion ya code automatically change nahi hota. "
+                "Final approval AI_MASTER hierarchy aur manual live validation ke baad hi possible hai."
+            )
+
     time_intelligence = case_data.get("time_intelligence", {}) if isinstance(case_data, dict) else {}
     if isinstance(time_intelligence, dict) and time_intelligence:
         with st.expander("⏱️ V39.3 Time Intelligence — Session Behaviour", expanded=True):
@@ -874,11 +925,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience + Self Review → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience + Self Review + Promotion + True Learning → CO Case File → AI_MASTER → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V44.3 - SELF REVIEW
+# NIFTY SELLER AI DASHBOARD V46.3 - TRUE LEARNING
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -904,7 +955,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V44.3 Self Review",
+    page_title="Nifty Seller AI V46.3 True Learning",
     page_icon="🧠",
     layout="wide",
 )
@@ -3166,7 +3217,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V44.3 AI COMMAND")
+st.sidebar.title("🏛️ V46.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -3182,6 +3233,8 @@ st.sidebar.caption("📰 DSP News Intelligence — Evidence Only")
 st.sidebar.caption("🏦 DSP Smart Money / Institutional Behaviour")
 st.sidebar.caption("🧠 DSP Experience & Validation — Evidence Only")
 st.sidebar.caption("🪞 DSP AI Self Review — Evidence Only")
+st.sidebar.caption("🎖️ DSP Personnel & Promotion Board — Evidence Only")
+st.sidebar.caption("🎓 DSP True Learning & Improvement — Evidence Only")
 st.sidebar.caption("🛡️ DSP Risk")
 st.sidebar.caption("🎯 DSP Strategy")
 st.sidebar.caption("📋 DSP Candidate")
@@ -6578,10 +6631,26 @@ try:
         )
         _promotion_board_trace_v45 = _promotion_board_v45.to_compact_dict()
         _promotion_board_department_v45 = _promotion_board_v45.to_department_report()
+        # V46.1-V46.3 upgrades the existing Learning Department. It converts
+        # completed-case, Self Review, and Personnel Board evidence into bounded
+        # improvement hypotheses for CO/AI_MASTER manual review only. It cannot
+        # edit rules, weights, thresholds, SOPs, training, ranks, or code.
+        _true_learning_v46 = LearningDepartment(max_records=200, max_recommendations=80).investigate(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
+            market_open=bool(_market_open_v1951),
+            experience=_experience_trace_v43,
+            self_review=_self_review_trace_v44,
+            promotion_board=_promotion_board_trace_v45,
+        )
+        _true_learning_trace_v46 = _true_learning_v46.to_compact_dict()
+        _true_learning_department_v46 = _true_learning_v46.to_department_report()
         _branch_source_reports_v28 = {
             **_branch_source_reports_v44_base,
             "SELF_REVIEW": _self_review_department_v44,
             "PROMOTION_BOARD": _promotion_board_department_v45,
+            "LEARNING": _true_learning_department_v46,
         }
         _co_case_v26 = AIOrganizationController().build_case_file(
             snapshot_id=_snapshot_id_v24,
@@ -6769,13 +6838,14 @@ try:
                 "experience": {"summary": _experience_department_v43["summary"], "confidence": _experience_department_v43["confidence"]},
                 "self_review": {"summary": _self_review_department_v44["summary"], "confidence": _self_review_department_v44["confidence"]},
                 "promotion_board": {"summary": _promotion_board_department_v45["summary"], "confidence": _promotion_board_department_v45["confidence"]},
+                "true_learning": {"summary": _true_learning_department_v46["summary"], "confidence": _true_learning_department_v46["confidence"]},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
                 "candidate": {"summary": _v24_candidate_report.summary, "confidence": _v24_candidate_report.confidence},
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V45_3_PROMOTION_SYSTEM_BUNDLE",
+                "version": "V46_3_TRUE_LEARNING_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6792,6 +6862,7 @@ try:
                 "experience_engine": _experience_trace_v43,
                 "self_review": _self_review_trace_v44,
                 "promotion_board": _promotion_board_trace_v45,
+                "true_learning": _true_learning_trace_v46,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -7134,7 +7205,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V44.3 Self Review</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V46.3 True Learning</div>", unsafe_allow_html=True)
 
 
 # =========================================================

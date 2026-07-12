@@ -129,6 +129,7 @@ class PromotionSystem:
         "SMART_MONEY": "DSP Smart Money / Institutional Behaviour",
         "EXPERIENCE": "DSP Experience & Validation",
         "SELF_REVIEW": "DSP AI Self Review",
+        "LEARNING": "DSP True Learning & Improvement",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
         "CANDIDATE": "DSP Candidate",

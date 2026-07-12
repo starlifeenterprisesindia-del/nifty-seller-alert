@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V45.3
+Version: V46.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -49,6 +49,7 @@ class DepartmentSOP:
         "EXPERIENCE": ("experience_state", "stored_cases", "pending_cases", "completed_cases", "similar_completed_cases", "automatic_rule_change"),
         "SELF_REVIEW": ("review_state", "review_scope", "completed_cases_reviewed", "department_reviews", "automatic_rule_change", "automatic_retraining"),
         "PROMOTION_BOARD": ("board_state", "review_scope", "officers_reviewed", "officer_profiles", "automatic_promotion", "automatic_demotion", "automatic_training"),
+        "LEARNING": ("learning_state", "review_scope", "recommendations_count", "review_ready_count", "recommendations", "automatic_rule_change", "automatic_weight_change", "automatic_threshold_change"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
         "CANDIDATE": (),
@@ -186,6 +187,7 @@ class DepartmentAcademy:
         "EXPERIENCE": "DSP Experience & Validation",
         "SELF_REVIEW": "DSP AI Self Review",
         "PROMOTION_BOARD": "DSP Personnel & Promotion Board",
+        "LEARNING": "DSP True Learning & Improvement",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
         "CANDIDATE": "DSP Candidate",
@@ -307,4 +309,6 @@ class DepartmentAcademy:
             lessons.append("Department performance review recorded; retraining and calibration remain manual recommendations only.")
         if branch == "PROMOTION_BOARD" and "board_state" in facts:
             lessons.append("Personnel-board recommendation recorded; competency grades and training actions require manual approval.")
+        if branch == "LEARNING" and "learning_state" in facts:
+            lessons.append("Learning hypothesis recorded; AI_MASTER review is required and no production change may be auto-applied.")
         return lessons or ["Observation recorded for future validation."]
