@@ -1,8 +1,8 @@
 """
 ai_master.py
-Version : V49.3
+Version : V50.3
 Role    : Final AI Authority
-Status  : V49 Master Intelligence shadow validation
+Status  : V50 Final Headquarters authority lock
 
 Golden Rules:
 - Only AI_MASTER can issue WAIT / SELL CE / SELL PE / IRON CONDOR.
@@ -94,7 +94,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V49.3_MASTER_INTELLIGENCE_AI_COURT_AUTHORITY"
+    VERSION = "V50.3_FINAL_AI_HEADQUARTERS_AI_COURT_AUTHORITY"
 
     def decide(
         self,

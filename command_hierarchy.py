@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V49.3
+Version: V50.3
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:

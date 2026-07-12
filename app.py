@@ -111,6 +111,7 @@ try:
     from experience_engine import ExperienceEngine
     from market_replay import MarketReplayEngine
     from master_intelligence import MasterIntelligenceEngine
+    from headquarters_engine import FinalAIHeadquarters
     from self_review import SelfReviewEngine
     from promotion_system import PromotionSystem
     from core.data_intelligence import SnapshotManager, DataDistributor
@@ -308,6 +309,78 @@ def _render_v48_market_replay(report):
         "V48 replay bounded completed snapshots ka compact reconstruction hai. "
         "Ye tick-by-tick playback ya live trade signal nahi; CO/AI_MASTER judgement ko override nahi karta."
     )
+
+def _render_v50_final_headquarters(report):
+    """Render the final one-brain integrity and live-testing certificate."""
+    if not isinstance(report, dict) or not report:
+        st.info("V50 Final AI Headquarters certificate abhi available nahi hai.")
+        return
+
+    st.markdown(
+        f"**Headquarters:** `{report.get('headquarters_state','FINAL_HEADQUARTERS_HOLD')}` &nbsp; | &nbsp; "
+        f"**Single Brain:** `{report.get('single_brain_lock','HOLD')}` &nbsp; | &nbsp; "
+        f"**Final Authority:** `{report.get('final_authority','AI_MASTER')}`"
+    )
+    st.info(str(report.get("statement", "Final headquarters integrity is collecting.")))
+    _render_safe_table([{
+        "Integrity": f"{float(report.get('authority_integrity_score',0) or 0):.0f}%",
+        "Pipeline": "COMPLETE" if report.get("pipeline_complete", False) else "CAUTION",
+        "Final Judgement": report.get("final_action", "WAIT"),
+        "Confidence": f"{float(report.get('final_confidence',0) or 0):.0f}%",
+        "CO Status": report.get("co_status", "CASE_FILE_HOLD"),
+        "CO Strength": f"{float(report.get('co_case_strength',0) or 0):.0f}%",
+        "Master State": report.get("master_state", "COLLECTING_CONTEXT"),
+    }], max_rows=1)
+    _render_safe_table([{
+        "Departments": int(report.get("reporting_departments", 0) or 0),
+        "Ready": int(report.get("ready_departments", 0) or 0),
+        "Evidence Only": int(report.get("observation_only_departments", 0) or 0),
+        "Testing State": report.get("live_testing_state", "READY_TO_BEGIN_2_3_WEEK_LIVE_TEST"),
+        "Certificate": str(report.get("reasoning_fingerprint", ""))[:14] or "COLLECTING",
+        "Decision Control": "AI_MASTER ONLY",
+    }], max_rows=1)
+
+    checkpoints = []
+    for item in list(report.get("checkpoints", []) or [])[:10]:
+        if isinstance(item, dict):
+            checkpoints.append({
+                "Stage": item.get("stage", "-"),
+                "Status": item.get("status", "HOLD"),
+                "Verification": str(item.get("statement", "-"))[:190],
+            })
+    if checkpoints:
+        with st.expander("V50 End-to-End Authority Checkpoints", expanded=False):
+            _render_safe_table(checkpoints, max_rows=10)
+
+    metrics = report.get("live_testing_metrics", {}) or {}
+    if isinstance(metrics, dict):
+        st.markdown("**🧪 V50 Live Market Testing Readiness**")
+        _render_safe_table([{
+            "Unique Snapshots": int(metrics.get("unique_snapshots", 0) or 0),
+            "Observed Days": int(metrics.get("observed_days", 0) or 0),
+            "WAIT": int(metrics.get("wait_judgements", 0) or 0),
+            "Trade Judgements": int(metrics.get("trade_judgements", 0) or 0),
+            "Decision Flips": int(metrics.get("decision_flip_count", 0) or 0),
+            "Avg Confidence": f"{float(metrics.get('average_confidence',0) or 0):.0f}%",
+            "Completed Cases": int(metrics.get("completed_experience_cases", 0) or 0),
+            "Target": metrics.get("target_live_testing_days", "14–21 days"),
+        }], max_rows=1)
+
+    missing = list(report.get("missing_stages", []) or [])
+    conflicts = list(report.get("conflicts", []) or [])
+    if missing:
+        st.warning("Missing headquarters stages: " + " | ".join(str(x) for x in missing[:6]))
+    if conflicts:
+        st.error("Authority conflict: " + " | ".join(str(x) for x in conflicts[:5]))
+    for item in list(report.get("testing_protocol", []) or [])[:5]:
+        st.caption("Live testing rule: " + str(item))
+    for item in list(report.get("warnings", []) or [])[:4]:
+        st.caption("V50 caution: " + str(item))
+    st.caption(
+        "V50 Headquarters certificate post-judgement integrity layer hai. Ye action, confidence, candidate, "
+        "execution, rules, weights ya thresholds change nahi karta. V50 ke baad 2–3 hafte live validation hogi."
+    )
+
 
 def _render_v49_master_intelligence(report):
     """Render the AI_MASTER pre-judgement dossier without creating advice."""
@@ -1141,11 +1214,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience/Replay + Self Review + Promotion + True Learning → CO Case File → V49 Master Dossier → AI_MASTER → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience/Replay + Governance → CO Case File → V49 Master Dossier → AI_MASTER Final Judgement → V50 Headquarters Certificate")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V49.3 - MASTER INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V50.3 - FINAL AI HEADQUARTERS
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -1171,7 +1244,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V49.3 Master Intelligence",
+    page_title="Nifty Seller AI V50.3 Final Headquarters",
     page_icon="🧠",
     layout="wide",
 )
@@ -3433,7 +3506,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V49.3 AI COMMAND")
+st.sidebar.title("🏛️ V50.3 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -7060,6 +7133,26 @@ try:
             similar_cases=_case_history_trace_v33.get("similar_cases", []),
         )
         _pattern_probability_trace_v34 = _pattern_probability_v34.to_compact_dict()
+        # V50.1-V50.3 Final AI Headquarters runs after AI_MASTER judgement.
+        # It verifies one snapshot -> departments -> CO -> Master Dossier ->
+        # AI_MASTER -> reasoning, and prepares the 2–3 week live-test board.
+        # It is certificate-only and cannot change the final judgement.
+        _headquarters_v50 = FinalAIHeadquarters(history_limit=300).certify(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
+            co_case_file=_co_case_v26,
+            master_intelligence=_master_intelligence_trace_v49,
+            ai_master_decision=_v24_decision,
+            branch_reports=_co_case_v26.branch_reports,
+            experience=_experience_trace_v43,
+            replay=_market_replay_trace_v48,
+            self_review=_self_review_trace_v44,
+            promotion_board=_promotion_board_trace_v45,
+            learning=_true_learning_trace_v46,
+        )
+        _headquarters_trace_v50 = _headquarters_v50.to_compact_dict()
+
         def _v24_candidate_plan(candidate, side, confidence_value):
             _c = candidate if isinstance(candidate, dict) else {}
             _strike = _v221_int(_c.get("strike", 0), 0)
@@ -7118,7 +7211,7 @@ try:
             return _rows
 
         AI_MASTER.update({
-            "version": "V49.3_MASTER_INTELLIGENCE_AI_MASTER",
+            "version": "V50.3_FINAL_AI_HEADQUARTERS",
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
@@ -7131,7 +7224,8 @@ try:
             "advice": str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
             "reasoning_report": dict(_v24_decision.reasoning_report or {}),
             "master_intelligence": _master_intelligence_trace_v49,
-            "source_of_truth": "ONE_SNAPSHOT_DEPARTMENTS_CO_MASTER_DOSSIER_THEN_AI_MASTER",
+            "final_headquarters": _headquarters_trace_v50,
+            "source_of_truth": "ONE_SNAPSHOT_ONE_CO_ONE_AI_MASTER_ONE_FINAL_JUDGEMENT",
             "data_flow_status": "FRESH" if _data_quality_ok_v24 else "CAUTION",
             "ce_plan": _ce_plan_v24,
             "pe_plan": _pe_plan_v24,
@@ -7163,7 +7257,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V49_3_MASTER_INTELLIGENCE_BUNDLE",
+                "version": "V50_3_FINAL_AI_HEADQUARTERS_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -7183,6 +7277,7 @@ try:
                 "promotion_board": _promotion_board_trace_v45,
                 "true_learning": _true_learning_trace_v46,
                 "master_intelligence": _master_intelligence_trace_v49,
+                "final_headquarters": _headquarters_trace_v50,
                 "reasoning_certificate": dict(_v24_decision.reasoning_report or {}),
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
@@ -7526,7 +7621,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V49.3 Master Intelligence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.3 Final Headquarters</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -7696,6 +7791,13 @@ try:
         st.warning("⚠️ Brain Sync caution: " + " | ".join(_v204_brain_sync.get("stale_reasons", []) or ["Data freshness check failed"]))
 except Exception:
     pass
+
+st.markdown("### 🏛️ V50 Final AI Headquarters — One Brain Certificate")
+try:
+    _headquarters_ui_v50 = AI_MASTER.get("final_headquarters", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v50_final_headquarters(_headquarters_ui_v50)
+except Exception as _headquarters_ui_err_v50:
+    st.caption("Final AI Headquarters certificate unavailable: " + str(_headquarters_ui_err_v50))
 
 # V27: Visible command hierarchy and CO consolidated case file.
 st.markdown("### 🏛️ AI Organization — CO Command Case File")
