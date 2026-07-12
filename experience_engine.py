@@ -1,6 +1,6 @@
 """
 experience_engine.py
-Version: V43.3
+Version: V44.3
 Role: Bounded post-judgement experience registry and similar completed-case evidence.
 
 Architecture and safety:
@@ -232,6 +232,7 @@ class ExperienceEngine:
         consensus_direction: str,
         trade_allowed: bool,
         context: Mapping[str, Any],
+        department_reports: Optional[Mapping[str, Any]] = None,
     ) -> bool:
         records = self._records(state)
         if any(str(item.get("case_id")) == str(case_id) for item in records if isinstance(item, dict)):
@@ -278,6 +279,7 @@ class ExperienceEngine:
             "trade_allowed": bool(trade_allowed),
             "features": sorted(features)[:32],
             "fingerprint": fingerprint,
+            "department_snapshot": self._department_snapshot(department_reports or {}),
             "status": "PENDING",
             "reality": "PENDING",
             "actual_move_points": 0.0,
@@ -372,6 +374,71 @@ class ExperienceEngine:
                 lesson=str(old.get("lesson", "Observation stored."))[:220],
             ))
         return sorted(rows, key=lambda item: item.similarity, reverse=True)[:self.max_matches]
+
+    def _department_snapshot(self, reports: Mapping[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """Store compact department evidence for later V44 outcome review.
+
+        This snapshot is descriptive only. Observation-only branches remain
+        non-voting in CO and AI_MASTER even when their directional evidence is
+        later evaluated for accuracy.
+        """
+        output: Dict[str, Dict[str, Any]] = {}
+        for branch, report in reports.items():
+            name = str(branch or "UNKNOWN").upper()
+            if name == "SELF_REVIEW":
+                continue
+            summary = str(self._read_report(report, "summary", ""))[:260]
+            confidence = self._number(self._read_report(report, "confidence", 0.0))
+            details = self._read_report(report, "details", {})
+            recommendation = str(self._read_report(report, "recommendation", "INFORMATION_ONLY"))
+            direction = self._infer_department_direction(summary, details, recommendation)
+            output[name] = {
+                "direction": direction,
+                "confidence": round(max(0.0, min(100.0, confidence)), 1),
+                "summary": summary,
+                "recommendation": recommendation[:80],
+            }
+        return output
+
+    @staticmethod
+    def _read_report(report: Any, key: str, default: Any) -> Any:
+        if isinstance(report, Mapping):
+            return report.get(key, default)
+        return getattr(report, key, default) if report is not None else default
+
+    @staticmethod
+    def _infer_department_direction(summary: str, details: Any, recommendation: str) -> str:
+        text = f"{summary} {details} {recommendation}".lower()
+        if "sell pe" in text:
+            return "BULLISH"
+        if "sell ce" in text:
+            return "BEARISH"
+        if "iron condor" in text:
+            return "NEUTRAL"
+        bullish_tokens = (
+            "bullish", "uptrend", "risk_on", "risk on", "accumulation",
+            "long build", "short covering", "upside participation", "up move",
+            "domestic absorption", "positive pressure",
+        )
+        bearish_tokens = (
+            "bearish", "downtrend", "risk_off", "risk off", "distribution",
+            "panic selling", "downside participation", "down move",
+            "negative pressure",
+        )
+        neutral_tokens = (
+            "range", "balanced", "neutral", "mixed", "conflict", "collecting",
+            "information_only", "information only", "wait", "uncertain",
+        )
+        bullish = sum(token in text for token in bullish_tokens)
+        bearish = sum(token in text for token in bearish_tokens)
+        neutral = sum(token in text for token in neutral_tokens)
+        if bullish >= bearish + 1 and bullish >= neutral:
+            return "BULLISH"
+        if bearish >= bullish + 1 and bearish >= neutral:
+            return "BEARISH"
+        if neutral or bullish == bearish:
+            return "NEUTRAL"
+        return "CAUTION"
 
     def _fingerprint(self, context: Mapping[str, Any]) -> Tuple[str, Set[str]]:
         features: Set[str] = set()

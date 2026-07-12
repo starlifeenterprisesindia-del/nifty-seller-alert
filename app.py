@@ -109,6 +109,7 @@ try:
     from heavyweight_intelligence import HeavyweightIntelligenceDirector
     from news_intelligence import NewsIntelligenceDirector
     from experience_engine import ExperienceEngine
+    from self_review import SelfReviewEngine
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -202,7 +203,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE", "SELF_REVIEW",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -226,7 +227,7 @@ def _render_v27_command_hierarchy(case_data):
             "Recommendation": str(branch.get("recommendation", "INFORMATION_ONLY")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
-    _render_safe_table(rows, max_rows=14)
+    _render_safe_table(rows, max_rows=15)
 
     if court_brief:
         st.info("AI Court Brief: " + court_brief)
@@ -439,6 +440,71 @@ def _render_v27_command_hierarchy(case_data):
             st.info(
                 "Experience Engine old judgements ko later verified snapshots se compare karta hai. "
                 "Ye sirf prediction, reality, mistake aur lesson record karta hai; production rules ya AI weights automatically change nahi karta."
+            )
+
+    self_review = case_data.get("self_review", {}) if isinstance(case_data, dict) else {}
+    if isinstance(self_review, dict) and self_review:
+        with st.expander("🪞 V44.3 AI Self Review — Department Performance", expanded=True):
+            st.markdown(
+                f"**State:** `{self_review.get('review_state','COLLECTING_COMPLETED_CASES')}` &nbsp; | &nbsp; "
+                f"**Scope:** `{self_review.get('review_scope','LIVE_PROVISIONAL')}` &nbsp; | &nbsp; "
+                f"**Review Date:** `{self_review.get('review_date','NA')}`"
+            )
+            _review_summary_rows = [{
+                "Completed Cases": int(self_review.get("completed_cases_reviewed", 0) or 0),
+                "Today Completed": int(self_review.get("daily_completed_cases", 0) or 0),
+                "Newly Completed": int(self_review.get("newly_completed_cases", 0) or 0),
+                "Scored Observations": int(self_review.get("scored_department_observations", 0) or 0),
+                "Top Performers": len(list(self_review.get("top_performers", []) or [])),
+                "Review Required": len(list(self_review.get("review_required", []) or [])),
+                "Retraining Review": len(list(self_review.get("retraining_recommended", []) or [])),
+                "Evidence Confidence": f"{float(self_review.get('confidence',0) or 0):.0f}%",
+            }]
+            _render_safe_table(_review_summary_rows, max_rows=1)
+
+            _department_review_rows = []
+            for _item in list(self_review.get("department_reviews", []) or [])[:16]:
+                if not isinstance(_item, dict):
+                    continue
+                _accuracy = _item.get("accuracy")
+                _department_review_rows.append({
+                    "Department": str(_item.get("branch", "-")).replace("_", " ").title(),
+                    "Validated": int(_item.get("validated_samples", 0) or 0),
+                    "Supported / Contradicted": f"{int(_item.get('supported_cases',0) or 0)} / {int(_item.get('contradicted_cases',0) or 0)}",
+                    "Unscored": int(_item.get("unscored_cases", 0) or 0),
+                    "Accuracy": f"{float(_accuracy):.1f}%" if _accuracy is not None else "Collecting",
+                    "High-Confidence Wrong": int(_item.get("high_confidence_wrong", 0) or 0),
+                    "SOP Reliability": f"{float(_item.get('sop_reliability',0) or 0):.0f}%",
+                    "Status": _item.get("performance_status", "COLLECTING_EVIDENCE"),
+                    "Review": str(_item.get("review_note", "-"))[:150],
+                })
+            if _department_review_rows:
+                _render_safe_table(_department_review_rows, max_rows=16)
+
+            _top = list(self_review.get("top_performers", []) or [])
+            _stable = list(self_review.get("stable_departments", []) or [])
+            _review = list(self_review.get("review_required", []) or [])
+            _retraining = list(self_review.get("retraining_recommended", []) or [])
+            if _top:
+                st.success("Top validated departments: " + ", ".join(_top))
+            if _stable:
+                st.caption("Stable departments: " + ", ".join(_stable))
+            if _review:
+                st.warning("Manual review required: " + ", ".join(_review))
+            if _retraining:
+                st.error("Retraining recommendation only: " + ", ".join(_retraining))
+
+            for _item in list(self_review.get("dominant_mistakes", []) or [])[:4]:
+                st.caption("Dominant mistake: " + str(_item))
+            for _item in list(self_review.get("lessons", []) or [])[:4]:
+                st.caption("Self-review lesson: " + str(_item))
+            for _item in list(self_review.get("next_recommendations", []) or [])[:4]:
+                st.caption("Manual recommendation: " + str(_item))
+            for _warning in list(self_review.get("warnings", []) or [])[:4]:
+                st.warning(str(_warning))
+            st.info(
+                "Self Review sirf completed cases se department performance evaluate karti hai. "
+                "Ye production rules, confidence thresholds, promotion, demotion ya retraining automatically apply nahi karti; final authority AI_MASTER aur manual live validation ki hai."
             )
 
     time_intelligence = case_data.get("time_intelligence", {}) if isinstance(case_data, dict) else {}
@@ -745,11 +811,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier + Heavyweight + News + Institutional Behaviour → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience + Self Review → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V43.3 - EXPERIENCE ENGINE
+# NIFTY SELLER AI DASHBOARD V44.3 - SELF REVIEW
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -775,7 +841,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V43.3 Experience Engine",
+    page_title="Nifty Seller AI V44.3 Self Review",
     page_icon="🧠",
     layout="wide",
 )
@@ -3037,7 +3103,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V43.3 AI COMMAND")
+st.sidebar.title("🏛️ V44.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -3051,6 +3117,8 @@ st.sidebar.caption("🧱 DSP Move & Barrier Intelligence — Evidence Only")
 st.sidebar.caption("🏋️ DSP Heavyweight Intelligence — Evidence Only")
 st.sidebar.caption("📰 DSP News Intelligence — Evidence Only")
 st.sidebar.caption("🏦 DSP Smart Money / Institutional Behaviour")
+st.sidebar.caption("🧠 DSP Experience & Validation — Evidence Only")
+st.sidebar.caption("🪞 DSP AI Self Review — Evidence Only")
 st.sidebar.caption("🛡️ DSP Risk")
 st.sidebar.caption("🎯 DSP Strategy")
 st.sidebar.caption("📋 DSP Candidate")
@@ -6407,7 +6475,7 @@ try:
                 "rows_count": len(option_analysis.get("rows", [])) if isinstance(option_analysis, dict) else 0,
             },
         }
-        _branch_source_reports_v28 = {
+        _branch_source_reports_v44_base = {
             "DATA": _data_branch_report_v26,
             "OPTION": _v24_option_report,
             "PRICE_ACTION": _v24_price_report,
@@ -6422,6 +6490,22 @@ try:
             "RISK": _v24_risk_report,
             "CANDIDATE": _v24_candidate_report,
             "STRATEGY": _v24_strategy_report,
+        }
+        # V44.1-V44.3 Self Review evaluates only already-completed experience
+        # cases and historical department snapshots. It produces a neutral CO
+        # report and cannot retrain, promote, demote, or re-weight any branch.
+        _self_review_v44 = SelfReviewEngine().evaluate(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
+            market_open=bool(_market_open_v1951),
+            newly_completed=_experience_completed_updates_v43,
+        )
+        _self_review_trace_v44 = _self_review_v44.to_compact_dict()
+        _self_review_department_v44 = _self_review_v44.to_department_report()
+        _branch_source_reports_v28 = {
+            **_branch_source_reports_v44_base,
+            "SELF_REVIEW": _self_review_department_v44,
         }
         _co_case_v26 = AIOrganizationController().build_case_file(
             snapshot_id=_snapshot_id_v24,
@@ -6471,6 +6555,7 @@ try:
             consensus_direction=_co_case_v26.consensus_direction,
             trade_allowed=_v24_decision.trade_allowed,
             context=_experience_context_v43,
+            department_reports=_branch_source_reports_v44_base,
         )
         _experience_post_v43 = _experience_engine_v43.investigate(
             state=st.session_state,
@@ -6606,13 +6691,14 @@ try:
                 "news_intelligence": {"summary": _news_intelligence_department_v41["summary"], "confidence": _news_intelligence_department_v41["confidence"]},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "experience": {"summary": _experience_department_v43["summary"], "confidence": _experience_department_v43["confidence"]},
+                "self_review": {"summary": _self_review_department_v44["summary"], "confidence": _self_review_department_v44["confidence"]},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
                 "candidate": {"summary": _v24_candidate_report.summary, "confidence": _v24_candidate_report.confidence},
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V43_3_EXPERIENCE_ENGINE_BUNDLE",
+                "version": "V44_3_SELF_REVIEW_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6627,6 +6713,7 @@ try:
                 "news_intelligence": _news_intelligence_trace_v41,
                 "institutional_behaviour": _institutional_trace_v42,
                 "experience_engine": _experience_trace_v43,
+                "self_review": _self_review_trace_v44,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -6969,7 +7056,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V43.3 Experience Engine</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V44.3 Self Review</div>", unsafe_allow_html=True)
 
 
 # =========================================================

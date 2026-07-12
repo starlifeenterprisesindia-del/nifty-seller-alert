@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V43.3
+Version: V44.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -47,6 +47,7 @@ class DepartmentSOP:
         "NEWS_INTELLIGENCE": ("impact_level", "impact_score", "risk_state", "event_window", "market_confirmation", "source_mode", "uncertainty_score"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth", "institutional_state", "market_mood", "cash_flow_state", "futures_positioning", "institutional_pressure_score", "market_alignment"),
         "EXPERIENCE": ("experience_state", "stored_cases", "pending_cases", "completed_cases", "similar_completed_cases", "automatic_rule_change"),
+        "SELF_REVIEW": ("review_state", "review_scope", "completed_cases_reviewed", "department_reviews", "automatic_rule_change", "automatic_retraining"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
         "CANDIDATE": (),
@@ -182,6 +183,7 @@ class DepartmentAcademy:
         "NEWS_INTELLIGENCE": "DSP News Intelligence",
         "SMART_MONEY": "DSP Smart Money / Institutional Behaviour",
         "EXPERIENCE": "DSP Experience & Validation",
+        "SELF_REVIEW": "DSP AI Self Review",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
         "CANDIDATE": "DSP Candidate",
@@ -299,4 +301,6 @@ class DepartmentAcademy:
             lessons.append("Cash, futures and DII-absorption evidence recorded; conflict states require next-session confirmation.")
         if branch == "EXPERIENCE" and "experience_state" in facts:
             lessons.append("Prediction-versus-reality evidence recorded; lessons are review-only and cannot auto-change production rules.")
+        if branch == "SELF_REVIEW" and "review_state" in facts:
+            lessons.append("Department performance review recorded; retraining and calibration remain manual recommendations only.")
         return lessons or ["Observation recorded for future validation."]
