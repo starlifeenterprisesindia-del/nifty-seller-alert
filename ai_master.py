@@ -1,8 +1,8 @@
 """
 ai_master.py
-Version : V47.3
+Version : V49.3
 Role    : Final AI Authority
-Status  : Mega Sprint - Phase 1
+Status  : V49 Master Intelligence shadow validation
 
 Golden Rules:
 - Only AI_MASTER can issue WAIT / SELL CE / SELL PE / IRON CONDOR.
@@ -94,7 +94,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V47.3_REASONING_AI_COURT_AUTHORITY"
+    VERSION = "V49.3_MASTER_INTELLIGENCE_AI_COURT_AUTHORITY"
 
     def decide(
         self,
@@ -109,6 +109,7 @@ class AIMaster:
         strategy_report: Any,
         candidate_report: Any,
         co_case_file: Any = None,
+        master_intelligence_report: Any = None,
     ) -> AIMasterDecision:
         warnings: List[str] = []
         evidence: List[str] = []
@@ -220,6 +221,15 @@ class AIMaster:
             approved_candidate=approved_candidate,
             co_case_file=co_case_file,
         ).to_compact_dict()
+        master_view = self._master_intelligence_view(master_intelligence_report)
+        if master_view:
+            reasoning_report["master_intelligence"] = master_view
+            authority_trace = list(reasoning_report.get("authority_trace", []) or [])
+            marker = "AI_MASTER V49 MASTER DOSSIER (SHADOW MODE)"
+            if marker not in authority_trace:
+                insert_at = max(0, len(authority_trace) - 1)
+                authority_trace.insert(insert_at, marker)
+            reasoning_report["authority_trace"] = authority_trace
         reason = str(reasoning_report.get("primary_reason", reason))
 
         return AIMasterDecision(
@@ -246,9 +256,33 @@ class AIMaster:
                 "co_accepted": co_accepted,
                 "reasoning_version": reasoning_report.get("version", ""),
                 "reasoning_explanation_only": True,
+                "master_intelligence_version": master_view.get("version", "") if master_view else "",
+                "master_intelligence_state": master_view.get("master_state", "") if master_view else "",
+                "master_intelligence_shadow_mode": True,
             },
             reasoning_report=reasoning_report,
         )
+
+    @staticmethod
+    def _master_intelligence_view(report: Any) -> Dict[str, Any]:
+        if report is None:
+            return {}
+        if isinstance(report, Mapping):
+            value = dict(report)
+        elif hasattr(report, "to_compact_dict"):
+            try:
+                value = dict(report.to_compact_dict())
+            except Exception:
+                return {}
+        else:
+            return {}
+        # Hard safety contract: V49 remains explanation/shadow context only.
+        value["shadow_mode"] = True
+        value["execution_instruction"] = "NONE"
+        value["automatic_decision_change"] = False
+        value["automatic_confidence_change"] = False
+        value["automatic_candidate_change"] = False
+        return value
 
     def _strategy_view(self, report: Any) -> tuple[Dict[str, float], str]:
         scores: Dict[str, float] = {}

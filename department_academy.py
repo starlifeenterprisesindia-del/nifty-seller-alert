@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V48.3
+Version: V49.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:

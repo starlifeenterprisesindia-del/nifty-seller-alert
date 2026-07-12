@@ -110,6 +110,7 @@ try:
     from news_intelligence import NewsIntelligenceDirector
     from experience_engine import ExperienceEngine
     from market_replay import MarketReplayEngine
+    from master_intelligence import MasterIntelligenceEngine
     from self_review import SelfReviewEngine
     from promotion_system import PromotionSystem
     from core.data_intelligence import SnapshotManager, DataDistributor
@@ -307,6 +308,71 @@ def _render_v48_market_replay(report):
         "V48 replay bounded completed snapshots ka compact reconstruction hai. "
         "Ye tick-by-tick playback ya live trade signal nahi; CO/AI_MASTER judgement ko override nahi karta."
     )
+
+def _render_v49_master_intelligence(report):
+    """Render the AI_MASTER pre-judgement dossier without creating advice."""
+    if not isinstance(report, dict) or not report:
+        st.info("V49 Master Intelligence dossier abhi available nahi hai.")
+        return
+
+    st.markdown(
+        f"**Master State:** `{report.get('master_state','COLLECTING_CONTEXT')}` &nbsp; | &nbsp; "
+        f"**Direction:** `{report.get('current_direction','NEUTRAL')}` &nbsp; | &nbsp; "
+        f"**Transition:** `{report.get('transition_state','FIRST_OBSERVATION')}`"
+    )
+    st.info(str(report.get("statement", "Master context is collecting.")))
+    _render_safe_table([{
+        "Current Market": report.get("current_market_state", "UNKNOWN"),
+        "Previous State": report.get("previous_market_state", "NO_PREVIOUS_MASTER_STATE"),
+        "Preliminary Thesis": report.get("preliminary_strategy", "WAIT"),
+        "Thesis Alignment": report.get("thesis_alignment", "THESIS_UNCONFIRMED"),
+        "Historical Alignment": report.get("historical_alignment", "INSUFFICIENT_HISTORY"),
+        "Experience": report.get("experience_state", "COLLECTING_COMPLETED_CASES"),
+        "Behaviour": report.get("behaviour_state", "BEHAVIOUR_UNCLASSIFIED"),
+        "Risk": report.get("risk_state", "NORMAL_RISK"),
+    }], max_rows=1)
+    _render_safe_table([{
+        "Convergence": f"{float(report.get('convergence_score',0) or 0):.0f}%",
+        "Contradiction": f"{float(report.get('contradiction_score',0) or 0):.0f}%",
+        "Uncertainty": f"{float(report.get('uncertainty_score',0) or 0):.0f}%",
+        "Continuity": f"{float(report.get('continuity_score',0) or 0):.0f}%",
+        "Coverage": f"{float(report.get('evidence_coverage',0) or 0):.0f}%",
+        "Dossier Confidence": f"{float(report.get('confidence',0) or 0):.0f}%",
+        "Decision Control": "DISABLED / SHADOW",
+    }], max_rows=1)
+
+    dimension_rows = []
+    for item in list(report.get("dimensions", []) or [])[:12]:
+        if isinstance(item, dict):
+            dimension_rows.append({
+                "Dimension": item.get("name", "-"),
+                "Direction": item.get("direction", "NEUTRAL"),
+                "Confidence": f"{float(item.get('confidence',0) or 0):.0f}%",
+                "Role": item.get("role", "CONTEXT"),
+                "Observation": str(item.get("statement", "-"))[:180],
+            })
+    if dimension_rows:
+        with st.expander("V49 Cross-Dimension Comparison", expanded=False):
+            _render_safe_table(dimension_rows, max_rows=12)
+
+    supporting = list(report.get("supporting_dimensions", []) or [])
+    opposing = list(report.get("opposing_dimensions", []) or [])
+    unresolved = list(report.get("unresolved_dimensions", []) or [])
+    if supporting:
+        st.caption("Supporting dimensions: " + " | ".join(str(x) for x in supporting[:6]))
+    if opposing:
+        st.warning("Opposing dimensions: " + " | ".join(str(x) for x in opposing[:6]))
+    if unresolved:
+        st.caption("Unresolved dimensions: " + " | ".join(str(x) for x in unresolved[:5]))
+    for item in list(report.get("next_confirmation", []) or [])[:5]:
+        st.caption("Next confirmation: " + str(item))
+    for item in list(report.get("warnings", []) or [])[:4]:
+        st.warning(str(item))
+    st.caption(
+        "V49 Master Intelligence AI_MASTER ke andar pre-judgement comparison dossier hai. "
+        "Shadow mode mein ye action, confidence, candidate, rules, weights ya thresholds change nahi karta."
+    )
+
 
 def _render_v27_command_hierarchy(case_data):
     """Compact visual organization: branches -> CO -> AI_MASTER."""
@@ -1075,11 +1141,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience/Replay + Self Review + Promotion + True Learning → CO Case File → AI_MASTER → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience/Replay + Self Review + Promotion + True Learning → CO Case File → V49 Master Dossier → AI_MASTER → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V48.3 - MARKET REPLAY
+# NIFTY SELLER AI DASHBOARD V49.3 - MASTER INTELLIGENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -1105,7 +1171,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V48.3 Market Replay",
+    page_title="Nifty Seller AI V49.3 Master Intelligence",
     page_icon="🧠",
     layout="wide",
 )
@@ -3367,7 +3433,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V48.3 AI COMMAND")
+st.sidebar.title("🏛️ V49.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -6852,6 +6918,21 @@ try:
             data_quality_score=float(_did_snapshot_v24.quality_score),
             reports=_branch_source_reports_v28,
         )
+        # V49.1-V49.3 Master Intelligence is an AI_MASTER pre-judgement dossier,
+        # not a department and not a second decision engine. It compares current
+        # branches, the previous master state, Experience/Replay, behaviour and
+        # risk after CO review. During live validation it remains shadow-only.
+        _master_intelligence_v49 = MasterIntelligenceEngine(history_limit=12).evaluate(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            current_price=float(price),
+            current_change_pct=float(nifty_change_pct),
+            co_case_file=_co_case_v26,
+            branch_reports=_co_case_v26.branch_reports,
+            experience=_experience_trace_v43,
+            replay=_market_replay_trace_v48,
+        )
+        _master_intelligence_trace_v49 = _master_intelligence_v49.to_compact_dict()
         # V28 Academy: every DSP branch gets an SOP check and bounded diary.
         # It learns observations only; it cannot alter weights or issue trades.
         _academy_v28 = DepartmentAcademy(st.session_state, memory_limit=8)
@@ -6879,7 +6960,30 @@ try:
             risk_report=_v24_risk_report, strategy_report=_v24_strategy_report,
             candidate_report=_v24_candidate_report,
             co_case_file=_co_case_v26,
+            master_intelligence_report=_master_intelligence_v49,
         )
+        _v49_action_direction = {
+            "SELL PE": "BULLISH", "SELL CE": "BEARISH",
+            "IRON CONDOR": "RANGE", "WAIT": "NEUTRAL",
+        }.get(str(_v24_decision.action).upper(), "NEUTRAL")
+        _v49_master_direction = str(_master_intelligence_trace_v49.get("current_direction", "NEUTRAL"))
+        if _v24_decision.action == "WAIT":
+            _v49_final_alignment = "WAIT_WITH_CONFLICT_OR_RISK" if (
+                _v49_master_direction in {"CONFLICTED", "NEUTRAL"}
+                or str(_master_intelligence_trace_v49.get("risk_state", "NORMAL_RISK")) != "NORMAL_RISK"
+            ) else "WAIT_DESPITE_DIRECTIONAL_CONTEXT"
+        elif _v49_action_direction == _v49_master_direction:
+            _v49_final_alignment = "FINAL_JUDGEMENT_ALIGNED"
+        elif _v49_master_direction in {"CONFLICTED", "NEUTRAL"}:
+            _v49_final_alignment = "FINAL_JUDGEMENT_NOT_FULLY_CONFIRMED"
+        else:
+            _v49_final_alignment = "FINAL_JUDGEMENT_VS_DOSSIER_CONFLICT"
+        _master_intelligence_trace_v49.update({
+            "final_ai_master_action": _v24_decision.action,
+            "final_ai_master_confidence": _v24_decision.confidence,
+            "final_judgement_alignment": _v49_final_alignment,
+            "post_judgement_annotation_only": True,
+        })
         # V43 registers the final AI_MASTER judgement as a pending case only
         # after the CO-approved decision exists. It remains bounded and sampled
         # to prevent refresh spam; no rule or weight is modified.
@@ -7014,7 +7118,7 @@ try:
             return _rows
 
         AI_MASTER.update({
-            "version": "V48.3_MARKET_REPLAY_AI_MASTER",
+            "version": "V49.3_MASTER_INTELLIGENCE_AI_MASTER",
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
@@ -7026,7 +7130,8 @@ try:
             "warnings": list(_v24_decision.warnings),
             "advice": str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
             "reasoning_report": dict(_v24_decision.reasoning_report or {}),
-            "source_of_truth": "ONE_SNAPSHOT_DEPARTMENTS_THEN_AI_MASTER",
+            "master_intelligence": _master_intelligence_trace_v49,
+            "source_of_truth": "ONE_SNAPSHOT_DEPARTMENTS_CO_MASTER_DOSSIER_THEN_AI_MASTER",
             "data_flow_status": "FRESH" if _data_quality_ok_v24 else "CAUTION",
             "ce_plan": _ce_plan_v24,
             "pe_plan": _pe_plan_v24,
@@ -7058,7 +7163,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V48_3_MARKET_REPLAY_ENGINE_BUNDLE",
+                "version": "V49_3_MASTER_INTELLIGENCE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -7077,6 +7182,7 @@ try:
                 "self_review": _self_review_trace_v44,
                 "promotion_board": _promotion_board_trace_v45,
                 "true_learning": _true_learning_trace_v46,
+                "master_intelligence": _master_intelligence_trace_v49,
                 "reasoning_certificate": dict(_v24_decision.reasoning_report or {}),
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
@@ -7420,7 +7526,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V48.3 Market Replay</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V49.3 Master Intelligence</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -7598,6 +7704,13 @@ try:
     _render_v27_command_hierarchy(_co_ui_v27)
 except Exception as _co_ui_err_v27:
     st.caption("CO command case file unavailable: " + str(_co_ui_err_v27))
+
+st.markdown("### 🧠 V49 AI_MASTER Master Intelligence Dossier")
+try:
+    _master_ui_v49 = AI_MASTER.get("master_intelligence", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v49_master_intelligence(_master_ui_v49)
+except Exception as _master_ui_err_v49:
+    st.caption("Master Intelligence dossier unavailable: " + str(_master_ui_err_v49))
 
 st.markdown("### 🧾 V47 AI_MASTER Reasoning Certificate — WHY This Decision")
 try:
