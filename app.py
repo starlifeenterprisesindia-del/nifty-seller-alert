@@ -402,6 +402,41 @@ def _render_v27_command_hierarchy(case_data):
                 "Ye direct BUY/SELL nahi bolti; report CO ke through AI_MASTER tak jaati hai."
             )
 
+    institutional_behaviour = case_data.get("institutional_behaviour", {}) if isinstance(case_data, dict) else {}
+    if isinstance(institutional_behaviour, dict) and institutional_behaviour:
+        with st.expander("🏦 V42.3 Institutional Behaviour — FII/DII & Futures Investigation", expanded=True):
+            st.markdown(
+                f"**Mood:** `{institutional_behaviour.get('market_mood','NEUTRAL_INSTITUTIONAL_MOOD')}` &nbsp; | &nbsp; "
+                f"**Case:** `{institutional_behaviour.get('institutional_state','INSTITUTIONAL_DATA_PARTIAL')}` &nbsp; | &nbsp; "
+                f"**Pressure:** `{float(institutional_behaviour.get('institutional_pressure_score',0) or 0):+.0f}/100`"
+            )
+            _institutional_rows = [{
+                "FII Today": f"₹{float(institutional_behaviour.get('fii_cash_today',0) or 0):+,.0f} Cr",
+                "DII Today": f"₹{float(institutional_behaviour.get('dii_cash_today',0) or 0):+,.0f} Cr",
+                "FII 5D": f"₹{float(institutional_behaviour.get('fii_5day',0) or 0):+,.0f} Cr",
+                "FII 10D": f"₹{float(institutional_behaviour.get('fii_10day',0) or 0):+,.0f} Cr",
+                "Cash State": institutional_behaviour.get("cash_flow_state", "CASH_FLOW_BALANCED"),
+                "FII-DII Relation": institutional_behaviour.get("cash_alignment", "MIXED"),
+                "Futures Positioning": institutional_behaviour.get("futures_positioning", "UNAVAILABLE"),
+                "Long / Short": f"{float(institutional_behaviour.get('fii_long_pct',0) or 0):.1f}% / {float(institutional_behaviour.get('fii_short_pct',0) or 0):.1f}%",
+                "L-S Spread": f"{float(institutional_behaviour.get('long_short_spread',0) or 0):+.1f}",
+                "Market Alignment": institutional_behaviour.get("market_alignment", "UNCLEAR"),
+                "Conflict": f"{float(institutional_behaviour.get('institutional_conflict_score',0) or 0):.0f}/100",
+                "Persistence": institutional_behaviour.get("persistence_state", "FIRST_OBSERVATION"),
+                "Evidence Confidence": f"{float(institutional_behaviour.get('institutional_confidence',0) or 0):.0f}%",
+            }]
+            _render_safe_table(_institutional_rows, max_rows=1)
+            for _item in list(institutional_behaviour.get("evidence", []) or [])[:5]:
+                st.caption("• " + str(_item))
+            for _warning in list(institutional_behaviour.get("warnings", []) or [])[:4]:
+                st.warning(str(_warning))
+            for _check in list(institutional_behaviour.get("next_confirmation_required", []) or [])[:3]:
+                st.caption("Next confirmation: " + str(_check))
+            st.info(
+                "V42 ne existing DSP Smart Money branch ko upgrade kiya hai; koi duplicate Institutional Department nahi bana. "
+                "Cash, futures aur DII absorption evidence CO ko report hota hai. Direct BUY/SELL authority sirf AI_MASTER ke paas hai."
+            )
+
     news_intelligence = case_data.get("news_intelligence", {}) if isinstance(case_data, dict) else {}
     if isinstance(news_intelligence, dict) and news_intelligence:
         with st.expander("📰 V41.3 News Intelligence — Impact-Only Investigation", expanded=True):
@@ -637,11 +672,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier + Heavyweight + News Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier + Heavyweight + News + Institutional Behaviour → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V41.3 - NEWS INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V42.3 - INSTITUTIONAL BEHAVIOUR
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -667,7 +702,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V41.3 News Intelligence",
+    page_title="Nifty Seller AI V42.3 Institutional Behaviour",
     page_icon="🧠",
     layout="wide",
 )
@@ -2929,7 +2964,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V41.3 AI COMMAND")
+st.sidebar.title("🏛️ V42.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -2942,7 +2977,7 @@ st.sidebar.caption("⏱️ DSP Time Intelligence — Evidence Only")
 st.sidebar.caption("🧱 DSP Move & Barrier Intelligence — Evidence Only")
 st.sidebar.caption("🏋️ DSP Heavyweight Intelligence — Evidence Only")
 st.sidebar.caption("📰 DSP News Intelligence — Evidence Only")
-st.sidebar.caption("💰 DSP Smart Money")
+st.sidebar.caption("🏦 DSP Smart Money / Institutional Behaviour")
 st.sidebar.caption("🛡️ DSP Risk")
 st.sidebar.caption("🎯 DSP Strategy")
 st.sidebar.caption("📋 DSP Candidate")
@@ -6061,9 +6096,6 @@ try:
         _hw_rows_v24 = heavy_analysis.get("rows", []) if isinstance(heavy_analysis, dict) else []
         _adv_hw_v24 = sum(1 for r in _hw_rows_v24 if float(r.get("change_pct", 0) or 0) > 0)
         _dec_hw_v24 = sum(1 for r in _hw_rows_v24 if float(r.get("change_pct", 0) or 0) < 0)
-        _v24_money_report = SmartMoneyDirector().build_report(
-            float(fii_today), float(dii_today), _adv_hw_v24, _dec_hw_v24, _adv_hw_v24, _dec_hw_v24
-        )
 
         # V40.1-V40.3 Heavyweight Intelligence upgrades the existing quote/driver
         # layer into one evidence-only DSP report. It performs no data fetch and
@@ -6080,6 +6112,58 @@ try:
         )
         _heavyweight_trace_v40 = _heavyweight_v40.to_compact_dict()
         _heavyweight_department_v40 = _heavyweight_v40.to_department_report()
+
+        # V42.1-V42.3 upgrades the existing SMART_MONEY branch into one
+        # Institutional Behaviour investigation. No duplicate department is
+        # created. Legacy keys remain compatible; richer fields go to CO.
+        try:
+            _institutional_stats_v42 = v102_journal_stats(
+                locals().get("fii_journal_df", pd.DataFrame())
+            )
+        except Exception:
+            _institutional_stats_v42 = {
+                "rows": 0, "fii_5": float(fii_5day), "dii_5": float(dii_5day),
+                "fii_10": 0.0, "dii_10": 0.0,
+            }
+        try:
+            _institutional_journal_v42 = (
+                locals().get("fii_journal_df", pd.DataFrame())
+                .sort_values("Date")
+                .tail(10)
+                .to_dict("records")
+            )
+        except Exception:
+            _institutional_journal_v42 = []
+
+        _v24_money_report = SmartMoneyDirector().build_report(
+            float(fii_today),
+            float(dii_today),
+            _adv_hw_v24,
+            _dec_hw_v24,
+            _adv_hw_v24,
+            _dec_hw_v24,
+            state=st.session_state,
+            fii_5day=float(fii_5day),
+            dii_5day=float(dii_5day),
+            fii_10day=float(_institutional_stats_v42.get("fii_10", 0) or 0),
+            dii_10day=float(_institutional_stats_v42.get("dii_10", 0) or 0),
+            futures_contracts=float(locals().get("fii_index_futures_contracts", 0) or 0),
+            fii_long_pct=float(locals().get("fii_long_pct", 0) or 0),
+            fii_short_pct=float(locals().get("fii_short_pct", 0) or 0),
+            futures_bias=str(locals().get("fii_index_futures_bias", "Neutral")),
+            options_bias=str(
+                (_institutional_journal_v42[-1].get("FII Options Bias", "Neutral") if _institutional_journal_v42 else "Neutral")
+            ),
+            journal_records=_institutional_journal_v42,
+            nifty_change_pct=float(nifty_change_pct),
+            heavyweight_report=_heavyweight_v40,
+            observed_at=(str(heavy_raw.get("fetched_at", "")) if isinstance(heavy_raw, dict) and heavy_raw.get("fetched_at") else datetime.now(IST).isoformat(timespec="seconds")),
+        )
+        _institutional_trace_v42 = {
+            "summary": _v24_money_report.summary,
+            "confidence": _v24_money_report.confidence,
+            **dict(_v24_money_report.details),
+        }
 
         # V39.1-V39.3 Time Intelligence: one clock profile, bounded phase evidence,
         # and a time-conditioned reliability report. It is observation-only and
@@ -6189,6 +6273,9 @@ try:
                 "declining_heavyweights": _dec_hw_v24,
                 "heavyweight_investigation_state": _heavyweight_trace_v40.get("investigation_state", "COLLECTING"),
                 "heavyweight_alignment": _heavyweight_trace_v40.get("alignment_state", "MIXED_OR_BALANCED"),
+                "institutional_state": _institutional_trace_v42.get("institutional_state", "INSTITUTIONAL_DATA_PARTIAL"),
+                "institutional_mood": _institutional_trace_v42.get("market_mood", "NEUTRAL_INSTITUTIONAL_MOOD"),
+                "institutional_pressure": _institutional_trace_v42.get("institutional_pressure_score", 0),
             },
             "risk": {
                 "news_score": news.get("score", 0) if isinstance(news, dict) else 0,
@@ -6384,7 +6471,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V41_3_NEWS_INTELLIGENCE_BUNDLE",
+                "version": "V42_3_INSTITUTIONAL_BEHAVIOUR_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6397,6 +6484,7 @@ try:
                 "market_journey": _market_journey_trace_v37,
                 "heavyweight_intelligence": _heavyweight_trace_v40,
                 "news_intelligence": _news_intelligence_trace_v41,
+                "institutional_behaviour": _institutional_trace_v42,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -6739,7 +6827,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V41.3 News Intelligence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V42.3 Institutional Behaviour</div>", unsafe_allow_html=True)
 
 
 # =========================================================

@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V41.3
+Version: V42.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -45,7 +45,7 @@ class DepartmentSOP:
         "MARKET_JOURNEY": ("upside_remaining_points", "downside_remaining_points", "primary_direction", "reversal_risk", "barrier_adjustment_points", "barrier_statistics", "tracked_barriers"),
         "HEAVYWEIGHT_INTELLIGENCE": ("investigation_state", "alignment_state", "coverage_count", "weighted_pressure", "estimated_nifty_points", "dominant_driver", "sector_map"),
         "NEWS_INTELLIGENCE": ("impact_level", "impact_score", "risk_state", "event_window", "market_confirmation", "source_mode", "uncertainty_score"),
-        "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth"),
+        "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth", "institutional_state", "market_mood", "cash_flow_state", "futures_positioning", "institutional_pressure_score", "market_alignment"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
         "CANDIDATE": (),
@@ -179,7 +179,7 @@ class DepartmentAcademy:
         "MARKET_JOURNEY": "DSP Move & Barrier Intelligence",
         "HEAVYWEIGHT_INTELLIGENCE": "DSP Heavyweight Intelligence",
         "NEWS_INTELLIGENCE": "DSP News Intelligence",
-        "SMART_MONEY": "DSP Smart Money",
+        "SMART_MONEY": "DSP Smart Money / Institutional Behaviour",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
         "CANDIDATE": "DSP Candidate",
@@ -293,4 +293,6 @@ class DepartmentAcademy:
             lessons.append("Driver alignment and contribution concentration recorded; next-snapshot persistence is required.")
         if branch == "NEWS_INTELLIGENCE" and "impact_level" in facts:
             lessons.append("Impact-only news evidence recorded; causal attribution requires source and market-reaction confirmation.")
+        if branch == "SMART_MONEY" and "institutional_state" in facts:
+            lessons.append("Cash, futures and DII-absorption evidence recorded; conflict states require next-session confirmation.")
         return lessons or ["Observation recorded for future validation."]

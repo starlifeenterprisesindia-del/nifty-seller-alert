@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V41.3
+Version: V42.3
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -391,7 +391,7 @@ class CommandingOfficer:
             ("STRATEGY", "RISK", "Does the risk branch permit the proposed strategy?"),
             ("STRATEGY", "CANDIDATE", "Is a valid candidate available for the proposed strategy?"),
             ("CO", "DATA", "Is the snapshot quality sufficient for judgement?"),
-            ("SMART_MONEY", "PRICE_ACTION", "Do heavyweights and price action point in the same direction?"),
+            ("SMART_MONEY", "PRICE_ACTION", "Do institutional cash/futures and price action point in the same direction?"),
         ]
         output: List[CrossExaminationItem] = []
         for source, target, question in questions:
@@ -490,7 +490,7 @@ class AIOrganizationController:
         "MARKET_JOURNEY": BranchBoss("MARKET_JOURNEY", "DSP Move & Barrier Intelligence", 0),
         "HEAVYWEIGHT_INTELLIGENCE": BranchBoss("HEAVYWEIGHT_INTELLIGENCE", "DSP Heavyweight Intelligence", 0),
         "NEWS_INTELLIGENCE": BranchBoss("NEWS_INTELLIGENCE", "DSP News Intelligence", 0),
-        "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money", 0),
+        "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money / Institutional Behaviour", 0),
         "RISK": BranchBoss("RISK", "DSP Risk", 0),
         "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),
         "STRATEGY": BranchBoss("STRATEGY", "DSP Strategy", 0),
