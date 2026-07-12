@@ -106,6 +106,7 @@ try:
     from market_journey import MarketJourneyEngine
     from market_psychology import MarketPsychologyDirector
     from time_intelligence import TimeIntelligenceDirector
+    from heavyweight_intelligence import HeavyweightIntelligenceDirector
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -199,7 +200,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "SMART_MONEY",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "SMART_MONEY",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -223,7 +224,7 @@ def _render_v27_command_hierarchy(case_data):
             "Recommendation": str(branch.get("recommendation", "INFORMATION_ONLY")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
-    _render_safe_table(rows, max_rows=12)
+    _render_safe_table(rows, max_rows=13)
 
     if court_brief:
         st.info("AI Court Brief: " + court_brief)
@@ -400,6 +401,58 @@ def _render_v27_command_hierarchy(case_data):
                 "Ye direct BUY/SELL nahi bolti; report CO ke through AI_MASTER tak jaati hai."
             )
 
+    heavyweight_intelligence = case_data.get("heavyweight_intelligence", {}) if isinstance(case_data, dict) else {}
+    if isinstance(heavyweight_intelligence, dict) and heavyweight_intelligence:
+        with st.expander("🏋️ V40.3 Heavyweight Intelligence — NIFTY Driver Investigation", expanded=True):
+            st.markdown(
+                f"**Case State:** `{heavyweight_intelligence.get('investigation_state','COLLECTING')}` &nbsp; | &nbsp; "
+                f"**Alignment:** `{heavyweight_intelligence.get('alignment_state','MIXED_OR_BALANCED')}` &nbsp; | &nbsp; "
+                f"**Coverage:** `{int(heavyweight_intelligence.get('coverage_count',0) or 0)}/{int(heavyweight_intelligence.get('expected_count',8) or 8)}`"
+            )
+            _heavy_rows = [{
+                "Pressure": f"{float(heavyweight_intelligence.get('weighted_pressure',0) or 0):+.0f}/100",
+                "Estimated NIFTY Points": f"{float(heavyweight_intelligence.get('estimated_nifty_points',0) or 0):+.1f}",
+                "Tracked Weight": f"{float(heavyweight_intelligence.get('tracked_weight_pct',0) or 0):.2f}%",
+                "Participation": f"{float(heavyweight_intelligence.get('participation_pct',0) or 0):.0f}%",
+                "Advance / Decline": f"{int(heavyweight_intelligence.get('advancing_count',0) or 0)} / {int(heavyweight_intelligence.get('declining_count',0) or 0)}",
+                "Dominant Driver": heavyweight_intelligence.get('dominant_driver','-'),
+                "Driver Contribution": f"{float(heavyweight_intelligence.get('dominant_driver_points',0) or 0):+.1f} pts",
+                "Dominant Sector": heavyweight_intelligence.get('dominant_sector','-'),
+                "Concentration": heavyweight_intelligence.get('concentration_risk','-'),
+                "Leadership": heavyweight_intelligence.get('leadership_rotation','COLLECTING'),
+                "Shocks": int(heavyweight_intelligence.get('shock_count',0) or 0),
+                "Confidence": f"{float(heavyweight_intelligence.get('confidence',0) or 0):.0f}%",
+            }]
+            _render_safe_table(_heavy_rows, max_rows=1)
+
+            _sector_map = heavyweight_intelligence.get("sector_map", {}) if isinstance(heavyweight_intelligence.get("sector_map", {}), dict) else {}
+            _sector_rows = []
+            for _sector, _data in _sector_map.items():
+                if not isinstance(_data, dict):
+                    continue
+                _sector_rows.append({
+                    "Sector": _sector,
+                    "Members": ", ".join(_data.get("members", []) or []),
+                    "Weight %": f"{float(_data.get('weight_pct',0) or 0):.2f}",
+                    "Est. NIFTY Points": f"{float(_data.get('estimated_nifty_points',0) or 0):+.1f}",
+                    "Direction": _data.get("direction", "FLAT"),
+                    "Advance / Decline": f"{int(_data.get('advancing',0) or 0)} / {int(_data.get('declining',0) or 0)}",
+                })
+            if _sector_rows:
+                st.markdown("**Sector Contribution Map**")
+                _render_safe_table(_sector_rows, max_rows=6)
+
+            for _item in list(heavyweight_intelligence.get("evidence", []) or [])[:4]:
+                st.caption("• " + str(_item))
+            for _warning in list(heavyweight_intelligence.get("warnings", []) or [])[:3]:
+                st.warning(str(_warning))
+            for _check in list(heavyweight_intelligence.get("next_confirmation_required", []) or [])[:3]:
+                st.caption("Next confirmation: " + str(_check))
+            st.info(
+                "Heavyweight Intelligence existing Dhan/Yahoo quote layer ko investigate karti hai; koi extra API call nahi. "
+                "Ye direct BUY/SELL nahi bolti aur report CO ke through AI_MASTER tak jaati hai."
+            )
+
     journey = case_data.get("market_journey", {}) if isinstance(case_data, dict) else {}
     if isinstance(journey, dict) and journey:
         with st.expander("🧱 V39.3 Time-Conditioned Barrier & Move Remaining", expanded=True):
@@ -552,11 +605,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier + Heavyweight Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V39.3 - TIME INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V40.3 - HEAVYWEIGHT INTELLIGENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -568,16 +621,21 @@ DEFAULT_NIFTY_SEGMENT = "IDX_I"
 
 # Official Nifty 50 factsheet dated 30-Jun-2026.
 # Keep editable in the sidebar because weights change over time.
-TOP5_DEFAULT = {
+HEAVYWEIGHT_DEFAULT = {
     "HDFCBANK": {"name": "HDFC Bank", "weight": 11.18, "yahoo": "HDFCBANK.NS"},
     "ICICIBANK": {"name": "ICICI Bank", "weight": 9.01, "yahoo": "ICICIBANK.NS"},
     "RELIANCE": {"name": "Reliance", "weight": 8.00, "yahoo": "RELIANCE.NS"},
     "BHARTIARTL": {"name": "Bharti Airtel", "weight": 5.15, "yahoo": "BHARTIARTL.NS"},
     "LT": {"name": "Larsen & Toubro", "weight": 4.44, "yahoo": "LT.NS"},
+    "AXISBANK": {"name": "Axis Bank", "weight": 3.54, "yahoo": "AXISBANK.NS"},
+    "INFY": {"name": "Infosys", "weight": 3.21, "yahoo": "INFY.NS"},
+    # TCS is retained as a roadmap driver. Its default remains sidebar-editable
+    # because the official monthly top-10 factsheet may not list it every month.
+    "TCS": {"name": "TCS", "weight": 2.35, "yahoo": "TCS.NS"},
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V39.3 Time Intelligence",
+    page_title="Nifty Seller AI V40.3 Heavyweight Intelligence",
     page_icon="🧠",
     layout="wide",
 )
@@ -848,7 +906,7 @@ def get_dhan_instrument_master():
         return {"success": False, "df": pd.DataFrame(), "message": f"Instrument master error: {exc}"}
 
 
-def resolve_top5_security_ids(master_df):
+def resolve_heavyweight_security_ids(master_df):
     """Resolve NSE equity security IDs from Dhan instrument master."""
     if master_df is None or master_df.empty:
         return {}
@@ -869,7 +927,7 @@ def resolve_top5_security_ids(master_df):
 
     eq = work[(work[required["exchange"]] == "NSE") & (work[required["segment"]] == "E")]
     result = {}
-    for symbol in TOP5_DEFAULT:
+    for symbol in HEAVYWEIGHT_DEFAULT:
         rows = eq[eq[required["symbol"]] == symbol]
         if not rows.empty:
             try:
@@ -880,14 +938,14 @@ def resolve_top5_security_ids(master_df):
 
 
 @st.cache_data(ttl=4, show_spinner=False)
-def get_dhan_market_bundle(client_id, access_token, top5_ids, nifty_security_id=DEFAULT_NIFTY_SECURITY_ID):
-    """One Dhan Market Quote request for Nifty + top-5 equities."""
+def get_dhan_market_bundle(client_id, access_token, heavyweight_ids, nifty_security_id=DEFAULT_NIFTY_SECURITY_ID):
+    """One Dhan Market Quote request for Nifty + eight tracked heavyweight equities."""
     if not client_id or not access_token:
         return {"success": False, "message": "Dhan credentials missing."}
     try:
         body = {"IDX_I": [int(nifty_security_id)]}
-        if top5_ids:
-            body["NSE_EQ"] = [int(v) for v in top5_ids.values()]
+        if heavyweight_ids:
+            body["NSE_EQ"] = [int(v) for v in heavyweight_ids.values()]
 
         response = requests.post(
             f"{DHAN_BASE}/marketfeed/quote",
@@ -1169,9 +1227,9 @@ def get_yahoo_price_action():
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yahoo_heavyweights():
-    """Batch fallback for top-5 stock moves; 5-minute bars to keep it lighter."""
+    """Batch fallback for eight-stock heavyweight moves; 5-minute bars to keep it lighter."""
     try:
-        symbols = [cfg["yahoo"] for cfg in TOP5_DEFAULT.values()]
+        symbols = [cfg["yahoo"] for cfg in HEAVYWEIGHT_DEFAULT.values()]
         intraday = yf.download(
             tickers=symbols,
             period="2d",
@@ -1191,7 +1249,7 @@ def get_yahoo_heavyweights():
             threads=True,
         )
         rows = []
-        for symbol, cfg in TOP5_DEFAULT.items():
+        for symbol, cfg in HEAVYWEIGHT_DEFAULT.items():
             ysym = cfg["yahoo"]
             try:
                 if isinstance(intraday.columns, pd.MultiIndex):
@@ -1481,17 +1539,17 @@ def analyze_option_chain(option_chain):
 # =========================================================
 # HEAVYWEIGHT DRIVER ENGINE
 # =========================================================
-def parse_dhan_heavyweights(bundle, top5_ids, weights):
-    if not bundle.get("success") or not top5_ids:
+def parse_dhan_heavyweights(bundle, heavyweight_ids, weights):
+    if not bundle.get("success") or not heavyweight_ids:
         return {"success": False, "rows": [], "message": bundle.get("message", "No Dhan bundle")}
     try:
         eq = (bundle.get("data", {}) or {}).get("NSE_EQ", {}) or {}
         rows = []
-        for symbol, sec_id in top5_ids.items():
+        for symbol, sec_id in heavyweight_ids.items():
             item = eq.get(str(sec_id), {}) or eq.get(int(sec_id), {}) or {}
             if not item:
                 continue
-            cfg = TOP5_DEFAULT[symbol]
+            cfg = HEAVYWEIGHT_DEFAULT[symbol]
             ltp = float(item.get("last_price", 0) or 0)
             ohlc = item.get("ohlc", {}) or {}
             prev = float(ohlc.get("close", 0) or 0)
@@ -2839,7 +2897,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V39.3 AI COMMAND")
+st.sidebar.title("🏛️ V40.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -3122,10 +3180,10 @@ with st.sidebar.expander("6️⃣ News Risk", expanded=True):
     use_auto_news = st.checkbox("Use automatic news APIs when keys exist", value=True)
     st.caption("Optional secrets: TRADING_ECONOMICS_API_KEY, ALPHAVANTAGE_API_KEY")
 
-with st.sidebar.expander("7️⃣ Top-5 Weights", expanded=False):
-    st.caption("Defaults: official Nifty 50 factsheet, 30-Jun-2026")
+with st.sidebar.expander("7️⃣ V40 Tracked Heavyweight Weights", expanded=False):
+    st.caption("HDFC, ICICI, Reliance, Bharti, L&T, Axis and Infosys defaults: Nifty 50 factsheet 30-Jun-2026. TCS default is editable.")
     weights = {}
-    for symbol, cfg in TOP5_DEFAULT.items():
+    for symbol, cfg in HEAVYWEIGHT_DEFAULT.items():
         weights[symbol] = st.number_input(f"{cfg['name']} weight %", value=float(cfg["weight"]), step=0.01)
 
 with st.sidebar.expander("8️⃣ Risk / Position", expanded=True):
@@ -3165,8 +3223,8 @@ with st.sidebar.expander("9️⃣ V16 Active Trade / Discipline", expanded=True)
 # FETCH LIVE SOURCES
 # =========================================================
 master_result = get_dhan_instrument_master() if (prefer_dhan and dhan_ready) else {"success": False, "df": pd.DataFrame()}
-top5_ids = resolve_top5_security_ids(master_result.get("df", pd.DataFrame())) if master_result.get("success") else {}
-dhan_bundle = get_dhan_market_bundle(client_id, access_token, top5_ids, nifty_security_id) if (prefer_dhan and dhan_ready) else {"success": False, "message": "Dhan disabled."}
+heavyweight_ids = resolve_heavyweight_security_ids(master_result.get("df", pd.DataFrame())) if master_result.get("success") else {}
+dhan_bundle = get_dhan_market_bundle(client_id, access_token, heavyweight_ids, nifty_security_id) if (prefer_dhan and dhan_ready) else {"success": False, "message": "Dhan disabled."}
 
 # Nifty
 nifty_source = "Manual"
@@ -3226,8 +3284,8 @@ else:
     price_action_source = "Manual fallback"
 
 # Heavyweights
-if dhan_bundle.get("success") and top5_ids:
-    heavy_raw = parse_dhan_heavyweights(dhan_bundle, top5_ids, weights)
+if dhan_bundle.get("success") and heavyweight_ids:
+    heavy_raw = parse_dhan_heavyweights(dhan_bundle, heavyweight_ids, weights)
     # V9 accuracy improvement: if Dhan quote gives symbols but no usable daily move, fallback to Yahoo for movement.
     if heavy_raw.get("success") and heavy_raw.get("rows") and all(abs(float(r.get("change_pct", 0) or 0)) < 0.001 for r in heavy_raw["rows"]):
         yahoo_hw = get_yahoo_heavyweights()
@@ -5973,6 +6031,22 @@ try:
             float(fii_today), float(dii_today), _adv_hw_v24, _dec_hw_v24, _adv_hw_v24, _dec_hw_v24
         )
 
+        # V40.1-V40.3 Heavyweight Intelligence upgrades the existing quote/driver
+        # layer into one evidence-only DSP report. It performs no data fetch and
+        # cannot issue or modify a trade instruction.
+        _heavyweight_v40 = HeavyweightIntelligenceDirector().evaluate(
+            state=st.session_state,
+            rows=_hw_rows_v24,
+            nifty_level=float(price),
+            nifty_change_pct=float(nifty_change_pct),
+            expected_symbols=list(HEAVYWEIGHT_DEFAULT.keys()),
+            source=str(heavy_analysis.get("source", "Unknown")) if isinstance(heavy_analysis, dict) else "Unknown",
+            existing_analysis=heavy_analysis if isinstance(heavy_analysis, dict) else {},
+            observed_at=(str(heavy_raw.get("fetched_at", "")) if isinstance(heavy_raw, dict) and heavy_raw.get("fetched_at") else datetime.now(IST).isoformat(timespec="seconds")),
+        )
+        _heavyweight_trace_v40 = _heavyweight_v40.to_compact_dict()
+        _heavyweight_department_v40 = _heavyweight_v40.to_department_report()
+
         # V39.1-V39.3 Time Intelligence: one clock profile, bounded phase evidence,
         # and a time-conditioned reliability report. It is observation-only and
         # cannot issue or modify a trade instruction.
@@ -6062,6 +6136,8 @@ try:
                 "heavyweight_count": len(_hw_rows_v24),
                 "advancing_heavyweights": _adv_hw_v24,
                 "declining_heavyweights": _dec_hw_v24,
+                "heavyweight_investigation_state": _heavyweight_trace_v40.get("investigation_state", "COLLECTING"),
+                "heavyweight_alignment": _heavyweight_trace_v40.get("alignment_state", "MIXED_OR_BALANCED"),
             },
             "risk": {
                 "news_score": news.get("score", 0) if isinstance(news, dict) else 0,
@@ -6093,6 +6169,7 @@ try:
             "MARKET_PSYCHOLOGY": _v36_psychology_report,
             "TIME_INTELLIGENCE": _time_intelligence_department_v39,
             "MARKET_JOURNEY": _market_journey_department_v37,
+            "HEAVYWEIGHT_INTELLIGENCE": _heavyweight_department_v40,
             "SMART_MONEY": _v24_money_report,
             "RISK": _v24_risk_report,
             "CANDIDATE": _v24_candidate_report,
@@ -6244,6 +6321,7 @@ try:
                 "market_psychology": {"summary": _v36_psychology_report.summary, "confidence": _v36_psychology_report.confidence},
                 "time_intelligence": {"summary": _time_intelligence_department_v39["summary"], "confidence": _time_intelligence_department_v39["confidence"]},
                 "market_journey": {"summary": _market_journey_department_v37["summary"], "confidence": _market_journey_department_v37["confidence"]},
+                "heavyweight_intelligence": {"summary": _heavyweight_department_v40["summary"], "confidence": _heavyweight_department_v40["confidence"]},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
@@ -6251,7 +6329,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V39_3_TIME_INTELLIGENCE_BUNDLE",
+                "version": "V40_3_HEAVYWEIGHT_INTELLIGENCE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6262,6 +6340,7 @@ try:
                 "pattern_probability": _pattern_probability_trace_v34,
                 "time_intelligence": _time_intelligence_trace_v39,
                 "market_journey": _market_journey_trace_v37,
+                "heavyweight_intelligence": _heavyweight_trace_v40,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -6604,7 +6683,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V39.3 Time Intelligence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V40.3 Heavyweight Intelligence</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -7082,11 +7161,11 @@ with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded
             st.error(option_chain.get("message", "Dhan option chain unavailable."))
 
 
-with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False):
+with st.expander("🏋️ V40 Heavyweight Intelligence — 8 Major NIFTY Drivers", expanded=False):
     if heavy_analysis.get("success"):
         h1, h2, h3, h4 = st.columns(4)
         h1.metric("Weighted Pressure", f"{heavy_bias:+.0f}/100", bias_label(heavy_bias))
-        h2.metric("Estimated Top-5 Points", f"{heavy_analysis['estimated_points']:+.1f}")
+        h2.metric("Estimated Driver Points", f"{heavy_analysis['estimated_points']:+.1f}")
         h3.metric("HDFC + ICICI", heavy_analysis["banking_pair"])
         h4.metric("Divergence", heavy_analysis["divergence"])
 
@@ -7113,9 +7192,9 @@ with st.expander("🏋️ Nifty Top-5 Heavyweight Driver Engine", expanded=False
         st.caption(f"Heavyweight table last updated: {fmt_time()} | Green/Red trend compares current value with previous app refresh.")
 
         if final_trade == "SELL CE" and heavy_bias > 35:
-            st.warning("CE SELL WARNING: top-5 drivers bullish hain — short-covering/upside risk.")
+            st.warning("CE SELL WARNING: tracked drivers bullish hain — short-covering/upside risk.")
         if final_trade == "SELL PE" and heavy_bias < -35:
-            st.warning("PE SELL WARNING: top-5 drivers bearish hain — support-break risk.")
+            st.warning("PE SELL WARNING: tracked drivers bearish hain — support-break risk.")
         if heavy_analysis.get("shock_rows"):
             st.error("🚨 Heavyweight Shock: " + ", ".join(f"{r['name']} {r['shock_delta_pct']:+.2f}%pt" for r in heavy_analysis["shock_rows"]))
         st.caption("Estimated points are an approximation using constituent weights and stock returns; exact index attribution can differ.")
@@ -7190,7 +7269,7 @@ with st.expander("🧪 Live Dhan API Diagnostics", expanded=False):
     d3.metric("Expiry List", "OK" if expiry_result.get("success") else "Not OK")
     d4.metric("Option Chain", "OK" if option_chain.get("success") else "Not OK")
     if dhan_bundle.get("success"):
-        st.success("Dhan market quote is responding. Nifty/top-5 quote layer is ready.")
+        st.success("Dhan market quote is responding. Nifty/eight-driver quote layer is ready.")
     else:
         st.warning("Dhan market quote not active. Current message: " + str(dhan_bundle.get("message", "No response")))
     if not expiry_result.get("success"):
@@ -7204,7 +7283,7 @@ with st.expander("🧪 Live Dhan API Diagnostics", expanded=False):
 with st.expander("🔐 DhanHQ Setup Status", expanded=False):
     if dhan_ready:
         st.success("DHAN_CLIENT_ID and DHAN_ACCESS_TOKEN are detected from Streamlit secrets/environment.")
-        st.write(f"Top-5 Security IDs resolved: **{len(top5_ids)}/5**")
+        st.write(f"Heavyweight Security IDs resolved: **{len(heavyweight_ids)}/8**")
         if master_result.get("success") is False:
             st.warning(master_result.get("message", "Instrument master unavailable."))
         st.caption("Dhan access token can expire; keep credentials only in Streamlit Secrets, never in app.py or GitHub.")

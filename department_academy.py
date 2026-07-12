@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V39.3
+Version: V40.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -43,6 +43,7 @@ class DepartmentSOP:
         "MARKET_PSYCHOLOGY": ("psychology_state", "retail_fear", "retail_greed", "data_coverage", "psychology_case_report"),
         "TIME_INTELLIGENCE": ("phase_code", "phase_label", "observed_behaviour", "continuation_factor", "reversal_adjustment", "confidence_cap"),
         "MARKET_JOURNEY": ("upside_remaining_points", "downside_remaining_points", "primary_direction", "reversal_risk", "barrier_adjustment_points", "barrier_statistics", "tracked_barriers"),
+        "HEAVYWEIGHT_INTELLIGENCE": ("investigation_state", "alignment_state", "coverage_count", "weighted_pressure", "estimated_nifty_points", "dominant_driver", "sector_map"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
@@ -175,6 +176,7 @@ class DepartmentAcademy:
         "MARKET_PSYCHOLOGY": "DSP Market Psychology",
         "TIME_INTELLIGENCE": "DSP Time Intelligence",
         "MARKET_JOURNEY": "DSP Move & Barrier Intelligence",
+        "HEAVYWEIGHT_INTELLIGENCE": "DSP Heavyweight Intelligence",
         "SMART_MONEY": "DSP Smart Money",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
@@ -285,4 +287,6 @@ class DepartmentAcademy:
             lessons.append("Time-phase behaviour recorded; use only as bounded context until live validation.")
         if branch == "MARKET_JOURNEY" and "barrier_statistics" in facts:
             lessons.append("Barrier touch/bounce/break samples recorded; probability remains sample-size dependent.")
+        if branch == "HEAVYWEIGHT_INTELLIGENCE" and "alignment_state" in facts:
+            lessons.append("Driver alignment and contribution concentration recorded; next-snapshot persistence is required.")
         return lessons or ["Observation recorded for future validation."]
