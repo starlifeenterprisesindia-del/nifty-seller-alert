@@ -163,6 +163,70 @@ def _render_safe_table(data, *, max_rows=250):
         st.markdown(full_html, unsafe_allow_html=True)
 
 
+def _render_v47_reasoning_certificate(report):
+    """Render AI_MASTER's post-judgement explanation without creating advice."""
+    if not isinstance(report, dict) or not report:
+        st.info("V47 reasoning certificate abhi available nahi hai.")
+        return
+
+    decision = str(report.get("decision", "WAIT"))
+    status = str(report.get("decision_status", "WAIT_OR_BLOCKED"))
+    fingerprint = str(report.get("decision_fingerprint", "NA"))
+    balance = report.get("evidence_balance", {}) or {}
+    if not isinstance(balance, dict):
+        balance = {}
+
+    st.markdown(
+        f"**AI_MASTER Judgement:** `{decision}` &nbsp; | &nbsp; "
+        f"**Status:** `{status}` &nbsp; | &nbsp; **Certificate:** `{fingerprint}`"
+    )
+    st.info(str(report.get("primary_reason", "Reason unavailable.")))
+    st.caption(str(report.get("confidence_explanation", "")))
+    st.markdown(
+        f"**Evidence Balance:** Support {int(balance.get('supporting_count', 0) or 0)} | "
+        f"Oppose {int(balance.get('opposing_count', 0) or 0)} | "
+        f"Uncertain {int(balance.get('uncertainty_count', 0) or 0)} | "
+        f"CO Strength {float(balance.get('co_case_strength', 0) or 0):.0f}% | "
+        f"Score Gap {float(balance.get('strategy_score_gap', 0) or 0):.1f}"
+    )
+
+    support = list(report.get("supporting_evidence", []) or [])
+    oppose = list(report.get("opposing_evidence", []) or [])
+    uncertain = list(report.get("uncertainty", []) or [])
+    if support:
+        st.markdown("**Why this judgement is supported**")
+        for item in support[:6]:
+            st.write("✅ " + str(item))
+    if oppose:
+        with st.expander("Evidence against / conflicting evidence", expanded=False):
+            for item in oppose[:6]:
+                st.write("↔️ " + str(item))
+    if uncertain:
+        with st.expander("Uncertainty and missing confirmation", expanded=False):
+            for item in uncertain[:6]:
+                st.write("⚠️ " + str(item))
+
+    rejected = report.get("rejected_alternatives", {}) or {}
+    if isinstance(rejected, dict) and rejected:
+        with st.expander("Why other strategies were rejected", expanded=False):
+            rows = [
+                {"Alternative": name, "Reason rejected": reason}
+                for name, reason in rejected.items()
+            ]
+            _render_safe_table(rows, max_rows=4)
+
+    confirmations = list(report.get("next_confirmation", []) or [])
+    if confirmations:
+        st.markdown("**Next confirmation required**")
+        for item in confirmations[:5]:
+            st.write("🔎 " + str(item))
+
+    st.caption(
+        "Authority flow: " + " → ".join(str(x) for x in list(report.get("authority_trace", []) or []))
+        + " | Explanation-only: no action, confidence, rule, threshold or weight change."
+    )
+
+
 def _render_v27_command_hierarchy(case_data):
     """Compact visual organization: branches -> CO -> AI_MASTER."""
     if not isinstance(case_data, dict):
@@ -204,7 +268,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE", "SELF_REVIEW", "PROMOTION_BOARD",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE", "SELF_REVIEW", "PROMOTION_BOARD", "LEARNING",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -6805,14 +6869,18 @@ try:
             return _rows
 
         AI_MASTER.update({
-            "version": "V24.1_STABILITY_AI_MASTER",
+            "version": "V47.3_REASONING_AI_MASTER",
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
             "strategy": {"type": _v24_decision.action, "plan_source": "V24_DEPARTMENT_PIPELINE"},
-            "reasons": [_v24_decision.reason] + list(_v24_decision.evidence[:3]),
+            "reasons": [
+                str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
+                *list((_v24_decision.reasoning_report or {}).get("supporting_evidence", []) or [])[:3],
+            ],
             "warnings": list(_v24_decision.warnings),
-            "advice": _v24_decision.reason,
+            "advice": str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
+            "reasoning_report": dict(_v24_decision.reasoning_report or {}),
             "source_of_truth": "ONE_SNAPSHOT_DEPARTMENTS_THEN_AI_MASTER",
             "data_flow_status": "FRESH" if _data_quality_ok_v24 else "CAUTION",
             "ce_plan": _ce_plan_v24,
@@ -6845,7 +6913,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V46_3_TRUE_LEARNING_BUNDLE",
+                "version": "V47_3_REASONING_ENGINE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6863,6 +6931,7 @@ try:
                 "self_review": _self_review_trace_v44,
                 "promotion_board": _promotion_board_trace_v45,
                 "true_learning": _true_learning_trace_v46,
+                "reasoning_certificate": dict(_v24_decision.reasoning_report or {}),
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -7383,6 +7452,13 @@ try:
     _render_v27_command_hierarchy(_co_ui_v27)
 except Exception as _co_ui_err_v27:
     st.caption("CO command case file unavailable: " + str(_co_ui_err_v27))
+
+st.markdown("### 🧾 V47 AI_MASTER Reasoning Certificate — WHY This Decision")
+try:
+    _reasoning_ui_v47 = AI_MASTER.get("reasoning_report", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v47_reasoning_certificate(_reasoning_ui_v47)
+except Exception as _reasoning_ui_err_v47:
+    st.caption("Reasoning certificate unavailable: " + str(_reasoning_ui_err_v47))
 
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 📶 Signal Reliability Table")

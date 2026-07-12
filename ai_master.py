@@ -1,6 +1,6 @@
 """
 ai_master.py
-Version : V24.0
+Version : V47.3
 Role    : Final AI Authority
 Status  : Mega Sprint - Phase 1
 
@@ -16,6 +16,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Mapping, Optional
+
+from reasoning_engine import ReasoningEngine
 
 
 ALLOWED_ACTIONS = {"WAIT", "SELL CE", "SELL PE", "IRON CONDOR"}
@@ -36,6 +38,7 @@ class AIMasterDecision:
     approved_candidate: Optional[Dict[str, Any]] = None
     watchlist: Dict[str, Optional[Dict[str, Any]]] = field(default_factory=dict)
     trace: Dict[str, Any] = field(default_factory=dict)
+    reasoning_report: Dict[str, Any] = field(default_factory=dict)
 
 
 def _details(report: Any) -> Dict[str, Any]:
@@ -91,7 +94,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V30.0_AI_COURT_AUTHORITY"
+    VERSION = "V47.3_REASONING_AI_COURT_AUTHORITY"
 
     def decide(
         self,
@@ -198,6 +201,27 @@ class AIMaster:
             warnings=warnings,
         )
 
+        # V47 explanation is generated only after the final judgement exists.
+        # It is a read-only certificate and has no feedback path into action,
+        # confidence, candidates, rules, thresholds, or execution permission.
+        reasoning_report = ReasoningEngine().explain(
+            snapshot_id=snapshot_id or "UNKNOWN",
+            action=action,
+            confidence=confidence,
+            trade_allowed=trade_allowed,
+            market_bias=market_bias,
+            strategy_scores=strategy_scores,
+            evidence=evidence,
+            warnings=warnings,
+            data_quality_ok=data_quality_ok,
+            risk_block=risk_block,
+            score_gap=score_gap,
+            top_score=top_score,
+            approved_candidate=approved_candidate,
+            co_case_file=co_case_file,
+        ).to_compact_dict()
+        reason = str(reasoning_report.get("primary_reason", reason))
+
         return AIMasterDecision(
             snapshot_id=snapshot_id or "UNKNOWN",
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -220,7 +244,10 @@ class AIMaster:
                 "co_case_id": co_case_id,
                 "co_case_strength": co_case_strength,
                 "co_accepted": co_accepted,
+                "reasoning_version": reasoning_report.get("version", ""),
+                "reasoning_explanation_only": True,
             },
+            reasoning_report=reasoning_report,
         )
 
     def _strategy_view(self, report: Any) -> tuple[Dict[str, float], str]:
