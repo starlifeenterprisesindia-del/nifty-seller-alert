@@ -8013,35 +8013,8 @@ try:
 except Exception:
     pass
 
-st.markdown("### 🏛️ V50 Final AI Headquarters — One Brain Certificate")
-try:
-    _headquarters_ui_v50 = AI_MASTER.get("final_headquarters", {}) if isinstance(AI_MASTER, dict) else {}
-    _render_v50_final_headquarters(_headquarters_ui_v50)
-except Exception as _headquarters_ui_err_v50:
-    st.caption("Final AI Headquarters certificate unavailable: " + str(_headquarters_ui_err_v50))
-
-# V27: Visible command hierarchy and CO consolidated case file.
-st.markdown("### 🏛️ AI Organization — CO Command Case File")
-try:
-    _co_ui_v27 = AI_MASTER.get("command_hierarchy", {}) if isinstance(AI_MASTER, dict) else {}
-    _render_v27_command_hierarchy(_co_ui_v27)
-except Exception as _co_ui_err_v27:
-    st.caption("CO command case file unavailable: " + str(_co_ui_err_v27))
-
-st.markdown("### 🧠 V49 AI_MASTER Master Intelligence Dossier")
-try:
-    _master_ui_v49 = AI_MASTER.get("master_intelligence", {}) if isinstance(AI_MASTER, dict) else {}
-    _render_v49_master_intelligence(_master_ui_v49)
-except Exception as _master_ui_err_v49:
-    st.caption("Master Intelligence dossier unavailable: " + str(_master_ui_err_v49))
-
-st.markdown("### 🧾 V47 AI_MASTER Reasoning Certificate — WHY This Decision")
-try:
-    _reasoning_ui_v47 = AI_MASTER.get("reasoning_report", {}) if isinstance(AI_MASTER, dict) else {}
-    _render_v47_reasoning_certificate(_reasoning_ui_v47)
-except Exception as _reasoning_ui_err_v47:
-    st.caption("Reasoning certificate unavailable: " + str(_reasoning_ui_err_v47))
-
+# V50.4.1 UI PRIORITY: keep the three execution-facing tables directly
+# below AI FINAL AUTHORITY. Display order only; no engine/decision logic changed.
 # V17: Important Strategy Matrix - exact strikes for SELL/BUY/IRON CONDOR.
 st.markdown("### 📶 Signal Reliability Table")
 try:
@@ -8074,6 +8047,53 @@ try:
         st.info("AI_MASTER strategy rows unavailable.")
 except Exception as _v221_strategy_ui_error:
     st.caption("AI_MASTER strategy matrix unavailable: " + str(_v221_strategy_ui_error))
+
+# V13: put the most actionable parts near the top for mobile trading.
+# V16.3: Strategy setup moved near top as Smart Strategy Matrix.
+
+st.markdown("### 📋 AI Candidate Matrix")
+try:
+    _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
+    if _cand_rows_v221:
+        _render_safe_table(_cand_rows_v221)
+        st.caption(
+            f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
+            f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
+            "Candidate Matrix fresh CE/PE rows dikhati hai; advice/ranking sirf AI_MASTER se aati hai."
+        )
+    else:
+        st.info("AI Candidate Matrix ke liye live option-chain active hona zaroori hai.")
+except Exception as _cand_err_v221:
+    st.caption("AI Candidate Matrix unavailable: " + str(_cand_err_v221))
+
+st.markdown("### 🏛️ V50 Final AI Headquarters — One Brain Certificate")
+try:
+    _headquarters_ui_v50 = AI_MASTER.get("final_headquarters", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v50_final_headquarters(_headquarters_ui_v50)
+except Exception as _headquarters_ui_err_v50:
+    st.caption("Final AI Headquarters certificate unavailable: " + str(_headquarters_ui_err_v50))
+
+# V27: Visible command hierarchy and CO consolidated case file.
+st.markdown("### 🏛️ AI Organization — CO Command Case File")
+try:
+    _co_ui_v27 = AI_MASTER.get("command_hierarchy", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v27_command_hierarchy(_co_ui_v27)
+except Exception as _co_ui_err_v27:
+    st.caption("CO command case file unavailable: " + str(_co_ui_err_v27))
+
+st.markdown("### 🧠 V49 AI_MASTER Master Intelligence Dossier")
+try:
+    _master_ui_v49 = AI_MASTER.get("master_intelligence", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v49_master_intelligence(_master_ui_v49)
+except Exception as _master_ui_err_v49:
+    st.caption("Master Intelligence dossier unavailable: " + str(_master_ui_err_v49))
+
+st.markdown("### 🧾 V47 AI_MASTER Reasoning Certificate — WHY This Decision")
+try:
+    _reasoning_ui_v47 = AI_MASTER.get("reasoning_report", {}) if isinstance(AI_MASTER, dict) else {}
+    _render_v47_reasoning_certificate(_reasoning_ui_v47)
+except Exception as _reasoning_ui_err_v47:
+    st.caption("Reasoning certificate unavailable: " + str(_reasoning_ui_err_v47))
 
 # V20: AI Brain + Decision Authority duplicate UI removed.
 
@@ -8114,23 +8134,6 @@ if developer_mode:
         st.write("CE Plan:", _m_dev.get("ce_plan", {}))
         st.write("PE Plan:", _m_dev.get("pe_plan", {}))
 
-# V13: put the most actionable parts near the top for mobile trading.
-# V16.3: Strategy setup moved near top as Smart Strategy Matrix.
-
-st.markdown("### 📋 AI Candidate Matrix")
-try:
-    _cand_rows_v221 = AI_MASTER.get("candidate_rows", []) if isinstance(AI_MASTER, dict) else []
-    if _cand_rows_v221:
-        _render_safe_table(_cand_rows_v221)
-        st.caption(
-            f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
-            f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
-            "Candidate Matrix fresh CE/PE rows dikhati hai; advice/ranking sirf AI_MASTER se aati hai."
-        )
-    else:
-        st.info("AI Candidate Matrix ke liye live option-chain active hona zaroori hai.")
-except Exception as _cand_err_v221:
-    st.caption("AI Candidate Matrix unavailable: " + str(_cand_err_v221))
 
 
 with st.expander("💼 Active Positions + Add Position", expanded=False):
