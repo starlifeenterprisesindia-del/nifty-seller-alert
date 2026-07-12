@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V42.3
+Version: V43.3
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 
-OBSERVATION_ONLY_BRANCHES = {"MARKET_PSYCHOLOGY", "MARKET_JOURNEY", "TIME_INTELLIGENCE", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE"}
+OBSERVATION_ONLY_BRANCHES = {"MARKET_PSYCHOLOGY", "MARKET_JOURNEY", "TIME_INTELLIGENCE", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "EXPERIENCE"}
 
 
 @dataclass(frozen=True)
@@ -240,7 +240,7 @@ class CommandingOfficer:
 
     REQUIRED_BRANCHES = (
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE",
         "RISK", "CANDIDATE", "STRATEGY",
     )
 
@@ -280,7 +280,7 @@ class CommandingOfficer:
         all_evidence = [evidence for branch in branch_map.values() for evidence in branch.evidence]
         accepted_evidence: List[str] = []
         rejected_evidence: List[str] = []
-        # V36 Psychology, V38 Move/Barrier, V39 Time, V40 Heavyweight, and V41 News Intelligence remain observation-only branches
+        # Psychology, Move/Barrier, Time, Heavyweight, News, and Experience remain observation-only branches
         # during live validation. Their evidence is visible in the CO file, but
         # cannot silently improve or weaken execution case-strength scores.
         scoring_evidence_count = sum(
@@ -304,7 +304,7 @@ class CommandingOfficer:
                 missing_evidence.append(f"{name}: no structured evidence")
 
         branch_votes = {name: branch.branch_vote for name, branch in branch_map.items()}
-        # Psychology, Time, Move Remaining, Heavyweight, and News Intelligence are evidence-only. CO records and
+        # Psychology, Time, Move Remaining, Heavyweight, News, and Experience are evidence-only. CO records and
         # displays them, but excludes them from directional consensus and
         # execution case-strength until post-V50 live validation.
         _consensus_votes = {
@@ -491,6 +491,7 @@ class AIOrganizationController:
         "HEAVYWEIGHT_INTELLIGENCE": BranchBoss("HEAVYWEIGHT_INTELLIGENCE", "DSP Heavyweight Intelligence", 0),
         "NEWS_INTELLIGENCE": BranchBoss("NEWS_INTELLIGENCE", "DSP News Intelligence", 0),
         "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money / Institutional Behaviour", 0),
+        "EXPERIENCE": BranchBoss("EXPERIENCE", "DSP Experience & Validation", 0),
         "RISK": BranchBoss("RISK", "DSP Risk", 0),
         "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),
         "STRATEGY": BranchBoss("STRATEGY", "DSP Strategy", 0),

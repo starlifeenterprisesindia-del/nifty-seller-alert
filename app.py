@@ -108,6 +108,7 @@ try:
     from time_intelligence import TimeIntelligenceDirector
     from heavyweight_intelligence import HeavyweightIntelligenceDirector
     from news_intelligence import NewsIntelligenceDirector
+    from experience_engine import ExperienceEngine
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -201,7 +202,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY", "EXPERIENCE",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -225,7 +226,7 @@ def _render_v27_command_hierarchy(case_data):
             "Recommendation": str(branch.get("recommendation", "INFORMATION_ONLY")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
-    _render_safe_table(rows, max_rows=13)
+    _render_safe_table(rows, max_rows=14)
 
     if court_brief:
         st.info("AI Court Brief: " + court_brief)
@@ -367,6 +368,78 @@ def _render_v27_command_hierarchy(case_data):
             _render_safe_table(_prob_rows, max_rows=1)
             for _warning in list(probability.get("warnings", []) or [])[:4]:
                 st.warning(str(_warning))
+
+    experience = case_data.get("experience_engine", {}) if isinstance(case_data, dict) else {}
+    if isinstance(experience, dict) and experience:
+        with st.expander("🧠 V43.3 Experience Engine — Prediction vs Reality", expanded=True):
+            _overall_acc = experience.get("overall_accuracy")
+            _similar_acc = experience.get("similar_accuracy")
+            st.markdown(
+                f"**State:** `{experience.get('experience_state','COLLECTING_COMPLETED_CASES')}` &nbsp; | &nbsp; "
+                f"**{experience.get('statement','I have seen 0 similar completed cases.')}` &nbsp; | &nbsp; "
+                f"**Best Similarity:** `{float(experience.get('best_similarity',0) or 0):.0f}%`"
+            )
+            _experience_rows = [{
+                "Stored": int(experience.get("stored_cases", 0) or 0),
+                "Pending": int(experience.get("pending_cases", 0) or 0),
+                "Completed": int(experience.get("completed_cases", 0) or 0),
+                "Correct / Wrong": f"{int(experience.get('correct_cases',0) or 0)} / {int(experience.get('wrong_cases',0) or 0)}",
+                "Overall Accuracy": f"{float(_overall_acc):.1f}%" if _overall_acc is not None else "Collecting",
+                "Similar Completed": int(experience.get("similar_completed_cases", 0) or 0),
+                "Similar Accuracy": f"{float(_similar_acc):.1f}%" if _similar_acc is not None else "Collecting",
+                "Evidence Confidence": f"{float(experience.get('confidence',0) or 0):.0f}%",
+                "Auto Rule Change": "DISABLED",
+                "Storage": "Current app session",
+            }]
+            _render_safe_table(_experience_rows, max_rows=1)
+
+            _match_rows = []
+            for _case in list(experience.get("matches", []) or [])[:8]:
+                if not isinstance(_case, dict):
+                    continue
+                _match_rows.append({
+                    "Case ID": _case.get("case_id", "-"),
+                    "Similarity": f"{float(_case.get('similarity',0) or 0):.0f}%",
+                    "AI Judgement": _case.get("action", "WAIT"),
+                    "Prediction": _case.get("prediction", "-"),
+                    "Reality": _case.get("reality", "-"),
+                    "Move": f"{float(_case.get('actual_move_points',0) or 0):+.1f} pts",
+                    "Outcome": _case.get("outcome", "OBSERVATION"),
+                    "Mistake": _case.get("mistake", "NONE_IDENTIFIED"),
+                    "Lesson": str(_case.get("lesson", "-"))[:180],
+                })
+            if _match_rows:
+                st.markdown("**Most Similar Completed Cases**")
+                _render_safe_table(_match_rows, max_rows=8)
+
+            _recent_rows = []
+            for _case in list(experience.get("recent_completed", []) or [])[:6]:
+                if not isinstance(_case, dict):
+                    continue
+                _recent_rows.append({
+                    "Case ID": _case.get("case_id", "-"),
+                    "Judgement": _case.get("action", "WAIT"),
+                    "Prediction": _case.get("prediction", "-"),
+                    "Reality": _case.get("reality", "-"),
+                    "Move": f"{float(_case.get('actual_move_points',0) or 0):+.1f} pts",
+                    "Outcome": _case.get("outcome", "OBSERVATION"),
+                    "Mistake": _case.get("mistake", "NONE_IDENTIFIED"),
+                    "Next Review": str(_case.get("next_recommendation", "-"))[:180],
+                })
+            if _recent_rows:
+                with st.expander("Recent Completed Experience Cases", expanded=False):
+                    _render_safe_table(_recent_rows, max_rows=6)
+
+            for _lesson in list(experience.get("lessons", []) or [])[:4]:
+                st.caption("Lesson: " + str(_lesson))
+            for _review in list(experience.get("next_recommendations", []) or [])[:3]:
+                st.caption("Review recommendation: " + str(_review))
+            for _warning in list(experience.get("warnings", []) or [])[:3]:
+                st.warning(str(_warning))
+            st.info(
+                "Experience Engine old judgements ko later verified snapshots se compare karta hai. "
+                "Ye sirf prediction, reality, mistake aur lesson record karta hai; production rules ya AI weights automatically change nahi karta."
+            )
 
     time_intelligence = case_data.get("time_intelligence", {}) if isinstance(case_data, dict) else {}
     if isinstance(time_intelligence, dict) and time_intelligence:
@@ -676,7 +749,7 @@ def _render_v27_command_hierarchy(case_data):
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V42.3 - INSTITUTIONAL BEHAVIOUR
+# NIFTY SELLER AI DASHBOARD V43.3 - EXPERIENCE ENGINE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -702,7 +775,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V42.3 Institutional Behaviour",
+    page_title="Nifty Seller AI V43.3 Experience Engine",
     page_icon="🧠",
     layout="wide",
 )
@@ -2964,7 +3037,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V42.3 AI COMMAND")
+st.sidebar.title("🏛️ V43.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -6290,6 +6363,39 @@ try:
         _did_snapshot_v24 = SnapshotManager().create_snapshot(_did_payload_v24, [], _did_quality_v24)
         _did_distributor_v24 = DataDistributor(_did_snapshot_v24)
         _snapshot_id_v24 = _did_distributor_v24.snapshot_id
+        # V43.1-V43.3 Experience Engine: complete older pending cases from the
+        # new verified snapshot, then prepare historical evidence for CO. The
+        # current AI judgement is registered only after AI_MASTER decides, so
+        # experience can never create a circular or second decision authority.
+        _price_details_v43 = getattr(_v24_price_report, "details", {}) or {}
+        _experience_context_v43 = {
+            "price_trend": (_price_details_v43.get("trend", {}) or {}).get("trend", "UNKNOWN"),
+            "price_barrier": (_price_details_v43.get("barrier", {}) or {}).get("barrier_zone", "UNKNOWN"),
+            "move_stage": (_price_details_v43.get("move_stage", {}) or {}).get("stage", "UNKNOWN"),
+            "psychology": _v36_psychology_report.details.get("psychology_state", "UNKNOWN"),
+            "psychology_case": (_v36_psychology_report.details.get("psychology_case_report", {}) or {}).get("case_state", "UNKNOWN"),
+            "time_phase": _time_intelligence_trace_v39.get("phase_code", "UNKNOWN"),
+            "time_behaviour": _time_intelligence_trace_v39.get("observed_behaviour", "UNKNOWN"),
+            "move_direction": _market_journey_trace_v37.get("primary_direction", "UNKNOWN"),
+            "barrier_strength": _market_journey_trace_v37.get("barrier_strength", "UNKNOWN"),
+            "heavyweight_alignment": _heavyweight_trace_v40.get("alignment_state", "UNKNOWN"),
+            "news_impact": _news_intelligence_trace_v41.get("impact_level", "LOW"),
+            "institutional_state": _institutional_trace_v42.get("institutional_state", "UNKNOWN"),
+            "institutional_mood": _institutional_trace_v42.get("market_mood", "UNKNOWN"),
+            "market_mode": str(market_mode),
+        }
+        _experience_engine_v43 = ExperienceEngine(max_records=400, max_matches=8, evaluation_snapshots=4)
+        _experience_pre_v43 = _experience_engine_v43.investigate(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            current_price=float(price),
+            atr_points=float(atr5),
+            context=_experience_context_v43,
+            advance_snapshot=True,
+        )
+        _experience_completed_updates_v43 = list(_experience_pre_v43.newly_completed)
+        _experience_department_v43 = _experience_pre_v43.to_department_report()
+        _experience_trace_v43 = _experience_pre_v43.to_compact_dict()
         # V26 command hierarchy: every branch report is reviewed by its DSP,
         # consolidated by the CO, and only then forwarded to AI_MASTER.
         _data_branch_report_v26 = {
@@ -6312,6 +6418,7 @@ try:
             "HEAVYWEIGHT_INTELLIGENCE": _heavyweight_department_v40,
             "NEWS_INTELLIGENCE": _news_intelligence_department_v41,
             "SMART_MONEY": _v24_money_report,
+            "EXPERIENCE": _experience_department_v43,
             "RISK": _v24_risk_report,
             "CANDIDATE": _v24_candidate_report,
             "STRATEGY": _v24_strategy_report,
@@ -6349,9 +6456,42 @@ try:
             candidate_report=_v24_candidate_report,
             co_case_file=_co_case_v26,
         )
+        # V43 registers the final AI_MASTER judgement as a pending case only
+        # after the CO-approved decision exists. It remains bounded and sampled
+        # to prevent refresh spam; no rule or weight is modified.
+        _experience_engine_v43.register_judgement(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            case_id=_co_case_v26.case_id,
+            action=_v24_decision.action,
+            confidence=_v24_decision.confidence,
+            entry_price=float(price),
+            market_bias=_v24_decision.market_bias,
+            case_strength=_co_case_v26.case_strength,
+            consensus_direction=_co_case_v26.consensus_direction,
+            trade_allowed=_v24_decision.trade_allowed,
+            context=_experience_context_v43,
+        )
+        _experience_post_v43 = _experience_engine_v43.investigate(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            current_price=float(price),
+            atr_points=float(atr5),
+            context=_experience_context_v43,
+            advance_snapshot=False,
+        )
+        _experience_trace_v43 = _experience_post_v43.to_compact_dict()
         # V33 bounded case history. It stores compact case fingerprints only,
         # matches similar prior snapshots, and never changes live AI weights.
-        _case_history_v33 = CaseHistoryEngine(max_cases=80, max_matches=5).process_case(
+        _case_history_engine_v33 = CaseHistoryEngine(max_cases=80, max_matches=5)
+        for _experience_update_v43 in _experience_completed_updates_v43:
+            if isinstance(_experience_update_v43, dict):
+                _case_history_engine_v33.update_outcome(
+                    state=st.session_state,
+                    case_id=str(_experience_update_v43.get("case_id", "")),
+                    outcome=str(_experience_update_v43.get("outcome", "NEUTRAL")),
+                )
+        _case_history_v33 = _case_history_engine_v33.process_case(
             state=st.session_state,
             snapshot_id=_snapshot_id_v24,
             case_id=_co_case_v26.case_id,
@@ -6465,13 +6605,14 @@ try:
                 "heavyweight_intelligence": {"summary": _heavyweight_department_v40["summary"], "confidence": _heavyweight_department_v40["confidence"]},
                 "news_intelligence": {"summary": _news_intelligence_department_v41["summary"], "confidence": _news_intelligence_department_v41["confidence"]},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
+                "experience": {"summary": _experience_department_v43["summary"], "confidence": _experience_department_v43["confidence"]},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
                 "candidate": {"summary": _v24_candidate_report.summary, "confidence": _v24_candidate_report.confidence},
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V42_3_INSTITUTIONAL_BEHAVIOUR_BUNDLE",
+                "version": "V43_3_EXPERIENCE_ENGINE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6485,6 +6626,7 @@ try:
                 "heavyweight_intelligence": _heavyweight_trace_v40,
                 "news_intelligence": _news_intelligence_trace_v41,
                 "institutional_behaviour": _institutional_trace_v42,
+                "experience_engine": _experience_trace_v43,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -6827,7 +6969,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V42.3 Institutional Behaviour</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V43.3 Experience Engine</div>", unsafe_allow_html=True)
 
 
 # =========================================================

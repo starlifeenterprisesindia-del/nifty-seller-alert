@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V42.3
+Version: V43.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -46,6 +46,7 @@ class DepartmentSOP:
         "HEAVYWEIGHT_INTELLIGENCE": ("investigation_state", "alignment_state", "coverage_count", "weighted_pressure", "estimated_nifty_points", "dominant_driver", "sector_map"),
         "NEWS_INTELLIGENCE": ("impact_level", "impact_score", "risk_state", "event_window", "market_confirmation", "source_mode", "uncertainty_score"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth", "institutional_state", "market_mood", "cash_flow_state", "futures_positioning", "institutional_pressure_score", "market_alignment"),
+        "EXPERIENCE": ("experience_state", "stored_cases", "pending_cases", "completed_cases", "similar_completed_cases", "automatic_rule_change"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
         "CANDIDATE": (),
@@ -180,6 +181,7 @@ class DepartmentAcademy:
         "HEAVYWEIGHT_INTELLIGENCE": "DSP Heavyweight Intelligence",
         "NEWS_INTELLIGENCE": "DSP News Intelligence",
         "SMART_MONEY": "DSP Smart Money / Institutional Behaviour",
+        "EXPERIENCE": "DSP Experience & Validation",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
         "CANDIDATE": "DSP Candidate",
@@ -295,4 +297,6 @@ class DepartmentAcademy:
             lessons.append("Impact-only news evidence recorded; causal attribution requires source and market-reaction confirmation.")
         if branch == "SMART_MONEY" and "institutional_state" in facts:
             lessons.append("Cash, futures and DII-absorption evidence recorded; conflict states require next-session confirmation.")
+        if branch == "EXPERIENCE" and "experience_state" in facts:
+            lessons.append("Prediction-versus-reality evidence recorded; lessons are review-only and cannot auto-change production rules.")
         return lessons or ["Observation recorded for future validation."]
