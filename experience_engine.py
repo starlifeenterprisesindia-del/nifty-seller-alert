@@ -1,6 +1,6 @@
 """
 experience_engine.py
-Version: V44.3
+Version: V48.3
 Role: Bounded post-judgement experience registry and similar completed-case evidence.
 
 Architecture and safety:
@@ -287,6 +287,12 @@ class ExperienceEngine:
             "mistake": "PENDING_VALIDATION",
             "lesson": "Await later verified snapshots.",
             "next_recommendation": "No automatic rule change.",
+            "observations": [{
+                "sequence": sequence,
+                "price": round(float(entry_price or 0.0), 2),
+                "move_points": 0.0,
+                "phase": "ENTRY",
+            }],
         }
         records.append(record)
         state[self.SESSION_KEY] = records[-self.max_records:]
@@ -304,10 +310,26 @@ class ExperienceEngine:
         current = float(current_price or entry)
         move = current - entry
         record["last_price"] = round(current, 2)
+        previous_sequence = int(record.get("last_observed_sequence", record.get("registered_sequence", 0)) or 0)
         record["last_observed_sequence"] = sequence
         record["max_up_points"] = round(max(float(record.get("max_up_points", 0.0) or 0.0), move), 2)
         record["max_down_points"] = round(min(float(record.get("max_down_points", 0.0) or 0.0), move), 2)
         record["actual_move_points"] = round(move, 2)
+
+        # V48 compact replay path. Store at most ten verified snapshot points;
+        # never retain option tables, candles, or large object graphs.
+        observations = record.get("observations", [])
+        if not isinstance(observations, list):
+            observations = []
+        if sequence != previous_sequence:
+            age = max(0, sequence - int(record.get("registered_sequence", sequence) or sequence))
+            observations.append({
+                "sequence": sequence,
+                "price": round(current, 2),
+                "move_points": round(move, 2),
+                "phase": f"SNAPSHOT_{age}",
+            })
+            record["observations"] = observations[-10:]
 
     def _ready_to_complete(self, record: Mapping[str, Any], threshold: float) -> bool:
         age = int(record.get("last_observed_sequence", 0) or 0) - int(record.get("registered_sequence", 0) or 0)
@@ -549,6 +571,8 @@ class ExperienceEngine:
             "mistake": str(item.get("mistake", "NONE_IDENTIFIED")),
             "lesson": str(item.get("lesson", "Observation stored."))[:220],
             "next_recommendation": str(item.get("next_recommendation", "No automatic rule change."))[:220],
+            "replay_observations": len(item.get("observations", []) or []) if isinstance(item.get("observations", []), list) else 0,
+            "replay_ready": bool(isinstance(item.get("observations", []), list) and len(item.get("observations", [])) >= 2),
         }
 
     def _records(self, state: MutableMapping[str, Any]) -> List[Dict[str, Any]]:

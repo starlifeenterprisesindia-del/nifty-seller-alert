@@ -109,6 +109,7 @@ try:
     from heavyweight_intelligence import HeavyweightIntelligenceDirector
     from news_intelligence import NewsIntelligenceDirector
     from experience_engine import ExperienceEngine
+    from market_replay import MarketReplayEngine
     from self_review import SelfReviewEngine
     from promotion_system import PromotionSystem
     from core.data_intelligence import SnapshotManager, DataDistributor
@@ -226,6 +227,86 @@ def _render_v47_reasoning_certificate(report):
         + " | Explanation-only: no action, confidence, rule, threshold or weight change."
     )
 
+
+
+def _render_v48_market_replay(report):
+    """Render compact historical replay without creating live advice."""
+    if not isinstance(report, dict) or not report:
+        st.info("V48 Market Replay abhi available nahi hai.")
+        return
+
+    matched_acc = report.get("matched_accuracy")
+    same_acc = report.get("same_action_accuracy")
+    st.markdown(
+        f"**Replay State:** `{report.get('replay_state','COLLECTING_COMPLETED_CASES')}` &nbsp; | &nbsp; "
+        f"**Historical Alignment:** `{report.get('historical_alignment','INSUFFICIENT_HISTORY')}` &nbsp; | &nbsp; "
+        f"**Best Similarity:** `{float(report.get('best_similarity',0) or 0):.0f}%`"
+    )
+    st.info(str(report.get("statement", "No comparable completed cases available.")))
+    summary_rows = [{
+        "Preliminary/Final Thesis": report.get("preliminary_action", "WAIT"),
+        "Completed Archive": int(report.get("stored_completed_cases", 0) or 0),
+        "Eligible Replays": int(report.get("eligible_cases", 0) or 0),
+        "Replayed": int(report.get("replayed_cases", 0) or 0),
+        "Matched Accuracy": f"{float(matched_acc):.1f}%" if matched_acc is not None else "Collecting",
+        "Same-Action Cases": int(report.get("same_action_cases", 0) or 0),
+        "Same-Action Accuracy": f"{float(same_acc):.1f}%" if same_acc is not None else "Collecting",
+        "Decision Override": "DISABLED",
+    }]
+    _render_safe_table(summary_rows, max_rows=1)
+
+    replay_rows = []
+    for case in list(report.get("replay_cases", []) or [])[:6]:
+        if not isinstance(case, dict):
+            continue
+        replay_rows.append({
+            "Case ID": case.get("case_id", "-"),
+            "Similarity": f"{float(case.get('similarity',0) or 0):.0f}%",
+            "Regime": f"{float(case.get('regime_similarity',0) or 0):.0f}%",
+            "Departments": f"{float(case.get('department_alignment',0) or 0):.0f}%",
+            "Historical Action": case.get("historical_action", "WAIT"),
+            "Reality": case.get("reality", "UNKNOWN"),
+            "Outcome": case.get("outcome", "OBSERVATION"),
+            "Final Move": f"{float(case.get('actual_move_points',0) or 0):+.1f} pts",
+            "Favourable / Adverse": f"+{float(case.get('max_favourable_points',0) or 0):.1f} / -{float(case.get('max_adverse_points',0) or 0):.1f}",
+            "Replay Quality": case.get("replay_quality", "SUMMARY_RECONSTRUCTION"),
+        })
+    if replay_rows:
+        st.markdown("**Closest Historical Replays**")
+        _render_safe_table(replay_rows, max_rows=6)
+
+        first = list(report.get("replay_cases", []) or [])[0]
+        if isinstance(first, dict):
+            with st.expander("Closest Case — Compact Replay Timeline", expanded=False):
+                path_rows = []
+                for point in list(first.get("replay_path", []) or [])[:10]:
+                    if isinstance(point, dict):
+                        path_rows.append({
+                            "Step": point.get("step", "-"),
+                            "Move": f"{float(point.get('move_points',0) or 0):+.1f} pts",
+                            "Interpretation": point.get("note", "-"),
+                        })
+                if path_rows:
+                    _render_safe_table(path_rows, max_rows=10)
+                shared = list(first.get("shared_evidence", []) or [])
+                conflicts = list(first.get("conflicting_departments", []) or [])
+                if shared:
+                    st.caption("Shared evidence: " + " | ".join(str(x) for x in shared[:6]))
+                if conflicts:
+                    st.warning("Department conflict vs replay: " + ", ".join(str(x) for x in conflicts[:6]))
+                st.caption("Historical compatible action: " + str(first.get("historical_compatible_action", "OBSERVATION_ONLY")))
+                st.caption("Lesson: " + str(first.get("lesson", "Observation stored.")))
+
+    for lesson in list(report.get("counterfactual_lessons", []) or [])[:4]:
+        st.caption("Replay lesson: " + str(lesson))
+    for item in list(report.get("next_confirmation", []) or [])[:4]:
+        st.caption("Next confirmation: " + str(item))
+    for warning in list(report.get("warnings", []) or [])[:4]:
+        st.warning(str(warning))
+    st.caption(
+        "V48 replay bounded completed snapshots ka compact reconstruction hai. "
+        "Ye tick-by-tick playback ya live trade signal nahi; CO/AI_MASTER judgement ko override nahi karta."
+    )
 
 def _render_v27_command_hierarchy(case_data):
     """Compact visual organization: branches -> CO -> AI_MASTER."""
@@ -506,6 +587,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Experience Engine old judgements ko later verified snapshots se compare karta hai. "
                 "Ye sirf prediction, reality, mistake aur lesson record karta hai; production rules ya AI weights automatically change nahi karta."
             )
+
+    market_replay = case_data.get("market_replay", {}) if isinstance(case_data, dict) else {}
+    if isinstance(market_replay, dict) and market_replay:
+        with st.expander("🎞️ V48.3 Market Replay — Current vs Historical Cases", expanded=True):
+            _render_v48_market_replay(market_replay)
 
     self_review = case_data.get("self_review", {}) if isinstance(case_data, dict) else {}
     if isinstance(self_review, dict) and self_review:
@@ -989,11 +1075,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience + Self Review + Promotion + True Learning → CO Case File → AI_MASTER → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Investigation Departments + Experience/Replay + Self Review + Promotion + True Learning → CO Case File → AI_MASTER → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V46.3 - TRUE LEARNING
+# NIFTY SELLER AI DASHBOARD V48.3 - MARKET REPLAY
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -1019,7 +1105,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V46.3 True Learning",
+    page_title="Nifty Seller AI V48.3 Market Replay",
     page_icon="🧠",
     layout="wide",
 )
@@ -3281,7 +3367,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V46.3 AI COMMAND")
+st.sidebar.title("🏛️ V48.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -3295,7 +3381,7 @@ st.sidebar.caption("🧱 DSP Move & Barrier Intelligence — Evidence Only")
 st.sidebar.caption("🏋️ DSP Heavyweight Intelligence — Evidence Only")
 st.sidebar.caption("📰 DSP News Intelligence — Evidence Only")
 st.sidebar.caption("🏦 DSP Smart Money / Institutional Behaviour")
-st.sidebar.caption("🧠 DSP Experience & Validation — Evidence Only")
+st.sidebar.caption("🧠 DSP Experience, Validation & Replay — Evidence Only")
 st.sidebar.caption("🪞 DSP AI Self Review — Evidence Only")
 st.sidebar.caption("🎖️ DSP Personnel & Promotion Board — Evidence Only")
 st.sidebar.caption("🎓 DSP True Learning & Improvement — Evidence Only")
@@ -6644,6 +6730,51 @@ try:
         _experience_completed_updates_v43 = list(_experience_pre_v43.newly_completed)
         _experience_department_v43 = _experience_pre_v43.to_department_report()
         _experience_trace_v43 = _experience_pre_v43.to_compact_dict()
+        # V48.1-V48.3 Market Replay lives inside the existing Experience
+        # Department. It reconstructs bounded completed cases and compares them
+        # with the current regime before CO review. It is information-only and
+        # has no feedback path into strategy scores or AI_MASTER authority.
+        _replay_current_reports_v48 = {
+            "OPTION": _v24_option_report,
+            "PRICE_ACTION": _v24_price_report,
+            "MARKET_BEHAVIOUR": _v24_behaviour_report,
+            "MARKET_PSYCHOLOGY": _v36_psychology_report,
+            "TIME_INTELLIGENCE": _time_intelligence_department_v39,
+            "MARKET_JOURNEY": _market_journey_department_v37,
+            "HEAVYWEIGHT_INTELLIGENCE": _heavyweight_department_v40,
+            "NEWS_INTELLIGENCE": _news_intelligence_department_v41,
+            "SMART_MONEY": _v24_money_report,
+            "RISK": _v24_risk_report,
+            "CANDIDATE": _v24_candidate_report,
+            "STRATEGY": _v24_strategy_report,
+        }
+        _market_replay_pre_v48 = MarketReplayEngine(max_replays=6, minimum_similarity=38).replay(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            context=_experience_context_v43,
+            preliminary_action=str(getattr(_v24_strategy_report, "recommended_strategy", "WAIT")),
+            current_department_reports=_replay_current_reports_v48,
+        )
+        _market_replay_trace_v48 = _market_replay_pre_v48.to_compact_dict()
+        _experience_details_v48 = dict(_experience_department_v43.get("details", {}) or {})
+        _experience_details_v48.update({
+            "replay_state": _market_replay_trace_v48.get("replay_state", "COLLECTING_COMPLETED_CASES"),
+            "replayed_cases": _market_replay_trace_v48.get("replayed_cases", 0),
+            "replay_best_similarity": _market_replay_trace_v48.get("best_similarity", 0),
+            "historical_alignment": _market_replay_trace_v48.get("historical_alignment", "INSUFFICIENT_HISTORY"),
+            "automatic_decision_override": False,
+            "market_replay": _market_replay_trace_v48,
+        })
+        _experience_department_v43["details"] = _experience_details_v48
+        _experience_department_v43["summary"] = (
+            str(_experience_department_v43.get("summary", "Experience collecting"))
+            + " | Replay "
+            + str(_market_replay_trace_v48.get("historical_alignment", "INSUFFICIENT_HISTORY"))
+        )[:300]
+        _experience_department_v43["confidence"] = max(
+            float(_experience_department_v43.get("confidence", 0) or 0),
+            min(100.0, float(_market_replay_trace_v48.get("confidence", 0) or 0)),
+        )
         # V26 command hierarchy: every branch report is reviewed by its DSP,
         # consolidated by the CO, and only then forwarded to AI_MASTER.
         _data_branch_report_v26 = {
@@ -6775,6 +6906,20 @@ try:
             advance_snapshot=False,
         )
         _experience_trace_v43 = _experience_post_v43.to_compact_dict()
+        # Re-run replay after the final AI_MASTER judgement only for the UI and
+        # historical certificate. CO already received the pre-judgement neutral
+        # replay, so this cannot create circular decision influence.
+        _market_replay_post_v48 = MarketReplayEngine(max_replays=6, minimum_similarity=38).replay(
+            state=st.session_state,
+            snapshot_id=_snapshot_id_v24,
+            context=_experience_context_v43,
+            preliminary_action=_v24_decision.action,
+            current_department_reports=_replay_current_reports_v48,
+        )
+        _market_replay_trace_v48 = _market_replay_post_v48.to_compact_dict()
+        _experience_trace_v43["market_replay"] = _market_replay_trace_v48
+        _experience_trace_v43["replay_state"] = _market_replay_trace_v48.get("replay_state", "COLLECTING_COMPLETED_CASES")
+        _experience_trace_v43["historical_alignment"] = _market_replay_trace_v48.get("historical_alignment", "INSUFFICIENT_HISTORY")
         # V33 bounded case history. It stores compact case fingerprints only,
         # matches similar prior snapshots, and never changes live AI weights.
         _case_history_engine_v33 = CaseHistoryEngine(max_cases=80, max_matches=5)
@@ -6869,7 +7014,7 @@ try:
             return _rows
 
         AI_MASTER.update({
-            "version": "V47.3_REASONING_AI_MASTER",
+            "version": "V48.3_MARKET_REPLAY_AI_MASTER",
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
@@ -6913,7 +7058,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V47_3_REASONING_ENGINE_BUNDLE",
+                "version": "V48_3_MARKET_REPLAY_ENGINE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6928,6 +7073,7 @@ try:
                 "news_intelligence": _news_intelligence_trace_v41,
                 "institutional_behaviour": _institutional_trace_v42,
                 "experience_engine": _experience_trace_v43,
+                "market_replay": _market_replay_trace_v48,
                 "self_review": _self_review_trace_v44,
                 "promotion_board": _promotion_board_trace_v45,
                 "true_learning": _true_learning_trace_v46,
@@ -7274,7 +7420,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V46.3 True Learning</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V48.3 Market Replay</div>", unsafe_allow_html=True)
 
 
 # =========================================================

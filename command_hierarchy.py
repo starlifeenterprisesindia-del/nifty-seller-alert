@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V46.3
+Version: V48.3
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -304,7 +304,7 @@ class CommandingOfficer:
                 missing_evidence.append(f"{name}: no structured evidence")
 
         branch_votes = {name: branch.branch_vote for name, branch in branch_map.items()}
-        # Psychology, Time, Move Remaining, Heavyweight, News, Experience, Self Review, Promotion Board, and True Learning are evidence-only. CO records and
+        # Psychology, Time, Move Remaining, Heavyweight, News, Experience/Replay, Self Review, Promotion Board, and True Learning are evidence-only. CO records and
         # displays them, but excludes them from directional consensus and
         # execution case-strength until post-V50 live validation.
         _consensus_votes = {
@@ -491,7 +491,7 @@ class AIOrganizationController:
         "HEAVYWEIGHT_INTELLIGENCE": BranchBoss("HEAVYWEIGHT_INTELLIGENCE", "DSP Heavyweight Intelligence", 0),
         "NEWS_INTELLIGENCE": BranchBoss("NEWS_INTELLIGENCE", "DSP News Intelligence", 0),
         "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money / Institutional Behaviour", 0),
-        "EXPERIENCE": BranchBoss("EXPERIENCE", "DSP Experience & Validation", 0),
+        "EXPERIENCE": BranchBoss("EXPERIENCE", "DSP Experience, Validation & Replay", 0),
         "SELF_REVIEW": BranchBoss("SELF_REVIEW", "DSP AI Self Review", 0),
         "PROMOTION_BOARD": BranchBoss("PROMOTION_BOARD", "DSP Personnel & Promotion Board", 0),
         "LEARNING": BranchBoss("LEARNING", "DSP True Learning & Improvement", 0),
