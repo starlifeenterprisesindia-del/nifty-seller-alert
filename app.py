@@ -107,6 +107,7 @@ try:
     from market_psychology import MarketPsychologyDirector
     from time_intelligence import TimeIntelligenceDirector
     from heavyweight_intelligence import HeavyweightIntelligenceDirector
+    from news_intelligence import NewsIntelligenceDirector
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -200,7 +201,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "SMART_MONEY",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "HEAVYWEIGHT_INTELLIGENCE", "NEWS_INTELLIGENCE", "SMART_MONEY",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -399,6 +400,37 @@ def _render_v27_command_hierarchy(case_data):
             st.info(
                 "Time Intelligence sirf current session ke bounded snapshots se clock behaviour samajhti hai. "
                 "Ye direct BUY/SELL nahi bolti; report CO ke through AI_MASTER tak jaati hai."
+            )
+
+    news_intelligence = case_data.get("news_intelligence", {}) if isinstance(case_data, dict) else {}
+    if isinstance(news_intelligence, dict) and news_intelligence:
+        with st.expander("📰 V41.3 News Intelligence — Impact-Only Investigation", expanded=True):
+            st.markdown(
+                f"**Impact:** `{news_intelligence.get('impact_level','LOW')} {int(news_intelligence.get('impact_score',0) or 0)}/100` &nbsp; | &nbsp; "
+                f"**State:** `{news_intelligence.get('risk_state','LOW_IMPACT_MONITOR')}` &nbsp; | &nbsp; "
+                f"**Window:** `{news_intelligence.get('event_window','NO_SCHEDULED_WINDOW')}`"
+            )
+            _news_rows = [{
+                "Market Confirmation": news_intelligence.get("market_confirmation", "NO_MATERIAL_MARKET_CONFIRMATION"),
+                "Scheduled": f"{int(news_intelligence.get('scheduled_score',0) or 0)}/100",
+                "Breaking Risk": f"{int(news_intelligence.get('breaking_score',0) or 0)}/100",
+                "Market Reaction": f"{int(news_intelligence.get('reaction_score',0) or 0)}/100",
+                "Shock": f"{int(news_intelligence.get('shock_score',0) or 0)}/100",
+                "Coverage": news_intelligence.get("data_coverage", "LIMITED_MANUAL_COVERAGE"),
+                "Uncertainty": f"{int(news_intelligence.get('uncertainty_score',0) or 0)}/100",
+                "Persistence": news_intelligence.get("persistence_state", "FIRST_OBSERVATION"),
+                "Confidence": f"{float(news_intelligence.get('confidence',0) or 0):.0f}%",
+            }]
+            _render_safe_table(_news_rows, max_rows=1)
+            for _item in list(news_intelligence.get("evidence", []) or [])[:4]:
+                st.caption("• " + str(_item))
+            for _warning in list(news_intelligence.get("warnings", []) or [])[:3]:
+                st.warning(str(_warning))
+            for _check in list(news_intelligence.get("next_confirmation_required", []) or [])[:3]:
+                st.caption("Next confirmation: " + str(_check))
+            st.info(
+                "News Intelligence headlines display nahi karti. Existing calendar/news-risk layer aur live market reaction ko "
+                "impact-only evidence ke roop mein CO ko report karti hai; direct BUY/SELL nahi bolti."
             )
 
     heavyweight_intelligence = case_data.get("heavyweight_intelligence", {}) if isinstance(case_data, dict) else {}
@@ -605,11 +637,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier + Heavyweight Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier + Heavyweight + News Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V40.3 - HEAVYWEIGHT INTELLIGENCE
+# NIFTY SELLER AI DASHBOARD V41.3 - NEWS INTELLIGENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -635,7 +667,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V40.3 Heavyweight Intelligence",
+    page_title="Nifty Seller AI V41.3 News Intelligence",
     page_icon="🧠",
     layout="wide",
 )
@@ -2897,7 +2929,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V40.3 AI COMMAND")
+st.sidebar.title("🏛️ V41.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -2908,6 +2940,8 @@ st.sidebar.caption("🧭 DSP Market Behaviour")
 st.sidebar.caption("🧠 DSP Market Psychology — Evidence Only")
 st.sidebar.caption("⏱️ DSP Time Intelligence — Evidence Only")
 st.sidebar.caption("🧱 DSP Move & Barrier Intelligence — Evidence Only")
+st.sidebar.caption("🏋️ DSP Heavyweight Intelligence — Evidence Only")
+st.sidebar.caption("📰 DSP News Intelligence — Evidence Only")
 st.sidebar.caption("💰 DSP Smart Money")
 st.sidebar.caption("🛡️ DSP Risk")
 st.sidebar.caption("🎯 DSP Strategy")
@@ -6088,6 +6122,23 @@ try:
         _market_journey_trace_v37 = _market_journey_v37.to_compact_dict()
         _market_journey_department_v37 = _market_journey_v37.to_department_report()
 
+        # V41.1-V41.3 News Intelligence consumes the existing source-risk and
+        # live-reaction layer. It never fetches headlines or issues a trade.
+        _news_intelligence_v41 = NewsIntelligenceDirector().evaluate(
+            state=st.session_state,
+            news_risk=news if isinstance(news, dict) else {},
+            calendar_result=te_result if isinstance(te_result, dict) else {},
+            headline_result=alpha_result if isinstance(alpha_result, dict) else {},
+            manual_label=str(manual_news_risk),
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
+            nifty_change_pct=float(nifty_change_pct),
+            vix_change_pct=float(vix_change_pct),
+            heavyweight_report=_heavyweight_v40,
+            time_report=_time_intelligence_v39,
+        )
+        _news_intelligence_trace_v41 = _news_intelligence_v41.to_compact_dict()
+        _news_intelligence_department_v41 = _news_intelligence_v41.to_department_report()
+
         _v24_risk_report = RiskDirector().build_report(
             float(vix), bool(news.get("score", 0) >= 65), bool(is_expiry_mode),
             str(news.get("label", "") if isinstance(news, dict) else ""),
@@ -6142,6 +6193,8 @@ try:
             "risk": {
                 "news_score": news.get("score", 0) if isinstance(news, dict) else 0,
                 "news_label": news.get("label", "") if isinstance(news, dict) else "",
+                "news_impact_level": _news_intelligence_trace_v41.get("impact_level", "LOW"),
+                "news_event_window": _news_intelligence_trace_v41.get("event_window", "NO_SCHEDULED_WINDOW"),
                 "expiry": str(selected_expiry),
                 "market_mode": str(market_mode),
             },
@@ -6170,6 +6223,7 @@ try:
             "TIME_INTELLIGENCE": _time_intelligence_department_v39,
             "MARKET_JOURNEY": _market_journey_department_v37,
             "HEAVYWEIGHT_INTELLIGENCE": _heavyweight_department_v40,
+            "NEWS_INTELLIGENCE": _news_intelligence_department_v41,
             "SMART_MONEY": _v24_money_report,
             "RISK": _v24_risk_report,
             "CANDIDATE": _v24_candidate_report,
@@ -6322,6 +6376,7 @@ try:
                 "time_intelligence": {"summary": _time_intelligence_department_v39["summary"], "confidence": _time_intelligence_department_v39["confidence"]},
                 "market_journey": {"summary": _market_journey_department_v37["summary"], "confidence": _market_journey_department_v37["confidence"]},
                 "heavyweight_intelligence": {"summary": _heavyweight_department_v40["summary"], "confidence": _heavyweight_department_v40["confidence"]},
+                "news_intelligence": {"summary": _news_intelligence_department_v41["summary"], "confidence": _news_intelligence_department_v41["confidence"]},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
                 "strategy": {"summary": _v24_strategy_report.summary, "confidence": _v24_strategy_report.confidence},
@@ -6329,7 +6384,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V40_3_HEAVYWEIGHT_INTELLIGENCE_BUNDLE",
+                "version": "V41_3_NEWS_INTELLIGENCE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6341,6 +6396,7 @@ try:
                 "time_intelligence": _time_intelligence_trace_v39,
                 "market_journey": _market_journey_trace_v37,
                 "heavyweight_intelligence": _heavyweight_trace_v40,
+                "news_intelligence": _news_intelligence_trace_v41,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
                 "department_readiness": _co_case_v26.department_readiness,
@@ -6683,7 +6739,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V40.3 Heavyweight Intelligence</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V41.3 News Intelligence</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -7203,7 +7259,7 @@ with st.expander("🏋️ V40 Heavyweight Intelligence — 8 Major NIFTY Drivers
 
 
 if developer_mode:
-    with st.expander("🚨 Automatic Market News Risk Indicator", expanded=False):
+    with st.expander("🚨 V41 Source Layer — Calendar, Breaking Risk & Market Reaction", expanded=False):
         n1, n2, n3, n4 = st.columns(4)
         n1.metric("Final News Risk", f"{news['score']}/100", news["label"])
         n2.metric("Scheduled Event", f"{news['scheduled']}/100", "AUTO" if news["auto_calendar"] else "Manual fallback")

@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V40.3
+Version: V41.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -44,6 +44,7 @@ class DepartmentSOP:
         "TIME_INTELLIGENCE": ("phase_code", "phase_label", "observed_behaviour", "continuation_factor", "reversal_adjustment", "confidence_cap"),
         "MARKET_JOURNEY": ("upside_remaining_points", "downside_remaining_points", "primary_direction", "reversal_risk", "barrier_adjustment_points", "barrier_statistics", "tracked_barriers"),
         "HEAVYWEIGHT_INTELLIGENCE": ("investigation_state", "alignment_state", "coverage_count", "weighted_pressure", "estimated_nifty_points", "dominant_driver", "sector_map"),
+        "NEWS_INTELLIGENCE": ("impact_level", "impact_score", "risk_state", "event_window", "market_confirmation", "source_mode", "uncertainty_score"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth"),
         "RISK": ("vix", "news", "expiry", "gap"),
         "STRATEGY": (),
@@ -177,6 +178,7 @@ class DepartmentAcademy:
         "TIME_INTELLIGENCE": "DSP Time Intelligence",
         "MARKET_JOURNEY": "DSP Move & Barrier Intelligence",
         "HEAVYWEIGHT_INTELLIGENCE": "DSP Heavyweight Intelligence",
+        "NEWS_INTELLIGENCE": "DSP News Intelligence",
         "SMART_MONEY": "DSP Smart Money",
         "RISK": "DSP Risk",
         "STRATEGY": "DSP Strategy",
@@ -289,4 +291,6 @@ class DepartmentAcademy:
             lessons.append("Barrier touch/bounce/break samples recorded; probability remains sample-size dependent.")
         if branch == "HEAVYWEIGHT_INTELLIGENCE" and "alignment_state" in facts:
             lessons.append("Driver alignment and contribution concentration recorded; next-snapshot persistence is required.")
+        if branch == "NEWS_INTELLIGENCE" and "impact_level" in facts:
+            lessons.append("Impact-only news evidence recorded; causal attribution requires source and market-reaction confirmation.")
         return lessons or ["Observation recorded for future validation."]
