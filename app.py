@@ -1,5 +1,6 @@
 import os
 import gc
+import importlib
 from io import StringIO
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -86,39 +87,110 @@ try:
 except Exception:
     V21_ADVISOR_ENGINE_READY = False
 
-# V24 Department Architecture imports.
-try:
-    from option_intelligence import OptionIntelligenceDirector
-    from price_action import PriceActionDirector
-    from market_behaviour import MarketBehaviourDirector
-    from smart_money import SmartMoneyDirector
-    from risk_department import RiskDirector
-    from candidate_department import CandidateDirector
-    from strategy_department import StrategyDirector
-    from ai_master import AIMaster
-    from market_memory import MarketMemory
-    from learning_department import LearningDepartment
-    from command_hierarchy import AIOrganizationController
-    from department_academy import DepartmentAcademy
-    from communication_bus import DepartmentCommunicationBus
-    from case_history import CaseHistoryEngine
-    from pattern_probability import PatternProbabilityEngine
-    from market_journey import MarketJourneyEngine
-    from market_psychology import MarketPsychologyDirector
-    from time_intelligence import TimeIntelligenceDirector
-    from heavyweight_intelligence import HeavyweightIntelligenceDirector
-    from news_intelligence import NewsIntelligenceDirector
-    from experience_engine import ExperienceEngine
-    from market_replay import MarketReplayEngine
-    from master_intelligence import MasterIntelligenceEngine
-    from headquarters_engine import FinalAIHeadquarters
-    from self_review import SelfReviewEngine
-    from promotion_system import PromotionSystem
-    from core.data_intelligence import SnapshotManager, DataDistributor
-    V24_DEPARTMENT_ARCHITECTURE_READY = True
-except Exception as _v24_import_error:
-    V24_DEPARTMENT_ARCHITECTURE_READY = False
-    V24_DEPARTMENT_IMPORT_ERROR = str(_v24_import_error)
+# V24-V50 Department Architecture imports.
+# V50.4 audits every module separately so one missing upload can never fail
+# silently or leave the CO table showing fake 0% placeholder rows.
+V24_DEPARTMENT_IMPORT_ERRORS = {}
+
+def _v504_import_symbol(module_name, symbol_name):
+    try:
+        module = importlib.import_module(module_name)
+        return getattr(module, symbol_name)
+    except Exception as exc:
+        V24_DEPARTMENT_IMPORT_ERRORS[module_name] = f"{type(exc).__name__}: {exc}"
+        return None
+
+OptionIntelligenceDirector = _v504_import_symbol("option_intelligence", "OptionIntelligenceDirector")
+PriceActionDirector = _v504_import_symbol("price_action", "PriceActionDirector")
+MarketBehaviourDirector = _v504_import_symbol("market_behaviour", "MarketBehaviourDirector")
+SmartMoneyDirector = _v504_import_symbol("smart_money", "SmartMoneyDirector")
+RiskDirector = _v504_import_symbol("risk_department", "RiskDirector")
+CandidateDirector = _v504_import_symbol("candidate_department", "CandidateDirector")
+StrategyDirector = _v504_import_symbol("strategy_department", "StrategyDirector")
+AIMaster = _v504_import_symbol("ai_master", "AIMaster")
+MarketMemory = _v504_import_symbol("market_memory", "MarketMemory")
+LearningDepartment = _v504_import_symbol("learning_department", "LearningDepartment")
+AIOrganizationController = _v504_import_symbol("command_hierarchy", "AIOrganizationController")
+DepartmentAcademy = _v504_import_symbol("department_academy", "DepartmentAcademy")
+DepartmentCommunicationBus = _v504_import_symbol("communication_bus", "DepartmentCommunicationBus")
+CaseHistoryEngine = _v504_import_symbol("case_history", "CaseHistoryEngine")
+PatternProbabilityEngine = _v504_import_symbol("pattern_probability", "PatternProbabilityEngine")
+MarketJourneyEngine = _v504_import_symbol("market_journey", "MarketJourneyEngine")
+MarketPsychologyDirector = _v504_import_symbol("market_psychology", "MarketPsychologyDirector")
+TimeIntelligenceDirector = _v504_import_symbol("time_intelligence", "TimeIntelligenceDirector")
+HeavyweightIntelligenceDirector = _v504_import_symbol("heavyweight_intelligence", "HeavyweightIntelligenceDirector")
+NewsIntelligenceDirector = _v504_import_symbol("news_intelligence", "NewsIntelligenceDirector")
+ExperienceEngine = _v504_import_symbol("experience_engine", "ExperienceEngine")
+MarketReplayEngine = _v504_import_symbol("market_replay", "MarketReplayEngine")
+MasterIntelligenceEngine = _v504_import_symbol("master_intelligence", "MasterIntelligenceEngine")
+FinalAIHeadquarters = _v504_import_symbol("headquarters_engine", "FinalAIHeadquarters")
+SelfReviewEngine = _v504_import_symbol("self_review", "SelfReviewEngine")
+PromotionSystem = _v504_import_symbol("promotion_system", "PromotionSystem")
+SnapshotManager = _v504_import_symbol("core.data_intelligence", "SnapshotManager")
+DataDistributor = _v504_import_symbol("core.data_intelligence", "DataDistributor")
+
+V24_DEPARTMENT_ARCHITECTURE_READY = not V24_DEPARTMENT_IMPORT_ERRORS
+V24_DEPARTMENT_IMPORT_ERROR = " | ".join(
+    f"{name}: {error}" for name, error in sorted(V24_DEPARTMENT_IMPORT_ERRORS.items())
+)
+
+_V504_BRANCH_BLUEPRINT = {
+    "DATA": ("DSP Data Intelligence", "core.data_intelligence"),
+    "OPTION": ("DSP Option Intelligence", "option_intelligence"),
+    "PRICE_ACTION": ("DSP Price Action", "price_action"),
+    "MARKET_BEHAVIOUR": ("DSP Market Behaviour", "market_behaviour"),
+    "MARKET_PSYCHOLOGY": ("DSP Market Psychology", "market_psychology"),
+    "TIME_INTELLIGENCE": ("DSP Time Intelligence", "time_intelligence"),
+    "MARKET_JOURNEY": ("DSP Move & Barrier Intelligence", "market_journey"),
+    "HEAVYWEIGHT_INTELLIGENCE": ("DSP Heavyweight Intelligence", "heavyweight_intelligence"),
+    "NEWS_INTELLIGENCE": ("DSP News Intelligence", "news_intelligence"),
+    "SMART_MONEY": ("DSP Smart Money / Institutional Behaviour", "smart_money"),
+    "EXPERIENCE": ("DSP Experience, Validation & Replay", "experience_engine"),
+    "SELF_REVIEW": ("DSP AI Self Review", "self_review"),
+    "PROMOTION_BOARD": ("DSP Personnel & Promotion Board", "promotion_system"),
+    "LEARNING": ("DSP True Learning & Improvement", "learning_department"),
+    "RISK": ("DSP Risk", "risk_department"),
+    "STRATEGY": ("DSP Strategy", "strategy_department"),
+    "CANDIDATE": ("DSP Candidate", "candidate_department"),
+}
+
+def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
+    import_errors = dict(import_errors or {})
+    branches = {}
+    for branch_name, (boss, module_name) in _V504_BRANCH_BLUEPRINT.items():
+        module_error = import_errors.get(module_name, "")
+        status = "IMPORT_ERROR" if module_error else "PIPELINE_BLOCKED"
+        summary = (
+            f"{module_name}: {module_error}" if module_error
+            else f"Blocked because department pipeline stopped at {stage}."
+        )
+        branches[branch_name] = {
+            "boss": boss, "status": status, "confidence": 0,
+            "summary": summary[:220], "reasoning": reason[:260],
+            "risk_note": "Fail-closed: no execution permitted.",
+            "recommendation": "INFORMATION_ONLY", "branch_vote": "NEUTRAL",
+            "evidence_count": 0, "sop_status": "NOT_STARTED",
+            "learning_state": "PIPELINE_UNAVAILABLE", "memory_count": 0,
+            "experience_count": 0, "reliability_score": 0,
+            "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
+        }
+    return {
+        "version": "V50_4_LIVE_READINESS_DIAGNOSTIC",
+        "pipeline_status": stage,
+        "pipeline_error": str(reason)[:700],
+        "import_errors": import_errors,
+        "case_id": "PIPELINE-DIAGNOSTIC",
+        "case_strength": 0, "department_readiness": 0,
+        "witness_score": 0, "cross_exam_score": 0,
+        "consensus_direction": "NEUTRAL", "branch_votes": {},
+        "cross_examinations": [], "court_brief": "Department pipeline unavailable; fail-closed WAIT enforced.",
+        "accepted_evidence": [], "rejected_evidence": [],
+        "missing_evidence": [f"{name}: pipeline unavailable" for name in branches],
+        "co_status": "CASE_FILE_HOLD", "accepted": False,
+        "agreement_score": 0, "data_quality_score": 0,
+        "conflicts": [], "warnings": [str(reason)[:500]],
+        "branches": branches,
+    }
 
 
 def _safe_display_df(data):
@@ -453,6 +525,9 @@ def _render_v27_command_hierarchy(case_data):
         st.info("CO command hierarchy report abhi available nahi hai.")
         return
 
+    pipeline_status = str(case_data.get("pipeline_status", "READY"))
+    pipeline_error = str(case_data.get("pipeline_error", "") or "")
+    import_errors = dict(case_data.get("import_errors", {}) or {})
     status = str(case_data.get("co_status", "CASE_FILE_HOLD"))
     accepted = bool(case_data.get("accepted", False))
     agreement = float(case_data.get("agreement_score", 0) or 0)
@@ -484,6 +559,13 @@ def _render_v27_command_hierarchy(case_data):
         f"Readiness: {readiness:.0f}% | Witness: {witness_score:.0f}% | "
         f"Cross Exam: {cross_exam_score:.0f}% | Consensus: {consensus_direction}"
     )
+    if pipeline_status != "READY":
+        st.error(f"Department Pipeline: {pipeline_status} — {pipeline_error or 'unknown error'}")
+        if import_errors:
+            st.code("\n".join(f"{name}: {error}" for name, error in sorted(import_errors.items())))
+    if not branches:
+        st.error("CO branch reports are absent. Final execution is fail-closed WAIT until the complete project pipeline is restored.")
+        return
 
     rows = []
     branch_order = [
@@ -512,7 +594,7 @@ def _render_v27_command_hierarchy(case_data):
             "Recommendation": str(branch.get("recommendation", "INFORMATION_ONLY")),
             "Report": str(branch.get("summary", "No report"))[:140],
         })
-    _render_safe_table(rows, max_rows=15)
+    _render_safe_table(rows, max_rows=18)
 
     if court_brief:
         st.info("AI Court Brief: " + court_brief)
@@ -1244,7 +1326,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.3 Final Headquarters",
+    page_title="Nifty Seller AI V50.4 Live Readiness",
     page_icon="🧠",
     layout="wide",
 )
@@ -1503,7 +1585,7 @@ except Exception:
 # =========================================================
 # DHANHQ DATA LAYER
 # =========================================================
-@st.cache_data(ttl=86400, show_spinner=False)
+@st.cache_data(ttl=900, show_spinner=False)
 def get_dhan_instrument_master():
     """Fetch Dhan compact instrument master and return a DataFrame."""
     try:
@@ -1572,7 +1654,7 @@ def get_dhan_market_bundle(client_id, access_token, heavyweight_ids, nifty_secur
         return {"success": False, "message": f"Dhan Market Quote error: {exc}"}
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def get_dhan_expiries(client_id, access_token, underlying_scrip=DEFAULT_NIFTY_SECURITY_ID, underlying_seg=DEFAULT_NIFTY_SEGMENT):
     if not client_id or not access_token:
         return {"success": False, "expiries": [], "message": "Dhan credentials missing."}
@@ -2807,7 +2889,9 @@ def v162_analyze_position(pos):
         leg2 = v162_leg_pnl(pos.get("Sell2 Side", ""), pos.get("Sell2 Strike", 0), pos.get("Sell2 Entry", 0), pos.get("Hedge2 Strike", 0), pos.get("Hedge2 Entry", 0), lots, lot_sz)
     total_pnl = leg1["pnl"] + leg2["pnl"]
     avg_profit_pct = (leg1["profit_pct"] + (leg2["profit_pct"] if str(pos.get("Sell2 Side", "")) else leg1["profit_pct"])) / (2 if str(pos.get("Sell2 Side", "")) else 1)
-    risk = max(int(locals().get("gamma_score_v7", 0) or 0), int(locals().get("shock_score_v7", 0) or 0))
+    _master_position_ctx = globals().get("AI_MASTER", {}) if isinstance(globals().get("AI_MASTER", {}), dict) else {}
+    _master_position_action = str(_master_position_ctx.get("final_action", globals().get("final_trade", "WAIT")) or "WAIT").upper()
+    risk = max(int(globals().get("gamma_score_v7", 0) or 0), int(globals().get("shock_score_v7", 0) or 0))
     action = "HOLD"
     reason = "Premium decay normal hai. SL discipline rakho."
     if risk >= 75:
@@ -2818,8 +2902,8 @@ def v162_analyze_position(pos):
         action, reason = "HOLD + TRAIL SL", "Profit in favour hai. Trail SL use karo."
     elif avg_profit_pct <= -25:
         action, reason = "EXIT IF SL HIT", "Premium seller ke against gaya. SL check karo."
-    elif str(locals().get("final_trade", "WAIT")) == "WAIT":
-        action, reason = "MANAGE ONLY", "Fresh trade WAIT hai; existing position ko tight manage karo."
+    elif _master_position_action == "WAIT":
+        action, reason = "MANAGE ONLY", "AI_MASTER fresh trade WAIT hai; existing position ko tight manage karo."
     return {
         "Action": action,
         "Reason": reason,
@@ -3506,7 +3590,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.3 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.4 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -3540,8 +3624,12 @@ with st.sidebar.expander("Legacy Engine Health", expanded=False):
         st.caption("stability_engine: " + ("READY / LOCK" if V19_STABILITY_ENGINE_READY else "MISSING"))
         st.caption("memory_engine: " + ("READY / MEMORY" if V19_MEMORY_ENGINE_READY else "MISSING"))
         st.caption("oi_flow_engine: " + ("READY / OI FLOW" if V19_OI_FLOW_ENGINE_READY else "MISSING"))
-    except Exception:
-        st.caption("Legacy health unavailable")
+        st.caption("V24–V50 department pipeline: " + ("READY" if V24_DEPARTMENT_ARCHITECTURE_READY else "IMPORT BLOCKED"))
+        if V24_DEPARTMENT_IMPORT_ERRORS:
+            for _module_name, _module_error in sorted(V24_DEPARTMENT_IMPORT_ERRORS.items()):
+                st.error(f"{_module_name}: {_module_error}")
+    except Exception as _health_error_v504:
+        st.caption("Legacy health unavailable: " + str(_health_error_v504))
 
 # V19.1 Sidebar Refresh Control Center
 st.sidebar.markdown("---")
@@ -5226,23 +5314,28 @@ def _v205_build_snapshot_context():
     came from this one context/snapshot chain.
     """
     g = globals()
+    _status_text, _day_text = market_status()
+    _option_chain_ctx = g.get("option_chain", {}) if isinstance(g.get("option_chain", {}), dict) else {}
+    _heavy_ctx = g.get("heavy_analysis", {}) if isinstance(g.get("heavy_analysis", {}), dict) else {}
     return {
         "price": g.get("price", 0),
         "nifty_price": g.get("price", 0),
-        "change": g.get("change", 0),
-        "change_pct": g.get("change_pct", 0),
+        "change": g.get("nifty_change", g.get("change", 0)),
+        "nifty_change": g.get("nifty_change", g.get("change", 0)),
+        "change_pct": g.get("nifty_change_pct", g.get("change_pct", 0)),
+        "nifty_change_pct": g.get("nifty_change_pct", g.get("change_pct", 0)),
         "vix": g.get("vix", 0),
         "india_vix": g.get("vix", 0),
         "vix_change_pct": g.get("vix_change_pct", 0),
         "pcr": g.get("pcr", 0),
-        "status": g.get("market_text", ""),
-        "market_status_text": g.get("market_text", ""),
-        "day_name": g.get("day_name", ""),
+        "status": _status_text,
+        "market_status_text": _status_text,
+        "day_name": _day_text,
         "selected_expiry": g.get("selected_expiry", ""),
-        "atm_strike": g.get("atm_strike", ""),
-        "option_chain": g.get("option_chain", {}) if isinstance(g.get("option_chain", {}), dict) else {},
+        "atm_strike": _option_chain_ctx.get("atm_strike", g.get("atm_strike", "")),
+        "option_chain": _option_chain_ctx,
         "option_analysis": g.get("option_analysis", {}) if isinstance(g.get("option_analysis", {}), dict) else {},
-        "heavyweight_analysis": g.get("heavyweight_analysis", {}) if isinstance(g.get("heavyweight_analysis", {}), dict) else {},
+        "heavyweight_analysis": _heavy_ctx,
         "news": g.get("news", {}) if isinstance(g.get("news", {}), dict) else {},
         "final_decision": g.get("final_decision", {}) if isinstance(g.get("final_decision", {}), dict) else {},
         "option_bias": g.get("option_bias", 0),
@@ -5260,8 +5353,8 @@ def _v205_build_snapshot_context():
         "expiry_mode": g.get("expiry_mode", g.get("mode", "")),
         "mode": g.get("mode", ""),
         "dhan_ready": g.get("dhan_ready", False),
-        "nifty_source": g.get("source_text", ""),
-        "heavy_source": g.get("heavy_source", ""),
+        "nifty_source": g.get("nifty_source", ""),
+        "heavy_source": _heavy_ctx.get("source", g.get("heavy_source", "")),
         "vix_source": g.get("vix_source", ""),
         "best_ce": g.get("best_ce", {}) if isinstance(g.get("best_ce", {}), dict) else {},
         "best_pe": g.get("best_pe", {}) if isinstance(g.get("best_pe", {}), dict) else {},
@@ -6548,7 +6641,7 @@ try:
         "risk_label": _advisor_v221.get("risk_label", "NA"),
         "ce_plan": _ce_plan_v221,
         "pe_plan": _pe_plan_v221,
-        "professional_candidate_authority": professional_candidate_report_v224 if isinstance(globals().get("professional_candidate_report_v224"), dict) else (professional_candidate_report_v223 if isinstance(globals().get("professional_candidate_report_v223"), dict) else {}),
+        "professional_candidate_authority": globals().get("professional_candidate_report_v224", {}) if isinstance(globals().get("professional_candidate_report_v224"), dict) else (globals().get("professional_candidate_report_v223", {}) if isinstance(globals().get("professional_candidate_report_v223"), dict) else {}),
         "evidence_rows": _evidence_rows_v221,
     }
     AI_MASTER["strategy_rows"] = _v221_strategy_rows(AI_MASTER)
@@ -7211,7 +7304,7 @@ try:
             return _rows
 
         AI_MASTER.update({
-            "version": "V50.3_FINAL_AI_HEADQUARTERS",
+            "version": "V50.4_LIVE_MARKET_READINESS",
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
@@ -7257,7 +7350,10 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_3_FINAL_AI_HEADQUARTERS_BUNDLE",
+                "version": "V50_4_LIVE_READINESS_FIX",
+                "pipeline_status": "READY",
+                "pipeline_error": "",
+                "import_errors": {},
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -7338,14 +7434,38 @@ try:
             AI_MASTER["final_action"] = "WAIT"
             AI_MASTER["execution_status"] = "WAIT"
             AI_MASTER["advice"] = "CO HOLD: branch case file not cleared for execution."
+            # V50.4 live-safety lock: when CO holds because verified data quality
+            # is below the live-observation floor, do not leave a directional
+            # confidence/projection or stale candidate rows visible. A high
+            # confidence WAIT beside missing Dhan/option data is misleading.
+            if float(_co_case_v26.data_quality_score or 0) < 70.0:
+                AI_MASTER["confidence"] = 0
+                AI_MASTER["projection"] = {
+                    "direction": "RANGE", "probability": 50,
+                    "bullish": 50, "bearish": 50,
+                }
+                AI_MASTER["strategy"] = {"type": "WAIT", "plan_status": "BLOCKED_LOW_DATA_QUALITY"}
+                AI_MASTER["strategy_rows"] = []
+                AI_MASTER["candidate_rows"] = []
+                AI_MASTER["ce_plan"] = {"strike": "No Strike"}
+                AI_MASTER["pe_plan"] = {"strike": "No Strike"}
+                AI_MASTER["source_of_truth"] = "CO_HOLD_LOW_DATA_QUALITY"
+                AI_MASTER["data_flow_status"] = "BLOCKED"
+                AI_MASTER["reasons"] = [
+                    f"CO HOLD because verified data quality is only {_co_case_v26.data_quality_score:.0f}%.",
+                    "No directional confidence or candidate is trusted until live feeds recover.",
+                ]
+                AI_MASTER.setdefault("blockers", []).append(
+                    f"Verified data quality below 70% ({_co_case_v26.data_quality_score:.0f}%)."
+                )
 
         # V24.1 lightweight session memory. Store plain compact dictionaries,
         # not custom class instances, to reduce retained object graphs on rerun.
         _v24_hist = list(st.session_state.get("v24_compact_decision_history", []))[-7:]
         _v24_hist.append({
             "snapshot_id": _snapshot_id_v24,
-            "action": _v24_decision.action,
-            "confidence": _v24_decision.confidence,
+            "action": str(AI_MASTER.get("final_action", "WAIT")),
+            "confidence": float(AI_MASTER.get("confidence", 0) or 0),
             "price": round(float(price), 2),
         })
         _v24_hist = _v24_hist[-8:]
@@ -7362,11 +7482,52 @@ try:
         del _candidate_rows_input_v24, _v24_rows, _hw_rows_v24
         gc.collect()
     else:
-        AI_MASTER.setdefault("warnings", []).append("V24 department imports unavailable: " + str(globals().get("V24_DEPARTMENT_IMPORT_ERROR", "unknown")))
+        _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
+        AI_MASTER.update({
+            "version": "V50.4_LIVE_MARKET_READINESS",
+            "final_action": "WAIT",
+            "execution_status": "WAIT",
+            "confidence": 0,
+            "projection": {"direction": "RANGE", "probability": 50, "bullish": 50, "bearish": 50},
+            "reasons": ["Department architecture import check failed; no department judgement is trusted."],
+            "blockers": [_v504_import_reason],
+            "strategy": {"type": "WAIT", "plan_status": "BLOCKED"},
+            "strategy_rows": [], "candidate_rows": [],
+            "ce_plan": {"strike": "No Strike"}, "pe_plan": {"strike": "No Strike"},
+            "advice": "FAIL-CLOSED WAIT: department architecture import check failed.",
+            "source_of_truth": "FAIL_CLOSED_DEPARTMENT_PIPELINE",
+            "data_flow_status": "BLOCKED",
+            "v24_pipeline_status": "IMPORT_BLOCKED",
+            "command_hierarchy": _v504_diagnostic_command_hierarchy(
+                _v504_import_reason, stage="IMPORT_BLOCKED",
+                import_errors=V24_DEPARTMENT_IMPORT_ERRORS,
+            ),
+        })
+        AI_MASTER.setdefault("warnings", []).append(_v504_import_reason)
 except Exception as _v24_pipeline_error:
-    # Fail-safe: retain the proven V22.6 AI_MASTER instead of crashing the app.
-    AI_MASTER.setdefault("warnings", []).append("V24 department pipeline fallback: " + str(_v24_pipeline_error))
-    AI_MASTER["v24_pipeline_status"] = "FALLBACK_TO_V22_6"
+    # V50.4 safety: never leave the old V22 fallback capable of showing a trade
+    # when the department/CO pipeline failed. Surface the exact runtime stage.
+    _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
+    AI_MASTER.update({
+        "version": "V50.4_LIVE_MARKET_READINESS",
+        "final_action": "WAIT",
+        "execution_status": "WAIT",
+        "confidence": 0,
+        "projection": {"direction": "RANGE", "probability": 50, "bullish": 50, "bearish": 50},
+        "reasons": ["Department pipeline runtime error; no department judgement is trusted."],
+        "blockers": [_v504_runtime_reason],
+        "strategy": {"type": "WAIT", "plan_status": "BLOCKED"},
+        "strategy_rows": [], "candidate_rows": [],
+        "ce_plan": {"strike": "No Strike"}, "pe_plan": {"strike": "No Strike"},
+        "advice": "FAIL-CLOSED WAIT: department pipeline runtime error. Open CO diagnostics.",
+        "source_of_truth": "FAIL_CLOSED_DEPARTMENT_PIPELINE",
+        "data_flow_status": "BLOCKED",
+        "v24_pipeline_status": "RUNTIME_ERROR",
+        "command_hierarchy": _v504_diagnostic_command_hierarchy(
+            _v504_runtime_reason, stage="RUNTIME_ERROR", import_errors={},
+        ),
+    })
+    AI_MASTER.setdefault("warnings", []).append("V24 department pipeline blocked: " + _v504_runtime_reason)
 
 
 # =========================================================
@@ -7621,7 +7782,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.3 Final Headquarters</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.4 Live Readiness</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -7749,6 +7910,66 @@ _ai_master_v221 = AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) 
 if _advisor_v214:
     _de_final_v197 = str(_advisor_v214.get("final_action", _de_final_v197) or _de_final_v197).upper()
     _de_status_v197 = str(_advisor_v214.get("execution_status", _de_status_v197) or _de_status_v197).upper()
+
+# V50.4 pre-market/live-market readiness gate. Observation-only diagnostic;
+# it never changes AI_MASTER action, confidence or candidate.
+_v504_pipeline_ui = AI_MASTER.get("command_hierarchy", {}) if isinstance(AI_MASTER, dict) else {}
+_v504_pipeline_state = str(_v504_pipeline_ui.get("pipeline_status", AI_MASTER.get("v24_pipeline_status", "UNKNOWN")) if isinstance(_v504_pipeline_ui, dict) else "UNKNOWN")
+_v504_dhan_quote_ok = bool(dhan_bundle.get("success", False)) if isinstance(dhan_bundle, dict) else False
+_v504_expiry_ok = bool(expiry_result.get("success", False)) if isinstance(expiry_result, dict) else False
+_v504_oc_ok = bool(option_chain.get("success", False)) if isinstance(option_chain, dict) else False
+_v504_pa_ok = bool(price_action_result.get("success", False)) if isinstance(locals().get("price_action_result", {}), dict) else False
+_v504_vix_ok = bool(yahoo_vix.get("success", False)) if isinstance(locals().get("yahoo_vix", {}), dict) else False
+_v504_hw_ok = bool(heavy_analysis.get("success", False)) if isinstance(heavy_analysis, dict) else False
+_v504_quality = float(_v504_pipeline_ui.get("data_quality_score", data_quality) or 0) if isinstance(_v504_pipeline_ui, dict) else float(data_quality or 0)
+_v504_flow_state = str((v205_data_flow or {}).get("status", "UNKNOWN")) if isinstance(locals().get("v205_data_flow", {}), dict) else "UNKNOWN"
+_v504_flow_fresh = bool((v205_data_flow or {}).get("fresh", False)) if isinstance(locals().get("v205_data_flow", {}), dict) else False
+_v504_market_open = str(market_text) == "Market Open"
+_v504_core_ready = bool(
+    _v504_pipeline_state == "READY" and _v504_dhan_quote_ok and _v504_expiry_ok
+    and _v504_oc_ok and _v504_pa_ok and _v504_vix_ok and _v504_hw_ok
+    and _v504_quality >= 70
+)
+_v504_live_ready = bool(_v504_core_ready and (not _v504_market_open or _v504_flow_fresh))
+if _v504_core_ready and not _v504_market_open:
+    _v504_gate_state = "READY_FOR_NEXT_LIVE_SESSION"
+elif _v504_live_ready:
+    _v504_gate_state = "READY_FOR_LIVE_OBSERVATION"
+elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
+    _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
+else:
+    _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
+st.markdown("### ✅ V50.4 Live Market Readiness Gate")
+_render_safe_table([{
+    "Gate": _v504_gate_state,
+    "Market": market_text,
+    "Department Pipeline": _v504_pipeline_state,
+    "Dhan Quote": "READY" if _v504_dhan_quote_ok else "MISSING",
+    "Expiry List": "READY" if _v504_expiry_ok else "MISSING",
+    "Option Chain": "READY" if _v504_oc_ok else "MISSING",
+    "Price Action": "AUTO" if _v504_pa_ok else "MANUAL/FALLBACK",
+    "VIX": "AUTO" if _v504_vix_ok else "MANUAL/FALLBACK",
+    "Heavyweights": "READY" if _v504_hw_ok else "MISSING",
+    "Snapshot Flow": _v504_flow_state,
+    "Data Quality": f"{_v504_quality:.0f}%",
+    "Real Money": "NOT CERTIFIED — LIVE VALIDATION",
+}], max_rows=1)
+if not _v504_core_ready or (_v504_market_open and not _v504_flow_fresh):
+    _v504_gate_reasons = []
+    if _v504_pipeline_state != "READY": _v504_gate_reasons.append("Department pipeline not READY")
+    if not _v504_dhan_quote_ok: _v504_gate_reasons.append("Dhan NIFTY quote missing")
+    if not _v504_expiry_ok: _v504_gate_reasons.append("Dhan expiry list missing")
+    if not _v504_oc_ok: _v504_gate_reasons.append("Dhan option chain missing")
+    if not _v504_pa_ok: _v504_gate_reasons.append("Automatic price action unavailable")
+    if not _v504_vix_ok: _v504_gate_reasons.append("Automatic India VIX unavailable")
+    if not _v504_hw_ok: _v504_gate_reasons.append("Heavyweight data unavailable")
+    if _v504_quality < 70: _v504_gate_reasons.append(f"Data quality only {_v504_quality:.0f}%")
+    if _v504_market_open and not _v504_flow_fresh: _v504_gate_reasons.append(f"Snapshot flow {_v504_flow_state}")
+    st.warning("Live gate HOLD: " + " | ".join(_v504_gate_reasons))
+elif not _v504_market_open:
+    st.info("Pre-market/closed-market readiness passed. Market open par Snapshot Flow FRESH confirm hone ke baad live observation start karo.")
+else:
+    st.success("Live observation gate READY. Real-money certification still requires the planned 2–3 week validation.")
 
 st.markdown("### 🧠 AI FINAL AUTHORITY")
 # V22.2: AI Final Authority is now a pure AI_MASTER display.
@@ -7999,28 +8220,33 @@ with st.expander("💼 Active Positions + Add Position", expanded=False):
 
 # V12 Position Manager + Expiry/Shock/Discipline panels
 with st.expander("🚀 Position Manager — Hold / Exit / Trail SL", expanded=False):
+    _position_master_action_v504 = str(AI_MASTER.get("final_action", "WAIT") if isinstance(AI_MASTER, dict) else "WAIT")
+    _position_master_conf_v504 = float(AI_MASTER.get("confidence", 0) if isinstance(AI_MASTER, dict) else 0)
+    _position_ai_v504 = active_position_manager(
+        active_side, active_strike, active_entry_price, active_current_price, active_lots,
+        theta_score_v7, gamma_score_v7, shock_score_v7,
+        _position_master_action_v504, _position_master_conf_v504,
+    )
     if active_side == "None" or active_lots <= 0:
-        st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir AI Hold/Exit batayegi.")
-    try:
-        if entry_premium > 0:
-            prem_plan = v10_sl_target(entry_premium, gamma_score_v7, shock_score_v7, confidence)
-            st.write(f"V10 Premium Plan: SL around {prem_plan['sl']} | Target around {prem_plan['target']} | Trail after premium reaches {prem_plan['trail_after']}")
-    except Exception:
-        pass
+        st.info("Active trade details sidebar mein enter karo: CE/PE, strike, entry premium, current premium, lots. Phir position risk monitor update hoga.")
     else:
+        if float(active_entry_price or 0) > 0:
+            prem_plan = v10_sl_target(active_entry_price, gamma_score_v7, shock_score_v7, _position_master_conf_v504)
+            st.write(f"Premium Plan: SL around {prem_plan['sl']} | Target around {prem_plan['target']} | Trail after premium reaches {prem_plan['trail_after']}")
         p1, p2, p3, p4 = st.columns(4)
-        p1.metric("Position AI", position_ai["action"], f"Position Score {position_ai['confidence']}%")
-        p2.metric("Profit in Premium", f"{position_ai['profit_pct']:.1f}%")
-        p3.metric("Trail SL", f"₹{position_ai['trail_sl']:.2f}" if position_ai["trail_sl"] else "--")
-        p4.metric("Position Risk", f"{position_ai['risk']}/100")
-        for reason in position_ai["reasons"]:
+        p1.metric("Position Monitor", _position_ai_v504["action"], f"Monitor Score {_position_ai_v504['confidence']}%")
+        p2.metric("Profit in Premium", f"{_position_ai_v504['profit_pct']:.1f}%")
+        p3.metric("Trail SL", f"₹{_position_ai_v504['trail_sl']:.2f}" if _position_ai_v504["trail_sl"] else "--")
+        p4.metric("Position Risk", f"{_position_ai_v504['risk']}/100")
+        for reason in _position_ai_v504["reasons"]:
             st.write("✔", reason)
-        if position_ai["action"] == "EXIT NOW":
-            st.error("🔴 EXIT NOW: market structure/risk seller ke against ho raha hai.")
-        elif "BOOK" in position_ai["action"]:
-            st.warning("🟡 Profit secure karna better ho sakta hai.")
-        elif "HOLD" in position_ai["action"]:
-            st.success("🟢 Hold possible, but trail SL discipline zaroor rakho.")
+        if _position_ai_v504["action"] == "EXIT NOW":
+            st.error("🔴 Position risk critical: capital-protection review required.")
+        elif "BOOK" in _position_ai_v504["action"]:
+            st.warning("🟡 Position monitor: profit protection review karo.")
+        elif "HOLD" in _position_ai_v504["action"]:
+            st.success("🟢 Position monitor: hold structure possible, trail SL discipline rakho.")
+        st.caption("Position monitor fresh entry authority nahi hai; direction input sirf AI_MASTER se aata hai.")
 
 with st.expander("🧠 Expiry + Shock + Discipline Engine", expanded=False):
     e1, e2, e3, e4, e5 = st.columns(5)
