@@ -105,6 +105,7 @@ try:
     from pattern_probability import PatternProbabilityEngine
     from market_journey import MarketJourneyEngine
     from market_psychology import MarketPsychologyDirector
+    from time_intelligence import TimeIntelligenceDirector
     from core.data_intelligence import SnapshotManager, DataDistributor
     V24_DEPARTMENT_ARCHITECTURE_READY = True
 except Exception as _v24_import_error:
@@ -198,7 +199,7 @@ def _render_v27_command_hierarchy(case_data):
     rows = []
     branch_order = [
         "DATA", "OPTION", "PRICE_ACTION", "MARKET_BEHAVIOUR",
-        "MARKET_PSYCHOLOGY", "MARKET_JOURNEY", "SMART_MONEY",
+        "MARKET_PSYCHOLOGY", "TIME_INTELLIGENCE", "MARKET_JOURNEY", "SMART_MONEY",
         "RISK", "STRATEGY", "CANDIDATE",
     ]
     for branch_name in branch_order:
@@ -365,9 +366,43 @@ def _render_v27_command_hierarchy(case_data):
             for _warning in list(probability.get("warnings", []) or [])[:4]:
                 st.warning(str(_warning))
 
+    time_intelligence = case_data.get("time_intelligence", {}) if isinstance(case_data, dict) else {}
+    if isinstance(time_intelligence, dict) and time_intelligence:
+        with st.expander("⏱️ V39.3 Time Intelligence — Session Behaviour", expanded=True):
+            st.markdown(
+                f"**Phase:** `{time_intelligence.get('phase_label','NA')}` &nbsp; | &nbsp; "
+                f"**Observed Behaviour:** `{time_intelligence.get('observed_behaviour','COLLECTING')}` &nbsp; | &nbsp; "
+                f"**Clock:** `{time_intelligence.get('observed_time','NA')}`"
+            )
+            _time_rows = [{
+                "Key Clock": time_intelligence.get("key_clock", "-"),
+                "Phase Progress": f"{float(time_intelligence.get('phase_progress_pct',0) or 0):.0f}%",
+                "Market Character": time_intelligence.get("market_character", "-"),
+                "Expected Volatility": time_intelligence.get("expected_volatility", "-"),
+                "False-Break Risk": time_intelligence.get("false_break_risk", "-"),
+                "Continuation Reliability": time_intelligence.get("continuation_reliability", "-"),
+                "Reversal Sensitivity": time_intelligence.get("reversal_sensitivity", "-"),
+                "Snapshots": int(time_intelligence.get("snapshots_in_phase", 0) or 0),
+                "Phase Change": f"{float(time_intelligence.get('phase_change_points',0) or 0):+.1f} pts",
+                "Phase Range": f"{float(time_intelligence.get('phase_range_points',0) or 0):.1f} pts",
+                "Direction Stability": f"{float(time_intelligence.get('direction_stability',0) or 0):.0f}%",
+                "Continuation Factor": f"x{float(time_intelligence.get('continuation_factor',1) or 1):.2f}",
+                "Reversal Adjustment": f"{float(time_intelligence.get('reversal_adjustment',0) or 0):+.0f}",
+                "Confidence Cap": f"{float(time_intelligence.get('confidence_cap',0) or 0):.0f}%",
+            }]
+            _render_safe_table(_time_rows, max_rows=1)
+            for _reason in list(time_intelligence.get("reasons", []) or [])[:4]:
+                st.caption("• " + str(_reason))
+            for _warning in list(time_intelligence.get("warnings", []) or [])[:3]:
+                st.warning(str(_warning))
+            st.info(
+                "Time Intelligence sirf current session ke bounded snapshots se clock behaviour samajhti hai. "
+                "Ye direct BUY/SELL nahi bolti; report CO ke through AI_MASTER tak jaati hai."
+            )
+
     journey = case_data.get("market_journey", {}) if isinstance(case_data, dict) else {}
     if isinstance(journey, dict) and journey:
-        with st.expander("🧱 V38.3 Barrier Intelligence 2.0 & Move Remaining", expanded=True):
+        with st.expander("🧱 V39.3 Time-Conditioned Barrier & Move Remaining", expanded=True):
             _zone_low = float(journey.get("expected_zone_low", 0) or 0)
             _zone_high = float(journey.get("expected_zone_high", 0) or 0)
             _primary_direction = str(journey.get("primary_direction", journey.get("direction", "RANGE")))
@@ -400,6 +435,9 @@ def _render_v27_command_hierarchy(case_data):
                 "Stage": journey.get('move_stage','Unknown'),
                 "Energy": journey.get('market_energy','Unknown'),
                 "Time Phase": journey.get('time_phase','Normal Session'),
+                "Time Behaviour": journey.get('time_observed_behaviour','PHASE_BALANCED'),
+                "Time Factor": f"x{float(journey.get('time_continuation_factor',1) or 1):.2f}",
+                "Time Confidence Cap": f"{float(journey.get('time_confidence_cap',88) or 88):.0f}%",
             }]
             _render_safe_table(_journey_rows, max_rows=1)
             if _tracked_barriers:
@@ -514,11 +552,11 @@ def _render_v27_command_hierarchy(case_data):
                 "Single-snapshot evidence ko OI-price follow-through chahiye; final judgement AI_MASTER ka hai."
             )
 
-    st.caption("Command flow: Verified Snapshot → Psychology + Move Remaining Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
+    st.caption("Command flow: Verified Snapshot → Psychology + Time + Move/Barrier Departments → CO Case File → AI_MASTER → Case History → Pattern Probability → Final Authority")
 
 
 # =========================================================
-# NIFTY SELLER AI DASHBOARD V38.3 - BARRIER INTELLIGENCE 2.0
+# NIFTY SELLER AI DASHBOARD V39.3 - TIME INTELLIGENCE
 # DhanHQ-ready | OI+Price | Heavyweights | News Risk | FII/DII
 # =========================================================
 
@@ -539,7 +577,7 @@ TOP5_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V38.3 Barrier Intelligence",
+    page_title="Nifty Seller AI V39.3 Time Intelligence",
     page_icon="🧠",
     layout="wide",
 )
@@ -2801,7 +2839,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V38.3 AI COMMAND")
+st.sidebar.title("🏛️ V39.3 AI COMMAND")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -2810,6 +2848,8 @@ st.sidebar.caption("📊 DSP Option Intelligence")
 st.sidebar.caption("📈 DSP Price Action")
 st.sidebar.caption("🧭 DSP Market Behaviour")
 st.sidebar.caption("🧠 DSP Market Psychology — Evidence Only")
+st.sidebar.caption("⏱️ DSP Time Intelligence — Evidence Only")
+st.sidebar.caption("🧱 DSP Move & Barrier Intelligence — Evidence Only")
 st.sidebar.caption("💰 DSP Smart Money")
 st.sidebar.caption("🛡️ DSP Risk")
 st.sidebar.caption("🎯 DSP Strategy")
@@ -5933,10 +5973,28 @@ try:
             float(fii_today), float(dii_today), _adv_hw_v24, _dec_hw_v24, _adv_hw_v24, _dec_hw_v24
         )
 
-        # V38.1-V38.3: upgrade the existing Market Journey investigator with bounded barrier history.
-        # It estimates independent upside/downside room, then applies psychology,
-        # barrier and reversal-risk adjustments. The department is evidence-only
-        # and its report must enter the CO case file before AI_MASTER judgement.
+        # V39.1-V39.3 Time Intelligence: one clock profile, bounded phase evidence,
+        # and a time-conditioned reliability report. It is observation-only and
+        # cannot issue or modify a trade instruction.
+        _observed_now_v39 = datetime.now(IST)
+        _time_intelligence_v39 = TimeIntelligenceDirector().evaluate(
+            state=st.session_state,
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
+            price=float(price),
+            day_high=float(today_high),
+            day_low=float(today_low),
+            atr=float(atr5),
+            change_pct=float(nifty_change_pct),
+            price_report=_v24_price_report,
+            behaviour_report=_v24_behaviour_report,
+            option_report=_v24_option_report,
+            psychology_report=_v36_psychology_report,
+        )
+        _time_intelligence_trace_v39 = _time_intelligence_v39.to_compact_dict()
+        _time_intelligence_department_v39 = _time_intelligence_v39.to_department_report()
+
+        # V38 Barrier Intelligence + V39 Time Intelligence upgrade the existing
+        # Market Journey investigator. No duplicate move engine is created.
         _market_journey_v37 = MarketJourneyEngine().evaluate(
             state=st.session_state,
             price=float(price),
@@ -5948,8 +6006,10 @@ try:
             behaviour_report=_v24_behaviour_report,
             smart_money_report=_v24_money_report,
             psychology_report=_v36_psychology_report,
-            hour=datetime.now(IST).hour,
-            observed_at=datetime.now(IST).isoformat(timespec="seconds"),
+            time_report=_time_intelligence_v39,
+            hour=_observed_now_v39.hour,
+            minute=_observed_now_v39.minute,
+            observed_at=_observed_now_v39.isoformat(timespec="seconds"),
         )
         _market_journey_trace_v37 = _market_journey_v37.to_compact_dict()
         _market_journey_department_v37 = _market_journey_v37.to_department_report()
@@ -6031,6 +6091,7 @@ try:
             "PRICE_ACTION": _v24_price_report,
             "MARKET_BEHAVIOUR": _v24_behaviour_report,
             "MARKET_PSYCHOLOGY": _v36_psychology_report,
+            "TIME_INTELLIGENCE": _time_intelligence_department_v39,
             "MARKET_JOURNEY": _market_journey_department_v37,
             "SMART_MONEY": _v24_money_report,
             "RISK": _v24_risk_report,
@@ -6181,6 +6242,7 @@ try:
                 "option": {"summary": _v24_option_report.summary, "confidence": _v24_option_report.confidence},
                 "behaviour": {"summary": _v24_behaviour_report.summary, "confidence": _v24_behaviour_report.confidence},
                 "market_psychology": {"summary": _v36_psychology_report.summary, "confidence": _v36_psychology_report.confidence},
+                "time_intelligence": {"summary": _time_intelligence_department_v39["summary"], "confidence": _time_intelligence_department_v39["confidence"]},
                 "market_journey": {"summary": _market_journey_department_v37["summary"], "confidence": _market_journey_department_v37["confidence"]},
                 "smart_money": {"summary": _v24_money_report.summary, "confidence": _v24_money_report.confidence},
                 "risk": {"summary": _v24_risk_report.summary, "confidence": _v24_risk_report.confidence},
@@ -6189,7 +6251,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V38_3_BARRIER_INTELLIGENCE_2_BUNDLE",
+                "version": "V39_3_TIME_INTELLIGENCE_BUNDLE",
                 "market_psychology": {
                     "summary": _v36_psychology_report.summary,
                     "confidence": _v36_psychology_report.confidence,
@@ -6198,6 +6260,7 @@ try:
                 "communication_bus": _communication_trace_v32,
                 "case_history": _case_history_trace_v33,
                 "pattern_probability": _pattern_probability_trace_v34,
+                "time_intelligence": _time_intelligence_trace_v39,
                 "market_journey": _market_journey_trace_v37,
                 "case_id": _co_case_v26.case_id,
                 "case_strength": _co_case_v26.case_strength,
@@ -6541,7 +6604,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🧠 Nifty Seller AI V38.3 Barrier Intelligence 2.0</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🧠 Nifty Seller AI V39.3 Time Intelligence</div>", unsafe_allow_html=True)
 
 
 # =========================================================

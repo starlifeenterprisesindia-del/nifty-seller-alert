@@ -1,6 +1,6 @@
 """
 department_academy.py
-Version: V38.3
+Version: V39.3
 Role: Branch Academy, bounded observation memory, SOP review, and service-book metrics.
 
 Safety rules:
@@ -41,6 +41,7 @@ class DepartmentSOP:
         "PRICE_ACTION": ("trend", "barrier", "move_stage", "range"),
         "MARKET_BEHAVIOUR": ("barrier", "breakout", "reversal", "energy"),
         "MARKET_PSYCHOLOGY": ("psychology_state", "retail_fear", "retail_greed", "data_coverage", "psychology_case_report"),
+        "TIME_INTELLIGENCE": ("phase_code", "phase_label", "observed_behaviour", "continuation_factor", "reversal_adjustment", "confidence_cap"),
         "MARKET_JOURNEY": ("upside_remaining_points", "downside_remaining_points", "primary_direction", "reversal_risk", "barrier_adjustment_points", "barrier_statistics", "tracked_barriers"),
         "SMART_MONEY": ("fii", "dii", "heavyweights", "breadth"),
         "RISK": ("vix", "news", "expiry", "gap"),
@@ -172,6 +173,7 @@ class DepartmentAcademy:
         "PRICE_ACTION": "DSP Price Action",
         "MARKET_BEHAVIOUR": "DSP Market Behaviour",
         "MARKET_PSYCHOLOGY": "DSP Market Psychology",
+        "TIME_INTELLIGENCE": "DSP Time Intelligence",
         "MARKET_JOURNEY": "DSP Move & Barrier Intelligence",
         "SMART_MONEY": "DSP Smart Money",
         "RISK": "DSP Risk",
@@ -279,6 +281,8 @@ class DepartmentAcademy:
             lessons.append("Barrier response available for breakout/reversal learning.")
         if branch == "MARKET_PSYCHOLOGY" and "psychology_state" in facts:
             lessons.append("Consolidated psychology case recorded; outcome validation required before directional use.")
+        if branch == "TIME_INTELLIGENCE" and "phase_code" in facts:
+            lessons.append("Time-phase behaviour recorded; use only as bounded context until live validation.")
         if branch == "MARKET_JOURNEY" and "barrier_statistics" in facts:
             lessons.append("Barrier touch/bounce/break samples recorded; probability remains sample-size dependent.")
         return lessons or ["Observation recorded for future validation."]

@@ -1,8 +1,8 @@
 """
 market_journey.py
-Version: V38.3
-Department: Market Journey / Barrier Intelligence 2.0
-Status: V38.1 bounded barrier registry + V38.2 outcome statistics + V38.3 probability/strength profile
+Version: V39.3
+Department: Market Journey / Barrier Intelligence 2.0 with Time Intelligence
+Status: V38 barrier history + V39 time-conditioned move estimation
 
 Safety contract:
 - Improves the existing V35 Market Journey module; no duplicate move engine.
@@ -47,6 +47,11 @@ class MarketJourneyReport:
     barrier_statistics: Dict[str, Any]
     tracked_barriers: list[Dict[str, Any]]
     time_phase: str
+    time_phase_code: str
+    time_observed_behaviour: str
+    time_continuation_factor: float
+    time_reversal_adjustment: float
+    time_confidence_cap: float
     psychology_case_state: str
     authority: str
     execution_instruction: str
@@ -63,7 +68,7 @@ class MarketJourneyReport:
         summary = (
             f"Move Remaining {signed} pts | up room {self.upside_remaining_points:.0f} | "
             f"down room {self.downside_remaining_points:.0f} | barrier bounce {bounce:.0f}% / "
-            f"break {break_prob:.0f}% | reversal {self.reversal_risk}"
+            f"break {break_prob:.0f}% | time {self.time_phase} | reversal {self.reversal_risk}"
         )
         return {
             "summary": summary,
@@ -75,13 +80,13 @@ class MarketJourneyReport:
 class MarketJourneyEngine:
     """One-snapshot market journey investigator.
 
-    V38 does not create a second brain. It extends the existing V35 journey
-    investigator with an independent upside/downside room estimate and then
-    applies barrier and reversal-risk adjustments. The output is descriptive
-    evidence for CO; AI_MASTER retains all decision authority.
+    V39 does not create a second brain. It extends the existing V35/V38
+    journey investigator with bounded Time Intelligence evidence, then applies
+    barrier, psychology, and time-conditioned adjustments. The output remains
+    descriptive evidence for CO; AI_MASTER retains all decision authority.
     """
 
-    VERSION = "V38.3_BARRIER_INTELLIGENCE_2"
+    VERSION = "V39.3_TIME_CONDITIONED_MOVE_REMAINING"
     STATE_KEY = "v38_barrier_registry"
 
     def evaluate(
@@ -97,7 +102,9 @@ class MarketJourneyEngine:
         behaviour_report: Any,
         smart_money_report: Any,
         hour: int,
+        minute: int = 0,
         psychology_report: Any = None,
+        time_report: Any = None,
         observed_at: Optional[str] = None,
     ) -> MarketJourneyReport:
         price = float(price or 0.0)
@@ -110,6 +117,7 @@ class MarketJourneyEngine:
         b = self._details(behaviour_report)
         m = self._details(smart_money_report)
         psychology = self._details(psychology_report)
+        time_intelligence = self._details(time_report)
 
         trend = str(p.get("trend", {}).get("trend", ""))
         stage = str(p.get("move_stage", {}).get("stage", "Unknown"))
@@ -122,7 +130,12 @@ class MarketJourneyEngine:
 
         direction = self._direction(trend, pcr, strike_pressure, fii, heavy)
         barrier_type, barrier_level = self._nearest_barrier(price, support, resistance, direction)
-        time_phase = self._time_phase(hour)
+        time_phase = str(time_intelligence.get("phase_label") or self._time_phase(hour, minute))
+        time_phase_code = str(time_intelligence.get("phase_code", "LEGACY_TIME_PHASE"))
+        time_observed_behaviour = str(time_intelligence.get("observed_behaviour", "PHASE_BALANCED"))
+        time_continuation_factor = self._clamp(time_intelligence.get("continuation_factor", 1.0), 0.62, 1.18)
+        time_reversal_adjustment = self._clamp(time_intelligence.get("reversal_adjustment", 0.0), -8.0, 22.0)
+        time_confidence_cap = self._clamp(time_intelligence.get("confidence_cap", 88.0), 45.0, 88.0)
         oi_signal = str(o.get("oi", {}).get("signal", "Neutral"))
         barrier_context = self._update_barrier_registry(
             state=state,
@@ -158,11 +171,22 @@ class MarketJourneyEngine:
         psychology_state, psychology_up_factor, psychology_down_factor, psychology_reversal, psych_reasons, psych_warnings = (
             self._psychology_adjustment(psychology)
         )
-        reversal = self._clamp(reversal + psychology_reversal, 5.0, 95.0)
-        breakout = self._clamp(breakout - max(0.0, psychology_reversal * 0.45), 5.0, 95.0)
+        reversal = self._clamp(reversal + psychology_reversal + time_reversal_adjustment, 5.0, 95.0)
+        time_breakout_delta = (time_continuation_factor - 1.0) * 32.0
+        breakout = self._clamp(
+            breakout - max(0.0, psychology_reversal * 0.45) + time_breakout_delta,
+            5.0,
+            95.0,
+        )
         breakout, reversal = self._normalise_pair(breakout, reversal)
         reasons.extend(psych_reasons)
         warnings.extend(psych_warnings)
+        reasons.append(
+            f"Time Intelligence {time_phase}: continuation x{time_continuation_factor:.2f}, "
+            f"reversal adjustment {time_reversal_adjustment:+.0f}"
+        )
+        if time_observed_behaviour in {"TWO_WAY_WHIPSAW", "POSSIBLE_TIME_TRAP", "MOVE_STALLING_BY_TIME"}:
+            warnings.append(f"Time behaviour caution: {time_observed_behaviour}")
 
         raw_up, raw_down = self._two_sided_room(
             atr=atr,
@@ -174,6 +198,16 @@ class MarketJourneyEngine:
             psychology_up_factor=psychology_up_factor,
             psychology_down_factor=psychology_down_factor,
         )
+        counter_time_factor = self._clamp(1.0 + max(0.0, time_reversal_adjustment) / 100.0, 1.0, 1.22)
+        if direction == "UP":
+            raw_up *= time_continuation_factor
+            raw_down *= counter_time_factor
+        elif direction == "DOWN":
+            raw_down *= time_continuation_factor
+            raw_up *= counter_time_factor
+        else:
+            raw_up *= min(1.0, time_continuation_factor)
+            raw_down *= min(1.0, time_continuation_factor)
 
         adjusted_up, up_adjustment, up_barrier_distance = self._apply_barrier_cap(
             raw_room=raw_up,
@@ -250,13 +284,14 @@ class MarketJourneyEngine:
             resistance=resistance,
             psychology=psychology,
         )
+        confidence = min(confidence, time_confidence_cap)
 
         if active_barrier_distance is not None and primary_adjustment > 0.5:
             reasons.append(
                 f"Nearby barrier reduced the primary room estimate by {primary_adjustment:.1f} points"
             )
 
-        if time_phase in {"Opening Shock Zone", "Late Move Zone"}:
+        if time_phase_code in {"OPENING_SHOCK", "OPENING_DISCOVERY", "LATE_MOVE", "CLOSING_PRESSURE"}:
             warnings.append(f"{time_phase}: estimate can change quickly on the next snapshot.")
         if primary_direction == "RANGE":
             warnings.append("No dominant direction; use the two-sided room, not a single target.")
@@ -293,6 +328,11 @@ class MarketJourneyEngine:
             barrier_statistics=barrier_statistics,
             tracked_barriers=tracked_barriers,
             time_phase=time_phase,
+            time_phase_code=time_phase_code,
+            time_observed_behaviour=time_observed_behaviour,
+            time_continuation_factor=round(time_continuation_factor, 3),
+            time_reversal_adjustment=round(time_reversal_adjustment, 1),
+            time_confidence_cap=round(time_confidence_cap, 1),
             psychology_case_state=psychology_state,
             authority="EVIDENCE_ONLY_TO_CO",
             execution_instruction="NONE",
@@ -930,15 +970,22 @@ class MarketJourneyEngine:
         return "LOW"
 
     @staticmethod
-    def _time_phase(hour):
-        if 9 <= hour < 10:
-            return "Opening Shock Zone"
-        if 11 <= hour < 12:
-            return "Midday Decision Zone"
-        if 12 <= hour < 14:
-            return "Range / Lunch Zone"
-        if 14 <= hour < 15:
-            return "Late Move Zone"
+    def _time_phase(hour, minute=0):
+        total = int(hour) * 60 + int(minute)
+        if 555 <= total < 570:
+            return "9:15 Opening Shock"
+        if 570 <= total < 600:
+            return "9:30 Opening Discovery"
+        if 600 <= total < 645:
+            return "10:00 First Confirmation"
+        if 690 <= total < 735:
+            return "11:30 Midday Decision"
+        if 735 <= total < 810:
+            return "12:15 Lunch / Range Zone"
+        if 870 <= total < 905:
+            return "14:30 Late Move Zone"
+        if 905 <= total < 931:
+            return "15:05 Closing Pressure"
         return "Normal Session"
 
     @staticmethod
