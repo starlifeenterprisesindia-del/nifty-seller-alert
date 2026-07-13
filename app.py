@@ -194,7 +194,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_5_RECOVERY_DATA_INTEGRITY_DIAGNOSTIC",
+        "version": "V50_6_DHAN_AUTO_FEEDS_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1327,6 +1327,7 @@ IST = ZoneInfo("Asia/Kolkata")
 DHAN_BASE = "https://api.dhan.co/v2"
 DHAN_INSTRUMENT_MASTER = "https://images.dhan.co/api-data/api-scrip-master.csv"
 DEFAULT_NIFTY_SECURITY_ID = 13
+DEFAULT_INDIA_VIX_SECURITY_ID = 21
 DEFAULT_NIFTY_SEGMENT = "IDX_I"
 
 # Official Nifty 50 factsheet dated 30-Jun-2026.
@@ -1345,7 +1346,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.5 Recovery & Data Integrity",
+    page_title="Nifty Seller AI V50.6 Dhan Auto Feeds",
     page_icon="🧠",
     layout="wide",
 )
@@ -1648,12 +1649,21 @@ def resolve_heavyweight_security_ids(master_df):
 
 
 @st.cache_data(ttl=4, show_spinner=False)
-def get_dhan_market_bundle(client_id, access_token, heavyweight_ids, nifty_security_id=DEFAULT_NIFTY_SECURITY_ID):
-    """One Dhan Market Quote request for Nifty + eight tracked heavyweight equities."""
+def get_dhan_market_bundle(
+    client_id,
+    access_token,
+    heavyweight_ids,
+    nifty_security_id=DEFAULT_NIFTY_SECURITY_ID,
+    india_vix_security_id=DEFAULT_INDIA_VIX_SECURITY_ID,
+):
+    """One Dhan Market Quote request for Nifty, India VIX and tracked equities."""
     if not client_id or not access_token:
         return {"success": False, "message": "Dhan credentials missing."}
     try:
-        body = {"IDX_I": [int(nifty_security_id)]}
+        index_ids = [int(nifty_security_id)]
+        if india_vix_security_id and int(india_vix_security_id) not in index_ids:
+            index_ids.append(int(india_vix_security_id))
+        body = {"IDX_I": index_ids}
         if heavyweight_ids:
             body["NSE_EQ"] = [int(v) for v in heavyweight_ids.values()]
 
@@ -1865,57 +1875,70 @@ def get_yahoo_vix():
 
 
 
-@st.cache_data(ttl=10, show_spinner=False)
-def get_yahoo_price_action():
-    """Automatic Price Action from Nifty intraday candles.
-    Dhan option-chain remains primary; this gives live auto EMA/VWAP/ATR/High-Low fallback
-    instead of stale manual sidebar values.
-    """
+def _build_price_action_from_candles(df, source):
+    """Normalize candle data and derive the single automatic PA evidence set."""
     try:
-        ticker = yf.Ticker("^NSEI")
-        df = ticker.history(period="5d", interval="5m").dropna()
-        if df.empty or len(df) < 60:
-            return {"success": False, "message": "Not enough Nifty candles for Price Action."}
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC").tz_convert(IST)
+        if df is None or df.empty:
+            return {"success": False, "message": f"{source}: no candles", "source": source}
+        required = {"Open", "High", "Low", "Close"}
+        if not required.issubset(df.columns):
+            return {"success": False, "message": f"{source}: OHLC columns missing", "source": source}
+
+        work = df.copy()
+        if not isinstance(work.index, pd.DatetimeIndex):
+            return {"success": False, "message": f"{source}: timestamp index missing", "source": source}
+        if work.index.tz is None:
+            work.index = work.index.tz_localize("UTC").tz_convert(IST)
         else:
-            df.index = df.index.tz_convert(IST)
-        close = df["Close"].astype(float)
-        high = df["High"].astype(float)
-        low = df["Low"].astype(float)
-        volume = df["Volume"].astype(float) if "Volume" in df.columns else pd.Series([0]*len(df), index=df.index)
+            work.index = work.index.tz_convert(IST)
+        work = work.sort_index()
+        work = work[~work.index.duplicated(keep="last")]
+        for col in ("Open", "High", "Low", "Close", "Volume"):
+            if col in work.columns:
+                work[col] = pd.to_numeric(work[col], errors="coerce")
+        work = work.dropna(subset=["Open", "High", "Low", "Close"])
+        if len(work) < 60:
+            return {"success": False, "message": f"{source}: only {len(work)} candles; minimum 60", "source": source}
+
+        close = work["Close"].astype(float)
+        high = work["High"].astype(float)
+        low = work["Low"].astype(float)
         ema20_v = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
         ema50_v = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
-        # VWAP for current trading date. If volume is unavailable/zero, fall back to typical price mean.
-        today_date = df.index[-1].date()
-        today_df = df[df.index.date == today_date].copy()
+
+        today_date = work.index[-1].date()
+        today_df = work[work.index.date == today_date].copy()
         if today_df.empty:
-            today_df = df.tail(75).copy()
+            today_df = work.tail(75).copy()
         typical = (today_df["High"] + today_df["Low"] + today_df["Close"]) / 3.0
-        vol = today_df["Volume"] if "Volume" in today_df.columns else pd.Series([0]*len(today_df), index=today_df.index)
-        if float(vol.sum() or 0) > 0:
-            vwap_v = float((typical * vol).sum() / vol.sum())
+        vol = today_df["Volume"] if "Volume" in today_df.columns else pd.Series([0] * len(today_df), index=today_df.index)
+        if float(vol.fillna(0).sum() or 0) > 0:
+            vwap_v = float((typical * vol.fillna(0)).sum() / vol.fillna(0).sum())
         else:
             vwap_v = float(typical.mean())
-        prev_dates = sorted(set(df.index.date))
+
+        dates = sorted(set(work.index.date))
         prev_day_high_v = float(high.max())
         prev_day_low_v = float(low.min())
-        if len(prev_dates) >= 2:
-            prev_df = df[df.index.date == prev_dates[-2]]
+        if len(dates) >= 2:
+            prev_df = work[work.index.date == dates[-2]]
             if not prev_df.empty:
                 prev_day_high_v = float(prev_df["High"].max())
                 prev_day_low_v = float(prev_df["Low"].min())
+
         today_high_v = float(today_df["High"].max())
         today_low_v = float(today_df["Low"].min())
-        # Opening range 09:15 to 09:30/09:45 if available
         or_df = today_df.between_time("09:15", "09:45")
         if or_df.empty:
             or_df = today_df.head(6)
         or_high_v = float(or_df["High"].max()) if not or_df.empty else today_high_v
         or_low_v = float(or_df["Low"].min()) if not or_df.empty else today_low_v
+
         prev_close = close.shift(1)
-        tr = pd.concat([(high-low).abs(), (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
-        atr5_v = float(tr.rolling(14).mean().dropna().iloc[-1]) if not tr.rolling(14).mean().dropna().empty else 0.0
+        tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+        atr_series = tr.rolling(14).mean().dropna()
+        atr5_v = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
+
         latest_15 = today_df.tail(3) if len(today_df) >= 3 else today_df.tail(1)
         candle15_auto = {
             "open": float(latest_15["Open"].iloc[0]) if not latest_15.empty else float(close.iloc[-1]),
@@ -1923,6 +1946,8 @@ def get_yahoo_price_action():
             "low": float(latest_15["Low"].min()) if not latest_15.empty else float(low.iloc[-1]),
             "close": float(latest_15["Close"].iloc[-1]) if not latest_15.empty else float(close.iloc[-1]),
         }
+        latest_ts = work.index[-1]
+        age_seconds = max(0.0, (datetime.now(IST) - latest_ts.to_pydatetime()).total_seconds())
         return {
             "success": True,
             "ema20": ema20_v,
@@ -1936,12 +1961,82 @@ def get_yahoo_price_action():
             "opening_range_high": or_high_v,
             "opening_range_low": or_low_v,
             "candle15": candle15_auto,
+            "latest_candle_at": latest_ts.strftime("%d-%m-%Y %H:%M:%S"),
+            "candle_age_seconds": age_seconds,
+            "candle_count": int(len(work)),
             "fetched_at": fmt_time(),
-            "source": "Yahoo candles auto",
+            "source": source,
             "message": "OK",
         }
     except Exception as exc:
-        return {"success": False, "message": f"Price Action auto error: {exc}", "source": "Manual"}
+        return {"success": False, "message": f"{source} calculation error: {exc}", "source": source}
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def get_dhan_price_action(client_id, access_token, security_id=DEFAULT_NIFTY_SECURITY_ID):
+    """Primary automatic Nifty 5-minute candles from Dhan Historical Data API."""
+    if not client_id or not access_token:
+        return {"success": False, "message": "Dhan credentials missing for intraday candles.", "source": "Dhan candles"}
+    try:
+        now = datetime.now(IST)
+        from_dt = (now - timedelta(days=8)).replace(hour=9, minute=15, second=0, microsecond=0)
+        to_dt = now + timedelta(minutes=1)
+        response = requests.post(
+            f"{DHAN_BASE}/charts/intraday",
+            headers=dhan_headers(client_id, access_token),
+            json={
+                "securityId": str(int(security_id)),
+                "exchangeSegment": DEFAULT_NIFTY_SEGMENT,
+                "instrument": "INDEX",
+                "interval": "5",
+                "oi": False,
+                "fromDate": from_dt.strftime("%Y-%m-%d %H:%M:%S"),
+                "toDate": to_dt.strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            timeout=15,
+        )
+        if response.status_code != 200:
+            return {
+                "success": False,
+                "message": f"Dhan intraday HTTP {response.status_code}: {response.text[:180]}",
+                "source": "Dhan candles",
+            }
+        payload = response.json()
+        if isinstance(payload, dict) and payload.get("status") not in (None, "success"):
+            return {"success": False, "message": f"Dhan intraday failed: {payload}", "source": "Dhan candles"}
+        data = payload.get("data", payload) if isinstance(payload, dict) else {}
+        arrays = {name: data.get(name, []) for name in ("open", "high", "low", "close", "volume", "timestamp")}
+        sizes = [len(v) for v in arrays.values() if isinstance(v, list)]
+        if not sizes or min(sizes) < 60:
+            count = min(sizes) if sizes else 0
+            return {"success": False, "message": f"Dhan intraday returned only {count} candles.", "source": "Dhan candles"}
+        n = min(sizes)
+        index = pd.to_datetime(arrays["timestamp"][:n], unit="s", utc=True).tz_convert(IST)
+        df = pd.DataFrame(
+            {
+                "Open": arrays["open"][:n],
+                "High": arrays["high"][:n],
+                "Low": arrays["low"][:n],
+                "Close": arrays["close"][:n],
+                "Volume": arrays["volume"][:n],
+            },
+            index=index,
+        )
+        return _build_price_action_from_candles(df, "Dhan 5m candles")
+    except Exception as exc:
+        return {"success": False, "message": f"Dhan intraday error: {exc}", "source": "Dhan candles"}
+
+
+@st.cache_data(ttl=10, show_spinner=False)
+def get_yahoo_price_action():
+    """Secondary automatic candle fallback when Dhan intraday is unavailable."""
+    try:
+        ticker = yf.Ticker("^NSEI")
+        df = ticker.history(period="5d", interval="5m").dropna()
+        return _build_price_action_from_candles(df, "Yahoo 5m fallback")
+    except Exception as exc:
+        return {"success": False, "message": f"Yahoo Price Action error: {exc}", "source": "Yahoo candles"}
+
 
 @st.cache_data(ttl=60, show_spinner=False)
 def get_yahoo_heavyweights():
@@ -3782,7 +3877,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.5 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.6 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -4120,7 +4215,9 @@ with st.sidebar.expander("9️⃣ V16 Active Trade / Discipline", expanded=True)
 # =========================================================
 master_result = get_dhan_instrument_master() if (prefer_dhan and dhan_ready) else {"success": False, "df": pd.DataFrame()}
 heavyweight_ids = resolve_heavyweight_security_ids(master_result.get("df", pd.DataFrame())) if master_result.get("success") else {}
-dhan_bundle = get_dhan_market_bundle(client_id, access_token, heavyweight_ids, nifty_security_id) if (prefer_dhan and dhan_ready) else {"success": False, "message": "Dhan disabled."}
+dhan_bundle = get_dhan_market_bundle(
+    client_id, access_token, heavyweight_ids, nifty_security_id, DEFAULT_INDIA_VIX_SECURITY_ID
+) if (prefer_dhan and dhan_ready) else {"success": False, "message": "Dhan disabled."}
 
 # Nifty
 nifty_source = "Manual"
@@ -4149,28 +4246,67 @@ else:
     nifty_change_pct = yahoo_nifty.get("change_pct", manual_nifty_change_pct) if yahoo_nifty.get("success") else manual_nifty_change_pct
     nifty_source = yahoo_nifty.get("source", "Manual") if yahoo_nifty.get("success") else "Manual"
 
-# VIX - value and source status are kept separate so a manual 13.50 can
-# never be displayed as an automatic/live India VIX reading.
-yahoo_vix = get_yahoo_vix()
-vix_live_ok = bool(yahoo_vix.get("success"))
-if vix_live_ok:
-    vix = float(yahoo_vix["vix"])
-    vix_change_pct = float(yahoo_vix["change_pct"])
-    vix_source = yahoo_vix.get("source", "Yahoo fallback")
-    vix_status = "LIVE/FALLBACK FEED"
+# VIX automatic source order: Dhan live index quote -> Yahoo -> manual.
+# Dhan instrument master maps India VIX to IDX_I security ID 21.
+vix_live_ok = False
+vix_failure_message = ""
+dhan_vix_item = {}
+if dhan_bundle.get("success"):
+    _idx_map_vix = (dhan_bundle.get("data", {}) or {}).get("IDX_I", {}) or {}
+    dhan_vix_item = _idx_map_vix.get(str(DEFAULT_INDIA_VIX_SECURITY_ID), {}) or _idx_map_vix.get(DEFAULT_INDIA_VIX_SECURITY_ID, {}) or {}
+if dhan_vix_item and float(dhan_vix_item.get("last_price", 0) or 0) > 0:
+    vix = float(dhan_vix_item.get("last_price", 0) or 0)
+    _vix_ohlc = dhan_vix_item.get("ohlc", {}) or {}
+    _vix_prev = float(_vix_ohlc.get("close", 0) or 0)
+    vix_change_pct = pct_change(vix, _vix_prev) if _vix_prev else 0.0
+    vix_source = "DhanHQ Live"
+    vix_status = "AUTO_DHAN"
+    vix_live_ok = True
 else:
-    vix = manual_vix
-    vix_change_pct = manual_vix_change_pct
-    vix_source = "Manual"
-    vix_status = "MANUAL"
+    yahoo_vix = get_yahoo_vix()
+    if yahoo_vix.get("success"):
+        vix = float(yahoo_vix["vix"])
+        vix_change_pct = float(yahoo_vix["change_pct"])
+        vix_source = yahoo_vix.get("source", "Yahoo fallback")
+        vix_status = "AUTO_YAHOO"
+        vix_live_ok = True
+    else:
+        vix = manual_vix
+        vix_change_pct = manual_vix_change_pct
+        vix_source = "Manual"
+        vix_status = "MANUAL"
+        vix_failure_message = str(yahoo_vix.get("message", "Dhan and Yahoo VIX unavailable"))
 
 
-# V16 Automatic Price Action. If automatic candles fail while Auto is ON,
-# stale sidebar defaults are excluded from directional scoring.
+# Automatic Price Action source order: Dhan 5m candles -> Yahoo 5m fallback.
+# If both fail while Auto is ON, stale sidebar defaults are excluded.
 price_action_auto_ok = False
 price_action_manual_active = not bool(auto_price_action)
+price_action_result = {"success": False, "message": "Automatic price action disabled", "source": "Manual"}
 if auto_price_action:
-    price_action_result = get_yahoo_price_action()
+    if prefer_dhan and dhan_ready:
+        price_action_result = get_dhan_price_action(client_id, access_token, nifty_security_id)
+    if not price_action_result.get("success"):
+        _dhan_pa_message = str(price_action_result.get("message", "Dhan candles unavailable"))
+        _yahoo_pa = get_yahoo_price_action()
+        if _yahoo_pa.get("success"):
+            price_action_result = _yahoo_pa
+            price_action_result["fallback_from"] = _dhan_pa_message
+        else:
+            price_action_result = {
+                "success": False,
+                "source": "UNAVAILABLE",
+                "message": f"{_dhan_pa_message} | {str(_yahoo_pa.get('message', 'Yahoo candles unavailable'))}",
+            }
+    if price_action_result.get("success"):
+        _pa_age_seconds = float(price_action_result.get("candle_age_seconds", 0) or 0)
+        _pa_market_open = market_status()[0] == "Market Open"
+        if _pa_market_open and _pa_age_seconds > 900:
+            price_action_result = {
+                **price_action_result,
+                "success": False,
+                "message": f"Automatic candle is stale ({_pa_age_seconds/60:.1f} minutes old).",
+            }
     if price_action_result.get("success"):
         price_action_auto_ok = True
         ema20 = float(price_action_result.get("ema20", ema20))
@@ -4185,9 +4321,7 @@ if auto_price_action:
         opening_range_low = float(price_action_result.get("opening_range_low", opening_range_low))
         price_action_source = price_action_result.get("source", "Auto candles")
     else:
-        price_action_source = "UNAVAILABLE (auto failed; manual defaults excluded)"
-        # Dhan quote OHLC is allowed only for session high/low facts, not for
-        # EMA/VWAP direction. This keeps barriers sensible without inventing PA.
+        price_action_source = "UNAVAILABLE (Dhan/Yahoo candles failed; manual defaults excluded)"
         if isinstance(dhan_index_ohlc, dict) and dhan_index_ohlc:
             today_high = float(dhan_index_ohlc.get("high", price) or price)
             today_low = float(dhan_index_ohlc.get("low", price) or price)
@@ -4340,15 +4474,30 @@ smart_money_bias = signed_clamp(smart_money_bias)
 
 heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
 
-# V50.5 central source registry: every status panel and department reads the
+# V50.6 central source registry: every status panel and department reads the
 # same truth instead of independently saying OI OK / UNKNOWN or VIX live/manual.
+_pa_registry_status = (
+    "AUTO_DHAN" if price_action_auto_ok and str(price_action_source).lower().startswith("dhan")
+    else "AUTO_YAHOO" if price_action_auto_ok
+    else "MANUAL" if price_action_manual_active
+    else "UNAVAILABLE"
+)
 source_registry = {
     "nifty": {"ready": bool(dhan_bundle.get("success")), "source": nifty_source, "status": "LIVE" if str(nifty_source).lower().startswith("dhan") else "FALLBACK"},
     "expiry": {"ready": bool(expiry_result.get("success")), "source": "DhanHQ", "status": "READY" if expiry_result.get("success") else "MISSING"},
     "option_chain": {"ready": bool(option_chain.get("success")), "source": option_chain.get("source", "DhanHQ") if isinstance(option_chain, dict) else "DhanHQ", "status": "LIVE" if option_chain.get("success") else "MISSING"},
     "oi": {"ready": bool(option_analysis.get("success")), "snapshot_ready": bool(option_analysis.get("snapshot_ready", False)), "status": "SNAPSHOT_READY" if option_analysis.get("snapshot_ready") else ("DAY_CHANGE_ONLY" if option_analysis.get("success") else "MISSING")},
-    "price_action": {"ready": bool(price_action_direction_usable), "automatic": bool(price_action_auto_ok), "source": price_action_source, "status": "AUTO" if price_action_auto_ok else ("MANUAL" if price_action_manual_active else "UNAVAILABLE")},
-    "vix": {"ready": bool(vix_live_ok or vix_source == "Manual"), "automatic": bool(vix_live_ok), "source": vix_source, "status": vix_status},
+    "price_action": {
+        "ready": bool(price_action_direction_usable), "automatic": bool(price_action_auto_ok),
+        "source": price_action_source, "status": _pa_registry_status,
+        "message": str(price_action_result.get("message", "")),
+        "latest_candle_at": str(price_action_result.get("latest_candle_at", "")),
+        "candle_age_seconds": float(price_action_result.get("candle_age_seconds", 0) or 0),
+    },
+    "vix": {
+        "ready": bool(vix_live_ok or vix_source == "Manual"), "automatic": bool(vix_live_ok),
+        "source": vix_source, "status": vix_status, "message": vix_failure_message,
+    },
     "heavyweights": {"ready": bool(heavy_analysis.get("success")), "source": heavy_analysis.get("source", "Unknown") if isinstance(heavy_analysis, dict) else "Unknown", "status": "READY" if heavy_analysis.get("success") else "MISSING"},
 }
 
@@ -4450,7 +4599,7 @@ elif final_direction <= -24 and confidence >= 58:
 else:
     final_trade = "WAIT"
 
-# V50.5 compatibility safety: the legacy path is evidence-only, but it must
+# V50.6 compatibility safety: the legacy path is evidence-only, but it must
 # never preserve a continuation trade against the verified live movement phase.
 _movement_phase_legacy = str((live_movement or {}).get("phase", "NORMAL")) if isinstance(locals().get("live_movement", {}), dict) else "NORMAL"
 if _movement_phase_legacy in {"STRONG_RECOVERY", "RECOVERY"} and final_trade == "SELL CE":
@@ -7766,7 +7915,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.5_RECOVERY_DATA_INTEGRITY_PDF",
+            "version": "V50.6_DHAN_AUTO_FEEDS_PDF",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -7834,7 +7983,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_5_RECOVERY_DATA_INTEGRITY",
+                "version": "V50_6_DHAN_AUTO_FEEDS",
                 "pipeline_status": "READY",
                 "pipeline_error": "",
                 "import_errors": {},
@@ -7968,7 +8117,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.5_RECOVERY_DATA_INTEGRITY_PDF",
+            "version": "V50.6_DHAN_AUTO_FEEDS_PDF",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -7993,7 +8142,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.5_RECOVERY_DATA_INTEGRITY_PDF",
+        "version": "V50.6_DHAN_AUTO_FEEDS_PDF",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8262,7 +8411,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.5 Recovery & Data Integrity</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.6 Dhan Auto Feeds</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -8421,7 +8570,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.5 Live Market Readiness Gate")
+st.markdown("### ✅ V50.6 Live Market Readiness Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -8442,8 +8591,12 @@ if not _v504_core_ready or (_v504_market_open and not _v504_flow_fresh):
     if not _v504_dhan_quote_ok: _v504_gate_reasons.append("Dhan NIFTY quote missing")
     if not _v504_expiry_ok: _v504_gate_reasons.append("Dhan expiry list missing")
     if not _v504_oc_ok: _v504_gate_reasons.append("Dhan option chain missing")
-    if not _v504_pa_ok: _v504_gate_reasons.append("Automatic price action unavailable")
-    if not _v504_vix_ok: _v504_gate_reasons.append("Automatic India VIX unavailable")
+    if not _v504_pa_ok:
+        _pa_err = str((source_registry.get("price_action", {}) or {}).get("message", ""))[:120]
+        _v504_gate_reasons.append("Automatic price action unavailable" + (f" ({_pa_err})" if _pa_err else ""))
+    if not _v504_vix_ok:
+        _vix_err = str((source_registry.get("vix", {}) or {}).get("message", ""))[:120]
+        _v504_gate_reasons.append("Automatic India VIX unavailable" + (f" ({_vix_err})" if _vix_err else ""))
     if not _v504_hw_ok: _v504_gate_reasons.append("Heavyweight data unavailable")
     if _v504_quality < 70: _v504_gate_reasons.append(f"Data quality only {_v504_quality:.0f}%")
     if _v504_market_open and not _v504_flow_fresh: _v504_gate_reasons.append(f"Snapshot flow {_v504_flow_state}")
@@ -8497,7 +8650,7 @@ try:
 except Exception:
     pass
 
-# V50.5 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
+# V50.6 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
 # inside Streamlit, so it works as a normal mobile download.
 try:
     if V505_PDF_REPORT_READY:
@@ -8534,7 +8687,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.5"),
+                "Version": AI_MASTER.get("version", "V50.6"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),
