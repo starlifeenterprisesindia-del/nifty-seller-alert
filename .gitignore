@@ -11,3 +11,6 @@ __pycache__/
 .venv/
 __pycache__/
 *.pyc
+
+# V50.5 transient same-day runtime memory
+.runtime_state/

@@ -1,0 +1,118 @@
+"""App-native PDF report generator for Nifty Seller AI V50.5."""
+from __future__ import annotations
+
+from io import BytesIO
+from html import escape
+from typing import Any, Iterable, Mapping
+
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Paragraph,
+    Spacer,
+    Table,
+    TableStyle,
+    PageBreak,
+)
+
+
+def _text(value: Any) -> str:
+    if value is None:
+        return "-"
+    return escape(str(value).replace("₹", "INR ").replace("—", "-").replace("–", "-"))
+
+
+def _rows(value: Any) -> list[dict]:
+    return [dict(item) for item in value if isinstance(item, Mapping)] if isinstance(value, list) else []
+
+
+def _table(data: list[dict], max_rows: int = 40) -> Table | Paragraph:
+    if not data:
+        return Paragraph("No data available.", getSampleStyleSheet()["BodyText"])
+    columns = list(data[0].keys())
+    matrix = [[_text(col) for col in columns]]
+    for row in data[:max_rows]:
+        matrix.append([_text(row.get(col, "-")) for col in columns])
+    width = 265 * mm
+    col_width = width / max(1, len(columns))
+    table = Table(matrix, repeatRows=1, colWidths=[col_width] * len(columns))
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 6.2),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9CA3AF")),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),
+        ("LEFTPADDING", (0, 0), (-1, -1), 2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2),
+    ]))
+    return table
+
+
+def _page_number(canvas, doc):
+    canvas.saveState()
+    canvas.setFont("Helvetica", 7)
+    canvas.drawRightString(285 * mm, 8 * mm, f"Page {doc.page}")
+    canvas.restoreState()
+
+
+def build_ai_report_pdf(report: Mapping[str, Any]) -> bytes:
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=landscape(A4),
+        rightMargin=10 * mm,
+        leftMargin=10 * mm,
+        topMargin=10 * mm,
+        bottomMargin=12 * mm,
+        title="Nifty Seller AI Live Report",
+    )
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="TitleCenter", parent=styles["Title"], alignment=TA_CENTER, fontSize=17, leading=20))
+    styles.add(ParagraphStyle(name="Section", parent=styles["Heading2"], fontSize=11, leading=13, spaceBefore=7, spaceAfter=4))
+    styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=8, leading=10))
+
+    story = [
+        Paragraph("Nifty Seller AI - Live Market Report", styles["TitleCenter"]),
+        Paragraph(_text(report.get("generated_at", "")), styles["Small"]),
+        Spacer(1, 4 * mm),
+    ]
+
+    summary = report.get("summary", {}) if isinstance(report.get("summary"), Mapping) else {}
+    summary_rows = [{"Field": key, "Value": value} for key, value in summary.items()]
+    story += [Paragraph("Executive Summary", styles["Section"]), _table(summary_rows, max_rows=60)]
+
+    for title, key in (
+        ("Source and Readiness Status", "source_rows"),
+        ("Signal Reliability", "evidence_rows"),
+        ("Strategy Matrix", "strategy_rows"),
+        ("Candidate Matrix", "candidate_rows"),
+        ("Option Chain Analysis", "option_rows"),
+        ("Department Status", "department_rows"),
+    ):
+        rows = _rows(report.get(key, []))
+        if not rows:
+            continue
+        story += [Spacer(1, 3 * mm), Paragraph(title, styles["Section"]), _table(rows)]
+        if key in {"option_rows", "department_rows"}:
+            story.append(PageBreak())
+
+    reasons = report.get("reasons", []) if isinstance(report.get("reasons"), list) else []
+    warnings = report.get("warnings", []) if isinstance(report.get("warnings"), list) else []
+    story += [Paragraph("AI Reasons", styles["Section"])]
+    story.append(Paragraph("<br/>".join(f"- {_text(item)}" for item in reasons) or "- None", styles["Small"]))
+    story += [Paragraph("Warnings / Blockers", styles["Section"])]
+    story.append(Paragraph("<br/>".join(f"- {_text(item)}" for item in warnings) or "- None", styles["Small"]))
+    story.append(Spacer(1, 3 * mm))
+    story.append(Paragraph("Decision-support only. Verify broker data, chart confirmation, spreads, margin and hedge before any trade.", styles["Small"]))
+
+    doc.build(story, onFirstPage=_page_number, onLaterPages=_page_number)
+    return buffer.getvalue()

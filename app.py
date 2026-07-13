@@ -12,6 +12,25 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
+try:
+    from live_market_state import (
+        update_live_market_state,
+        load_previous_snapshot,
+        save_latest_snapshot,
+        load_option_delta_state,
+        save_option_delta_state,
+        update_projection_memory,
+    )
+    V505_LIVE_STATE_READY = True
+except Exception:
+    V505_LIVE_STATE_READY = False
+
+try:
+    from report_pdf import build_ai_report_pdf
+    V505_PDF_REPORT_READY = True
+except Exception:
+    V505_PDF_REPORT_READY = False
+
 
 # V19.5.1 Full Audit Fix module import.
 try:
@@ -175,7 +194,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_4_LIVE_READINESS_DIAGNOSTIC",
+        "version": "V50_5_RECOVERY_DATA_INTEGRITY_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1326,7 +1345,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.4 Live Readiness",
+    page_title="Nifty Seller AI V50.5 Recovery & Data Integrity",
     page_icon="🧠",
     layout="wide",
 )
@@ -1897,6 +1916,13 @@ def get_yahoo_price_action():
         prev_close = close.shift(1)
         tr = pd.concat([(high-low).abs(), (high-prev_close).abs(), (low-prev_close).abs()], axis=1).max(axis=1)
         atr5_v = float(tr.rolling(14).mean().dropna().iloc[-1]) if not tr.rolling(14).mean().dropna().empty else 0.0
+        latest_15 = today_df.tail(3) if len(today_df) >= 3 else today_df.tail(1)
+        candle15_auto = {
+            "open": float(latest_15["Open"].iloc[0]) if not latest_15.empty else float(close.iloc[-1]),
+            "high": float(latest_15["High"].max()) if not latest_15.empty else float(high.iloc[-1]),
+            "low": float(latest_15["Low"].min()) if not latest_15.empty else float(low.iloc[-1]),
+            "close": float(latest_15["Close"].iloc[-1]) if not latest_15.empty else float(close.iloc[-1]),
+        }
         return {
             "success": True,
             "ema20": ema20_v,
@@ -1909,6 +1935,7 @@ def get_yahoo_price_action():
             "today_low": today_low_v,
             "opening_range_high": or_high_v,
             "opening_range_low": or_low_v,
+            "candle15": candle15_auto,
             "fetched_at": fmt_time(),
             "source": "Yahoo candles auto",
             "message": "OK",
@@ -1979,7 +2006,7 @@ def get_yahoo_heavyweights():
 # SNAPSHOT DELTAS + OPTION INTELLIGENCE
 # =========================================================
 def attach_option_snapshot_deltas(rows, snapshot_id):
-    """Add snapshot-to-snapshot deltas for OI acceleration. First snapshot is day-change only."""
+    """Add fresh snapshot deltas and preserve them across browser reconnects."""
     current_map = {}
     for row in rows:
         for side in ("ce", "pe"):
@@ -1993,17 +2020,34 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
     previous_map = st.session_state.get("oc_snapshot_map", {})
     stored_deltas = st.session_state.get("oc_snapshot_deltas", {})
 
+    # Full browser reconnect can create a fresh Streamlit session. Reload the
+    # compact same-day option state instead of calling it the first snapshot.
+    if (not previous_map) and V505_LIVE_STATE_READY:
+        try:
+            persisted = load_option_delta_state()
+            last_id = persisted.get("snapshot_id", last_id)
+            previous_map = {}
+            for key, value in (persisted.get("current_map", {}) or {}).items():
+                strike_text, side = str(key).split("|", 1)
+                previous_map[(float(strike_text), side)] = value
+            stored_deltas = {}
+            for key, value in (persisted.get("deltas", {}) or {}).items():
+                strike_text, side = str(key).split("|", 1)
+                stored_deltas[(float(strike_text), side)] = value
+        except Exception:
+            previous_map, stored_deltas = {}, {}
+
     if snapshot_id != last_id:
         deltas = {}
         for key, current in current_map.items():
             previous = previous_map.get(key)
             if previous:
                 deltas[key] = {
-                    "price": current["ltp"] - previous["ltp"],
-                    "price_pct": pct_change(current["ltp"], previous["ltp"]),
-                    "oi": current["oi"] - previous["oi"],
-                    "oi_pct": pct_change(current["oi"], previous["oi"]),
-                    "volume": current["volume"] - previous["volume"],
+                    "price": current["ltp"] - previous.get("ltp", 0),
+                    "price_pct": pct_change(current["ltp"], previous.get("ltp", 0)),
+                    "oi": current["oi"] - previous.get("oi", 0),
+                    "oi_pct": pct_change(current["oi"], previous.get("oi", 0)),
+                    "volume": current["volume"] - previous.get("volume", 0),
                     "ready": True,
                 }
             else:
@@ -2012,6 +2056,16 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
         st.session_state["oc_snapshot_id"] = snapshot_id
         st.session_state["oc_snapshot_deltas"] = deltas
         stored_deltas = deltas
+        if V505_LIVE_STATE_READY:
+            try:
+                save_option_delta_state({
+                    "snapshot_id": snapshot_id,
+                    "current_map": {f"{key[0]}|{key[1]}": value for key, value in current_map.items()},
+                    "deltas": {f"{key[0]}|{key[1]}": value for key, value in deltas.items()},
+                    "saved_at": datetime.now(IST).isoformat(timespec="seconds"),
+                })
+            except Exception:
+                pass
 
     output = []
     for row in rows:
@@ -2173,15 +2227,31 @@ def score_sell_candidate(side, row, signal_info, spot):
 
 
 def analyze_option_chain(option_chain):
+    """Interpret current option flow without over-weighting stale day changes.
+
+    Snapshot-to-snapshot OI/price evidence gets full weight. Exchange day-change
+    remains useful on the first sample but is deliberately discounted. Strong
+    PE support and CE resistance together are treated as two-sided/range flow,
+    not as an extreme one-way directional signal.
+    """
     if not option_chain.get("success"):
         return {"success": False, "rows": [], "bias": 0, "message": option_chain.get("message", "No option chain")}
 
     rows = attach_option_snapshot_deltas(option_chain["rows"], option_chain["snapshot_id"])
-    spot = option_chain["underlying"]
-    atm = option_chain["atm_strike"]
+    spot = float(option_chain["underlying"])
+    atm = float(option_chain["atm_strike"])
     analyzed = []
-    directional_total = 0.0
-    directional_weight = 0.0
+    bullish_total = 0.0
+    bearish_total = 0.0
+    support_total = 0.0
+    resistance_total = 0.0
+    ce_writing_total = 0.0
+    pe_writing_total = 0.0
+    ce_side_weight = 0.0
+    pe_side_weight = 0.0
+    total_weight = 0.0
+    ready_sides = 0
+    all_sides = 0
 
     for row in rows:
         ce_info = classify_oi_price_signal("CE", row)
@@ -2189,35 +2259,109 @@ def analyze_option_chain(option_chain):
         ce_sell_score, ce_reason = score_sell_candidate("CE", row, ce_info, spot)
         pe_sell_score, pe_reason = score_sell_candidate("PE", row, pe_info, spot)
 
-        distance = abs(row["strike"] - atm)
-        near_weight = max(0.35, 1.0 - (distance / 500.0))
-        directional_total += (ce_info["directional_score"] + pe_info["directional_score"]) * near_weight
-        directional_weight += 2 * 98 * near_weight
+        distance = abs(float(row["strike"]) - atm)
+        if distance > 350:
+            near_weight = 0.10
+        else:
+            near_weight = max(0.20, 1.0 - distance / 400.0)
+
+        for side, info in (("CE", ce_info), ("PE", pe_info)):
+            all_sides += 1
+            if info.get("basis") == "Snapshot":
+                basis_weight = 1.0
+                ready_sides += 1
+            else:
+                basis_weight = 0.55
+            weight = near_weight * basis_weight
+            if side == "CE":
+                ce_side_weight += weight
+            else:
+                pe_side_weight += weight
+            score = float(info.get("directional_score", 0) or 0) * weight
+            if score > 0:
+                bullish_total += score
+            elif score < 0:
+                bearish_total += abs(score)
+            total_weight += 98.0 * weight
+
+            signal = str(info.get("signal", ""))
+            strength = float(info.get("strength", 0) or 0) * weight
+            if side == "CE" and "Writing" in signal:
+                resistance_total += strength
+                ce_writing_total += strength
+            elif side == "PE" and "Writing" in signal:
+                support_total += strength
+                pe_writing_total += strength
 
         analyzed.append({
             **row,
             "ce_signal": ce_info["signal"],
             "ce_signal_basis": ce_info["basis"],
             "ce_signal_strength": ce_info["strength"],
+            "ce_directional_score": round(float(ce_info.get("directional_score", 0)), 1),
             "ce_sell_score": ce_sell_score,
             "ce_sell_reason": ce_reason,
             "pe_signal": pe_info["signal"],
             "pe_signal_basis": pe_info["basis"],
             "pe_signal_strength": pe_info["strength"],
+            "pe_directional_score": round(float(pe_info.get("directional_score", 0)), 1),
             "pe_sell_score": pe_sell_score,
             "pe_sell_reason": pe_reason,
         })
 
-    bias = signed_clamp(safe_divide(directional_total, directional_weight, 0.0) * 100, -100, 100)
-    ce_candidates = [r for r in analyzed if r["strike"] >= spot]
-    pe_candidates = [r for r in analyzed if r["strike"] <= spot]
+    directional_base = max(bullish_total + bearish_total, 1.0)
+    raw_bias = ((bullish_total - bearish_total) / directional_base) * 100.0
+    conflict_score = min(bullish_total, bearish_total) / max(bullish_total, bearish_total, 1.0) * 100.0
+    # Two-way evidence must reduce directional certainty.
+    damp = max(0.35, 1.0 - conflict_score / 125.0)
+    bias = signed_clamp(raw_bias * damp, -85, 85)
+
+    # Normalize against the actual maximum weighted evidence. The previous
+    # half-denominator saturated both CE and PE writing at 100, which could
+    # falsely label a clearly PE-dominant book as two-sided range.
+    norm = max(total_weight, 1.0)
+    bullish_score = clamp((bullish_total / norm) * 100.0, 0, 100)
+    bearish_score = clamp((bearish_total / norm) * 100.0, 0, 100)
+    resistance_score = clamp((ce_writing_total / max(ce_side_weight * 98.0, 1.0)) * 100.0, 0, 100)
+    support_score = clamp((pe_writing_total / max(pe_side_weight * 98.0, 1.0)) * 100.0, 0, 100)
+    ce_writing_score = resistance_score
+    pe_writing_score = support_score
+    snapshot_ready_ratio = safe_divide(ready_sides, all_sides, 0.0)
+    snapshot_ready = snapshot_ready_ratio >= 0.35
+
+    if support_score >= 48 and resistance_score >= 48 and abs(support_score - resistance_score) <= 22:
+        flow_state = "TWO_SIDED_WRITING_RANGE"
+        bias = signed_clamp(bias * 0.55, -45, 45)
+    elif support_score >= resistance_score + 12:
+        flow_state = "PE_SUPPORT_DOMINANT"
+    elif resistance_score >= support_score + 12:
+        flow_state = "CE_RESISTANCE_DOMINANT"
+    elif bullish_score >= bearish_score + 12:
+        flow_state = "BULLISH_FLOW"
+    elif bearish_score >= bullish_score + 12:
+        flow_state = "BEARISH_FLOW"
+    else:
+        flow_state = "MIXED_FLOW"
+
+    ce_candidates = [r for r in analyzed if float(r["strike"]) >= spot]
+    pe_candidates = [r for r in analyzed if float(r["strike"]) <= spot]
     best_ce = max(ce_candidates, key=lambda r: r["ce_sell_score"], default=None)
     best_pe = max(pe_candidates, key=lambda r: r["pe_sell_score"], default=None)
 
     return {
         "success": True,
         "rows": analyzed,
-        "bias": bias,
+        "bias": round(float(bias), 2),
+        "bullish_score": round(float(bullish_score), 1),
+        "bearish_score": round(float(bearish_score), 1),
+        "support_score": round(float(support_score), 1),
+        "resistance_score": round(float(resistance_score), 1),
+        "ce_writing_score": round(float(ce_writing_score), 1),
+        "pe_writing_score": round(float(pe_writing_score), 1),
+        "conflict_score": round(float(conflict_score), 1),
+        "flow_state": flow_state,
+        "snapshot_ready": bool(snapshot_ready),
+        "snapshot_ready_ratio": round(float(snapshot_ready_ratio), 2),
         "best_ce": best_ce,
         "best_pe": best_pe,
         "snapshot_id": option_chain.get("snapshot_id", ""),
@@ -2648,47 +2792,95 @@ def v91_conflict_detector(price_action_bias, option_bias, heavy_bias, pcr, gamma
         reasons.append("Gamma risk high hai; option seller ko aggressive trade avoid karna chahiye.")
     return bool(reasons), reasons
 
-def v91_data_quality_score(dhan_ready=False, option_ok=False, nifty_source="Fallback", heavy_source="Fallback", vix_source="Fallback"):
-    score = 0
+def v91_data_quality_score(
+    dhan_ready=False,
+    option_ok=False,
+    nifty_source="Fallback",
+    heavy_source="Fallback",
+    vix_source="Fallback",
+    quote_ok=None,
+    expiry_ok=False,
+    price_action_ok=False,
+    price_action_manual=False,
+    vix_live_ok=False,
+    heavyweight_ok=False,
+    oi_snapshot_ready=False,
+    source_fresh=True,
+):
+    """Weighted quality of usable current evidence, not installed modules.
+
+    Credentials alone add no quality. Manual/fallback values are labelled and
+    receive only partial credit. This prevents 96% quality while core automatic
+    feeds are unavailable.
+    """
+    score = 0.0
     reasons = []
-    if dhan_ready:
+    quote_ok = bool(str(nifty_source).lower().startswith("dhan")) if quote_ok is None else bool(quote_ok)
+
+    if quote_ok:
         score += 20
-        reasons.append("Dhan credentials detected")
+        reasons.append("Nifty live quote ready")
+    elif str(nifty_source).lower().startswith("yahoo"):
+        score += 10
+        reasons.append("Nifty Yahoo fallback")
     else:
-        reasons.append("Dhan credentials missing")
+        score += 3
+        reasons.append("Nifty manual fallback")
 
     if option_ok:
-        score += 35
-        reasons.append("Dhan live option-chain active")
+        score += 25
+        reasons.append("Live option-chain ready")
     else:
-        reasons.append("Option-chain fallback/not live")
+        reasons.append("Live option-chain missing")
 
-    if str(nifty_source).lower().startswith("dhan"):
-        score += 20
-        reasons.append("Nifty from DhanHQ")
+    if expiry_ok:
+        score += 5
+        reasons.append("Expiry list ready")
     else:
-        score += 8
-        reasons.append(f"Nifty source: {nifty_source}")
+        reasons.append("Expiry list missing")
 
-    if str(heavy_source).lower().startswith("dhan"):
-        score += 15
-        reasons.append("Heavyweights from DhanHQ")
-    elif str(heavy_source).lower().startswith("yahoo"):
+    if price_action_ok:
+        score += 18
+        reasons.append("Automatic price action ready")
+    elif price_action_manual:
+        score += 7
+        reasons.append("Price action manual")
+    else:
+        reasons.append("Automatic price action unavailable; stale defaults excluded")
+
+    if vix_live_ok:
         score += 10
-        reasons.append("Heavyweights from Yahoo fallback")
+        reasons.append("India VIX live/fallback feed ready")
+    elif str(vix_source).lower().startswith("manual"):
+        score += 3
+        reasons.append("India VIX manual fallback")
     else:
-        reasons.append(f"Heavyweights source: {heavy_source}")
+        reasons.append("India VIX unavailable")
 
-    if str(vix_source).lower().startswith("dhan"):
-        score += 10
-        reasons.append("VIX from DhanHQ")
-    elif str(vix_source):
-        score += 6
-        reasons.append(f"VIX source: {vix_source}")
+    if heavyweight_ok:
+        if str(heavy_source).lower().startswith("dhan"):
+            score += 10
+            reasons.append("Heavyweights Dhan live")
+        else:
+            score += 6
+            reasons.append("Heavyweights fallback ready")
     else:
-        reasons.append("VIX source unavailable")
+        reasons.append("Heavyweights unavailable")
 
-    return int(max(0, min(100, score))), reasons
+    if option_ok and oi_snapshot_ready:
+        score += 7
+        reasons.append("Fresh snapshot OI delta ready")
+    elif option_ok:
+        score += 4
+        reasons.append("OI day-change only; second snapshot pending")
+
+    if source_fresh:
+        score += 5
+        reasons.append("Source timestamps fresh")
+    else:
+        reasons.append("One or more sources stale")
+
+    return int(round(max(0, min(100, score)))), reasons
 
 def v91_action_plan(final_trade, selected_strike, hedge, confidence, seller_risk, shock_score, gamma_score, conflict_reasons, source_text, data_quality=0):
     plan = []
@@ -3590,7 +3782,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.4 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.5 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -3757,7 +3949,8 @@ with st.sidebar.expander("3️⃣ Price Action", expanded=False):
     price_action_result = {"success": False, "message": "Manual fallback active", "source": "Manual fallback"}
 
 with st.sidebar.expander("3B 🕯️ 15m Candle Confirmation", expanded=False):
-    st.caption("Optional: 15-min candle values chart se daalo. Empty/default rahe to app price-action proxy use karegi.")
+    st.caption("Manual candle tabhi use hogi jab checkbox ON ho. Default values AI evidence nahi banengi.")
+    use_manual_15m_candle = st.checkbox("Use Manual 15m Candle", value=False, key="v505_use_manual_15m_candle")
     candle15_open = st.number_input("15m Open", value=manual_nifty, step=1.0)
     candle15_high = st.number_input("15m High", value=manual_nifty + 40.0, step=1.0)
     candle15_low = st.number_input("15m Low", value=manual_nifty - 40.0, step=1.0)
@@ -3931,12 +4124,14 @@ dhan_bundle = get_dhan_market_bundle(client_id, access_token, heavyweight_ids, n
 
 # Nifty
 nifty_source = "Manual"
+dhan_index_ohlc = {}
 if dhan_bundle.get("success"):
     idx_data = (dhan_bundle.get("data", {}) or {}).get("IDX_I", {}) or {}
     idx_item = idx_data.get(str(nifty_security_id), {}) or idx_data.get(int(nifty_security_id), {}) or {}
     if idx_item:
         price = float(idx_item.get("last_price", 0) or manual_nifty)
         idx_ohlc = idx_item.get("ohlc", {}) or {}
+        dhan_index_ohlc = dict(idx_ohlc)
         idx_prev = float(idx_ohlc.get("close", 0) or 0)
         nifty_change = price - idx_prev if idx_prev else 0.0
         nifty_change_pct = pct_change(price, idx_prev) if idx_prev else manual_nifty_change_pct
@@ -3954,22 +4149,30 @@ else:
     nifty_change_pct = yahoo_nifty.get("change_pct", manual_nifty_change_pct) if yahoo_nifty.get("success") else manual_nifty_change_pct
     nifty_source = yahoo_nifty.get("source", "Manual") if yahoo_nifty.get("success") else "Manual"
 
-# VIX
+# VIX - value and source status are kept separate so a manual 13.50 can
+# never be displayed as an automatic/live India VIX reading.
 yahoo_vix = get_yahoo_vix()
-if yahoo_vix.get("success"):
+vix_live_ok = bool(yahoo_vix.get("success"))
+if vix_live_ok:
     vix = float(yahoo_vix["vix"])
     vix_change_pct = float(yahoo_vix["change_pct"])
     vix_source = yahoo_vix.get("source", "Yahoo fallback")
+    vix_status = "LIVE/FALLBACK FEED"
 else:
     vix = manual_vix
     vix_change_pct = manual_vix_change_pct
     vix_source = "Manual"
+    vix_status = "MANUAL"
 
 
-# V16 Automatic Price Action - overrides stale manual values when enabled.
+# V16 Automatic Price Action. If automatic candles fail while Auto is ON,
+# stale sidebar defaults are excluded from directional scoring.
+price_action_auto_ok = False
+price_action_manual_active = not bool(auto_price_action)
 if auto_price_action:
     price_action_result = get_yahoo_price_action()
     if price_action_result.get("success"):
+        price_action_auto_ok = True
         ema20 = float(price_action_result.get("ema20", ema20))
         ema50 = float(price_action_result.get("ema50", ema50))
         vwap = float(price_action_result.get("vwap", vwap))
@@ -3982,9 +4185,18 @@ if auto_price_action:
         opening_range_low = float(price_action_result.get("opening_range_low", opening_range_low))
         price_action_source = price_action_result.get("source", "Auto candles")
     else:
-        price_action_source = "Manual fallback (auto failed)"
+        price_action_source = "UNAVAILABLE (auto failed; manual defaults excluded)"
+        # Dhan quote OHLC is allowed only for session high/low facts, not for
+        # EMA/VWAP direction. This keeps barriers sensible without inventing PA.
+        if isinstance(dhan_index_ohlc, dict) and dhan_index_ohlc:
+            today_high = float(dhan_index_ohlc.get("high", price) or price)
+            today_low = float(dhan_index_ohlc.get("low", price) or price)
+            opening_range_high = today_high
+            opening_range_low = today_low
 else:
     price_action_source = "Manual fallback"
+
+price_action_direction_usable = bool(price_action_auto_ok or price_action_manual_active)
 
 # Heavyweights
 if dhan_bundle.get("success") and heavyweight_ids:
@@ -4060,26 +4272,32 @@ support_distance = max(price - nearest_support, 0)
 resistance_distance = max(nearest_resistance - price, 0)
 
 price_action_bias = 0.0
-price_action_bias += 22 if price > ema20 else -22
-price_action_bias += 18 if price > ema50 else -18
-price_action_bias += 25 if price > vwap else -25
-price_action_bias += 15 if ema20 > ema50 else -15
-if price > opening_range_high:
-    price_action_bias += 18
-elif price < opening_range_low:
-    price_action_bias -= 18
-price_action_bias = signed_clamp(price_action_bias)
+if price_action_direction_usable:
+    price_action_bias += 22 if price > ema20 else -22
+    price_action_bias += 18 if price > ema50 else -18
+    price_action_bias += 25 if price > vwap else -25
+    price_action_bias += 15 if ema20 > ema50 else -15
+    if price > opening_range_high:
+        price_action_bias += 18
+    elif price < opening_range_low:
+        price_action_bias -= 18
+    price_action_bias = signed_clamp(price_action_bias)
+else:
+    # Auto was requested but failed: do not let stale manual defaults create a
+    # phantom -68/+68 Price Action score.
+    price_action_bias = 0.0
 
 sr_bias = 0.0
-if support_distance <= 30:
-    sr_bias += 55
-elif support_distance <= 60:
-    sr_bias += 25
-if resistance_distance <= 30:
-    sr_bias -= 55
-elif resistance_distance <= 60:
-    sr_bias -= 25
-sr_bias = signed_clamp(sr_bias)
+if price_action_direction_usable:
+    if support_distance <= 30:
+        sr_bias += 55
+    elif support_distance <= 60:
+        sr_bias += 25
+    if resistance_distance <= 30:
+        sr_bias -= 55
+    elif resistance_distance <= 60:
+        sr_bias -= 25
+    sr_bias = signed_clamp(sr_bias)
 
 # Option-chain directional bias. When Dhan is absent, use aggregate OI + PCR only.
 if option_analysis.get("success"):
@@ -4122,14 +4340,64 @@ smart_money_bias = signed_clamp(smart_money_bias)
 
 heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
 
-# Weighted directional model
+# V50.5 central source registry: every status panel and department reads the
+# same truth instead of independently saying OI OK / UNKNOWN or VIX live/manual.
+source_registry = {
+    "nifty": {"ready": bool(dhan_bundle.get("success")), "source": nifty_source, "status": "LIVE" if str(nifty_source).lower().startswith("dhan") else "FALLBACK"},
+    "expiry": {"ready": bool(expiry_result.get("success")), "source": "DhanHQ", "status": "READY" if expiry_result.get("success") else "MISSING"},
+    "option_chain": {"ready": bool(option_chain.get("success")), "source": option_chain.get("source", "DhanHQ") if isinstance(option_chain, dict) else "DhanHQ", "status": "LIVE" if option_chain.get("success") else "MISSING"},
+    "oi": {"ready": bool(option_analysis.get("success")), "snapshot_ready": bool(option_analysis.get("snapshot_ready", False)), "status": "SNAPSHOT_READY" if option_analysis.get("snapshot_ready") else ("DAY_CHANGE_ONLY" if option_analysis.get("success") else "MISSING")},
+    "price_action": {"ready": bool(price_action_direction_usable), "automatic": bool(price_action_auto_ok), "source": price_action_source, "status": "AUTO" if price_action_auto_ok else ("MANUAL" if price_action_manual_active else "UNAVAILABLE")},
+    "vix": {"ready": bool(vix_live_ok or vix_source == "Manual"), "automatic": bool(vix_live_ok), "source": vix_source, "status": vix_status},
+    "heavyweights": {"ready": bool(heavy_analysis.get("success")), "source": heavy_analysis.get("source", "Unknown") if isinstance(heavy_analysis, dict) else "Unknown", "status": "READY" if heavy_analysis.get("success") else "MISSING"},
+}
+
+data_quality, data_quality_reasons = v91_data_quality_score(
+    dhan_ready=dhan_ready,
+    option_ok=bool(option_chain.get("success")),
+    nifty_source=nifty_source,
+    heavy_source=source_registry["heavyweights"]["source"],
+    vix_source=vix_source,
+    quote_ok=bool(dhan_bundle.get("success")),
+    expiry_ok=bool(expiry_result.get("success")),
+    price_action_ok=bool(price_action_auto_ok),
+    price_action_manual=bool(price_action_manual_active),
+    vix_live_ok=bool(vix_live_ok),
+    heavyweight_ok=bool(heavy_analysis.get("success")),
+    oi_snapshot_ready=bool(option_analysis.get("snapshot_ready", False)),
+    source_fresh=True,
+)
+
+if V505_LIVE_STATE_READY:
+    try:
+        live_movement = update_live_market_state(
+            st.session_state,
+            price=price,
+            atr=atr5,
+            session_high=today_high,
+            session_low=today_low,
+            snapshot_id=str(option_analysis.get("snapshot_id", "")),
+            option_bias=option_bias,
+            pcr=pcr,
+            observed_at=datetime.now(IST),
+        )
+    except Exception:
+        live_movement = {"ready": False, "phase": "UNAVAILABLE", "label": "Movement memory error", "movement_bias": 0.0, "sample_count": 0}
+else:
+    live_movement = {"ready": False, "phase": "UNAVAILABLE", "label": "Movement memory module unavailable", "movement_bias": 0.0, "sample_count": 0}
+movement_bias = float(live_movement.get("movement_bias", 0) or 0)
+
+# Weighted directional model: the current 1/3/5-minute impulse is a first-class
+# evidence item, so a 70-100 point recovery cannot leave bearish probability
+# increasing merely because the broader EMA structure is still below VWAP.
 final_direction = (
-    price_action_bias * 0.24
-    + option_bias * 0.24
-    + heavy_bias * 0.19
-    + smart_money_bias * 0.12
-    + pcr_bias * 0.09
-    + sr_bias * 0.12
+    price_action_bias * 0.20
+    + option_bias * 0.22
+    + heavy_bias * 0.16
+    + smart_money_bias * 0.10
+    + pcr_bias * 0.07
+    + sr_bias * 0.10
+    + movement_bias * 0.15
 )
 final_direction = signed_clamp(final_direction)
 
@@ -4151,7 +4419,7 @@ seller_risk = (
 )
 seller_risk = clamp(seller_risk)
 
-component_signs = [price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, sr_bias]
+component_signs = [price_action_bias, option_bias, heavy_bias, smart_money_bias, pcr_bias, sr_bias, movement_bias]
 positive_components = sum(1 for x in component_signs if x >= 15)
 negative_components = sum(1 for x in component_signs if x <= -15)
 agreement = max(positive_components, negative_components) / len(component_signs)
@@ -4181,6 +4449,16 @@ elif final_direction <= -24 and confidence >= 58:
     final_trade = "SELL CE"
 else:
     final_trade = "WAIT"
+
+# V50.5 compatibility safety: the legacy path is evidence-only, but it must
+# never preserve a continuation trade against the verified live movement phase.
+_movement_phase_legacy = str((live_movement or {}).get("phase", "NORMAL")) if isinstance(locals().get("live_movement", {}), dict) else "NORMAL"
+if _movement_phase_legacy in {"STRONG_RECOVERY", "RECOVERY"} and final_trade == "SELL CE":
+    final_trade = "WAIT"
+    confidence = min(float(confidence or 0), 55)
+elif _movement_phase_legacy in {"STRONG_PULLBACK_DOWN", "PULLBACK_DOWN"} and final_trade == "SELL PE":
+    final_trade = "WAIT"
+    confidence = min(float(confidence or 0), 55)
 
 # Strike selection from Dhan ranking when available; manual fallback otherwise.
 best_ce = option_analysis.get("best_ce") if option_analysis.get("success") else None
@@ -4250,12 +4528,25 @@ try:
 except Exception:
     vix_range = {"ok": False}
 
+_auto_candle_legacy = price_action_result.get("candle15", {}) if isinstance(locals().get("price_action_result", {}), dict) else {}
+if bool(locals().get("use_manual_15m_candle", False)):
+    _c15_open_legacy = float(locals().get("candle15_open", price))
+    _c15_high_legacy = float(locals().get("candle15_high", price))
+    _c15_low_legacy = float(locals().get("candle15_low", price))
+    _c15_close_legacy = float(locals().get("candle15_close", price))
+elif isinstance(_auto_candle_legacy, dict) and _auto_candle_legacy:
+    _c15_open_legacy = float(_auto_candle_legacy.get("open", price))
+    _c15_high_legacy = float(_auto_candle_legacy.get("high", price))
+    _c15_low_legacy = float(_auto_candle_legacy.get("low", price))
+    _c15_close_legacy = float(_auto_candle_legacy.get("close", price))
+else:
+    _c15_open_legacy = float(price)
+    _c15_high_legacy = float(price)
+    _c15_low_legacy = float(price)
+    _c15_close_legacy = float(price)
+
 candle15 = v14_candle_confirmation(
-    locals().get("candle15_open", price),
-    locals().get("candle15_high", price),
-    locals().get("candle15_low", price),
-    locals().get("candle15_close", price),
-    final_direction,
+    _c15_open_legacy, _c15_high_legacy, _c15_low_legacy, _c15_close_legacy, final_direction
 )
 # Candle is confirmation only: low weight, no overreaction.
 if candle15.get("aligned") and proposed_trade_v14 != "WAIT":
@@ -4616,32 +4907,57 @@ def v11_strategy_ranker(
 # =========================================================
 # V16.4 AI AUDIT + SINGLE DECISION + BEST STRIKE ENGINE
 # =========================================================
-def v164_live_move_detector(price, nifty_change_pct, atr5=40):
-    """Detect fast Nifty movement between app refreshes and daily move shock."""
+def v164_live_move_detector(price, nifty_change_pct, atr5=40, movement=None):
+    """Display the actual recent move from persistent 1/3/5-minute memory."""
     try:
         price = float(price or 0)
         atr5 = max(float(atr5 or 40), 1.0)
+        movement = movement if isinstance(movement, dict) else {}
+        if movement:
+            last_move = movement.get("last_move")
+            move_3m = movement.get("move_3m")
+            move_5m = movement.get("move_5m")
+            move_points = float(move_3m if move_3m is not None else move_5m if move_5m is not None else last_move or 0)
+            phase = str(movement.get("phase", "NORMAL"))
+            if phase in {"STRONG_RECOVERY", "RECOVERY"}:
+                direction = "UP"
+                label = "STRONG RECOVERY" if phase == "STRONG_RECOVERY" else "RECOVERY"
+            elif phase in {"STRONG_PULLBACK_DOWN", "PULLBACK_DOWN"}:
+                direction = "DOWN"
+                label = "FAST FALL" if phase == "STRONG_PULLBACK_DOWN" else "PULLBACK DOWN"
+            else:
+                direction = "UP" if move_points > 0 else "DOWN" if move_points < 0 else "FLAT"
+                label = "NORMAL"
+            score = int(clamp(max(abs(move_points) / atr5 * 55, abs(float(nifty_change_pct or 0)) * 45), 0, 100))
+            return {
+                "fast_shock": bool(abs(move_points) >= max(28.0, atr5 * 0.55)),
+                "daily_shock": bool(abs(float(nifty_change_pct or 0)) >= 0.45),
+                "direction": direction,
+                "move_points": round(move_points, 2),
+                "move_1m": movement.get("move_1m"),
+                "move_3m": movement.get("move_3m"),
+                "move_5m": movement.get("move_5m"),
+                "recovery_from_low": movement.get("recovery_from_low", 0),
+                "daily_pct": round(float(nifty_change_pct or 0), 2),
+                "score": score,
+                "label": label,
+                "phase": phase,
+            }
+
+        # Safe fallback when persistent movement is unavailable.
         prev = st.session_state.get("v164_prev_nifty_price")
         st.session_state["v164_prev_nifty_price"] = price
         move_points = 0.0 if prev in (None, 0) else price - float(prev)
         move_abs = abs(move_points)
         daily_abs_pct = abs(float(nifty_change_pct or 0))
-        # Intraday shock if move from last app snapshot is meaningful versus ATR.
         fast_shock = move_abs >= max(35.0, atr5 * 0.70)
         daily_shock = daily_abs_pct >= 0.45
-        direction = "DOWN" if move_points < 0 or float(nifty_change_pct or 0) < -0.45 else "UP" if move_points > 0 or float(nifty_change_pct or 0) > 0.45 else "FLAT"
-        score = 0
-        score += min(move_abs / max(atr5, 1) * 45, 60)
-        score += min(daily_abs_pct * 75, 40)
-        score = int(clamp(score, 0, 100))
+        direction = "DOWN" if move_points < 0 else "UP" if move_points > 0 else "FLAT"
+        score = int(clamp(min(move_abs / atr5 * 45, 60) + min(daily_abs_pct * 75, 40), 0, 100))
         return {
-            "fast_shock": bool(fast_shock),
-            "daily_shock": bool(daily_shock),
-            "direction": direction,
-            "move_points": round(move_points, 2),
-            "daily_pct": round(float(nifty_change_pct or 0), 2),
-            "score": score,
-            "label": "FAST FALL" if direction == "DOWN" and (fast_shock or daily_shock) else "FAST RISE" if direction == "UP" and (fast_shock or daily_shock) else "NORMAL",
+            "fast_shock": bool(fast_shock), "daily_shock": bool(daily_shock), "direction": direction,
+            "move_points": round(move_points, 2), "daily_pct": round(float(nifty_change_pct or 0), 2),
+            "score": score, "label": "FAST FALL" if direction == "DOWN" and fast_shock else "FAST RISE" if direction == "UP" and fast_shock else "NORMAL",
         }
     except Exception:
         return {"fast_shock": False, "daily_shock": False, "direction": "FLAT", "move_points": 0.0, "daily_pct": 0.0, "score": 0, "label": "NA"}
@@ -4901,7 +5217,7 @@ except NameError:
 
 # V16.4 AI Audit: current market move + best strike + single final decision.
 try:
-    v164_move_guard = v164_live_move_detector(price, nifty_change_pct, atr5)
+    v164_move_guard = v164_live_move_detector(price, nifty_change_pct, atr5, live_movement)
 except Exception:
     v164_move_guard = {"fast_shock": False, "daily_shock": False, "direction": "FLAT", "move_points": 0.0, "daily_pct": 0.0, "score": 0, "label": "NA"}
 
@@ -5358,6 +5674,13 @@ def _v205_build_snapshot_context():
         "vix_source": g.get("vix_source", ""),
         "best_ce": g.get("best_ce", {}) if isinstance(g.get("best_ce", {}), dict) else {},
         "best_pe": g.get("best_pe", {}) if isinstance(g.get("best_pe", {}), dict) else {},
+        "movement": g.get("live_movement", {}) if isinstance(g.get("live_movement", {}), dict) else {},
+        "movement_bias": g.get("movement_bias", 0),
+        "source_registry": g.get("source_registry", {}) if isinstance(g.get("source_registry", {}), dict) else {},
+        "price_action_source": g.get("price_action_source", ""),
+        "price_action_auto_ok": g.get("price_action_auto_ok", False),
+        "price_action_direction_usable": g.get("price_action_direction_usable", False),
+        "vix_live_ok": g.get("vix_live_ok", False),
     }
 
 
@@ -5401,11 +5724,20 @@ def _v205_data_flow_monitor(snapshot, previous_snapshot=None):
         if repeat_count >= 3:
             warnings.append(f"OC unchanged {repeat_count} refresh")
         oi_lock = snapshot.get("oi_single_source", {}) if isinstance(snapshot.get("oi_single_source", {}), dict) else {}
-        oi_sync_ok = bool(oi_lock.get("sync_ok", True))
-        if not oi_sync_ok:
+        oi_available = bool(oi_lock.get("available", False))
+        oi_sync_ok = bool(oi_lock.get("sync_ok", False)) if oi_available else False
+        oi_status = str(oi_lock.get("status", "UNKNOWN")) if oi_lock else "UNKNOWN"
+        if not oi_available:
+            issues.append("OI unavailable")
+        elif not oi_sync_ok:
             issues.append("OI sync mismatch")
             for _m in (oi_lock.get("mismatches", []) or [])[:2]:
                 warnings.append(str(_m))
+        source_health = snapshot.get("source_health", {}) if isinstance(snapshot.get("source_health", {}), dict) else {}
+        if not source_health.get("price_action_auto_ok", False):
+            warnings.append("Automatic price action unavailable")
+        if not source_health.get("vix_live_ok", False):
+            warnings.append("VIX manual/fallback")
         health_ok = sh_label.upper() in ("HEALTHY", "CAUTION")
         status = "FRESH" if not issues and repeat_count < 3 and health_ok else ("CAUTION" if not issues else "WEAK")
         return {
@@ -5420,11 +5752,11 @@ def _v205_data_flow_monitor(snapshot, previous_snapshot=None):
             "oc_time": str(oc.get("fetched_at", "") or df.get("refresh_time", "")),
             "repeat_count": repeat_count,
             "snapshot_health": sh_label,
-            "oi_sync": "OK" if oi_sync_ok else "MISMATCH",
+            "oi_sync": oi_status,
             "oi_source": str(oi_lock.get("source", "NA")) if oi_lock else "NA",
             "issues": issues[:4],
             "warnings": warnings[:4],
-            "line": f"Data Flow: {status} | SNAP {sid[-6:] if sid else 'NA'} | OC rows {int(oc.get('rows_count',0) or 0)} | OI {'OK' if oi_sync_ok else 'MISMATCH'} | OC same {repeat_count}x | Brain Sync OK",
+            "line": f"Data Flow: {status} | SNAP {sid[-6:] if sid else 'NA'} | OC rows {int(oc.get('rows_count',0) or 0)} | OI {oi_status} | OC same {repeat_count}x | Brain Sync OK",
         }
     except Exception as e:
         return {"status": "WEAK", "fresh": False, "snapshot_id": "", "short_id": "NA", "oc_rows": 0, "repeat_count": 0, "issues": [str(e)], "warnings": [], "line": "Data Flow: WEAK | monitor error"}
@@ -5443,10 +5775,12 @@ if not V19_SNAPSHOT_ENGINE_READY:
     st.stop()
 
 try:
-    _previous_snapshot_v199 = st.session_state.get(
-        "v199_last_market_snapshot",
-        {},
-    )
+    _previous_snapshot_v199 = st.session_state.get("v199_last_market_snapshot", {})
+    if (not _previous_snapshot_v199) and V505_LIVE_STATE_READY:
+        try:
+            _previous_snapshot_v199 = load_previous_snapshot(datetime.now(IST))
+        except Exception:
+            _previous_snapshot_v199 = {}
 
     _v205_snapshot_context = _v205_build_snapshot_context()
 
@@ -5472,6 +5806,11 @@ try:
 
     st.session_state["v199_last_market_snapshot"] = market_snapshot
     st.session_state["v205_active_snapshot_id"] = market_snapshot.get("snapshot_id", "")
+    if V505_LIVE_STATE_READY:
+        try:
+            save_latest_snapshot(market_snapshot, datetime.now(IST))
+        except Exception:
+            pass
 
     # Compatibility aliases for existing Developer/UI panels.
     market_snapshot_external = market_snapshot
@@ -6271,28 +6610,77 @@ def _v221_side_plan(side, row, confidence_value):
 
 
 def _v221_build_projection(snapshot_obj):
+    """Display projection from the one authoritative snapshot.
+
+    Broad EMA structure and the active recovery/pullback phase are separate.
+    Missing automatic price action has zero directional weight.
+    """
     ms = snapshot_obj if isinstance(snapshot_obj, dict) else {}
     sig = ms.get("signals", {}) if isinstance(ms.get("signals", {}), dict) else {}
     risk = ms.get("risk", {}) if isinstance(ms.get("risk", {}), dict) else {}
     market = ms.get("market", {}) if isinstance(ms.get("market", {}), dict) else {}
-    pa = _v221_signed(sig.get("price_action_bias", 0))
+    movement = ms.get("movement", {}) if isinstance(ms.get("movement", {}), dict) else {}
+    source_health = ms.get("source_health", {}) if isinstance(ms.get("source_health", {}), dict) else {}
+
+    pa_usable = bool(source_health.get("price_action_usable", source_health.get("price_action_auto_ok", True)))
+    pa = _v221_signed(sig.get("price_action_bias", 0)) if pa_usable else 0.0
     ob = _v221_signed(sig.get("option_bias", 0))
     hw = _v221_signed(sig.get("heavyweight_bias", 0))
     sm = _v221_signed(sig.get("smart_money_bias", 0))
     pcrb = _v221_signed(sig.get("pcr_bias", 0))
+    move_bias = _v221_signed(sig.get("movement_bias", movement.get("movement_bias", 0)))
+    phase = str(sig.get("movement_phase", movement.get("phase", "NORMAL")))
+
     news_score_local = _v221_num(risk.get("news_risk", 0), 0)
     vix_val = _v221_num(market.get("india_vix", vix if "vix" in globals() else 0), 0)
-    raw = (pa * 0.30) + (ob * 0.25) + (hw * 0.15) + (sm * 0.08) + (pcrb * 0.03)
+    raw = (pa * 0.22) + (ob * 0.24) + (hw * 0.13) + (sm * 0.08) + (pcrb * 0.03) + (move_bias * 0.30)
     risk_penalty = max(0.0, news_score_local - 45.0) * 0.08 + max(0.0, vix_val - 16.0) * 0.8
     raw = max(-100.0, min(100.0, raw))
     bullish = int(round(max(0, min(100, 50 + raw / 2 - risk_penalty / 2))))
-    bearish = int(round(max(0, min(100, 100 - bullish))))
-    direction = "UP" if bullish > bearish else "DOWN" if bearish > bullish else "RANGE"
-    return {"raw": raw, "bullish": bullish, "bearish": bearish, "direction": direction, "probability": max(bullish, bearish)}
+
+    if phase == "STRONG_RECOVERY":
+        bullish = max(bullish, 56)
+    elif phase == "RECOVERY":
+        bullish = max(bullish, 53)
+    elif phase == "STRONG_PULLBACK_DOWN":
+        bullish = min(bullish, 44)
+    elif phase == "PULLBACK_DOWN":
+        bullish = min(bullish, 47)
+
+    # Incomplete core evidence must not produce an exaggerated 70-80% outlook.
+    if not pa_usable:
+        bullish = max(35, min(65, bullish))
+    bearish = int(max(0, min(100, 100 - bullish)))
+
+    if phase in {"STRONG_RECOVERY", "RECOVERY"}:
+        direction = "RECOVERY"
+        probability = bullish
+    elif phase in {"STRONG_PULLBACK_DOWN", "PULLBACK_DOWN"}:
+        direction = "PULLBACK DOWN"
+        probability = bearish
+    else:
+        direction = "UP" if bullish > bearish + 2 else "DOWN" if bearish > bullish + 2 else "RANGE"
+        probability = max(bullish, bearish)
+
+    return {
+        "raw": round(raw, 1),
+        "bullish": bullish,
+        "bearish": bearish,
+        "direction": direction,
+        "probability": probability,
+        "movement_phase": phase,
+        "price_action_usable": pa_usable,
+        "source": "ONE_SNAPSHOT_WITH_LIVE_MOVEMENT",
+    }
 
 
 def _v221_build_evidence_rows(snapshot_obj, intelligence_obj):
     rows = []
+    snapshot_obj = snapshot_obj if isinstance(snapshot_obj, dict) else {}
+    sig = snapshot_obj.get("signals", {}) if isinstance(snapshot_obj.get("signals", {}), dict) else {}
+    movement = snapshot_obj.get("movement", {}) if isinstance(snapshot_obj.get("movement", {}), dict) else {}
+    source_health = snapshot_obj.get("source_health", {}) if isinstance(snapshot_obj.get("source_health", {}), dict) else {}
+
     if isinstance(intelligence_obj, dict):
         src_rows = intelligence_obj.get("reliability_rows", []) or []
         if isinstance(src_rows, list):
@@ -6301,26 +6689,47 @@ def _v221_build_evidence_rows(snapshot_obj, intelligence_obj):
                     rr = dict(r)
                     rr.setdefault("Source", "AI_MASTER")
                     rows.append(rr)
-    if not rows and isinstance(snapshot_obj, dict):
-        sig = snapshot_obj.get("signals", {}) if isinstance(snapshot_obj.get("signals", {}), dict) else {}
-        rows = [
-            {"Signal": "Price Action", "Bias": round(_v221_signed(sig.get("price_action_bias", 0)), 1), "Status": "AI_MASTER"},
-            {"Signal": "Option Chain / OI", "Bias": round(_v221_signed(sig.get("option_bias", 0)), 1), "Status": "AI_MASTER"},
-            {"Signal": "Heavyweights", "Bias": round(_v221_signed(sig.get("heavyweight_bias", 0)), 1), "Status": "AI_MASTER"},
-            {"Signal": "FII/DII", "Bias": round(_v221_signed(sig.get("smart_money_bias", 0)), 1), "Status": "AI_MASTER"},
-            {"Signal": "PCR", "Bias": round(_v221_signed(sig.get("pcr_bias", 0)), 1), "Status": "AI_MASTER"},
-            {"Signal": "Market Bias", "Bias": round(_v221_signed(sig.get("market_bias", 0)), 1), "Status": "AI_MASTER"},
-        ]
-    try:
-        oi_lock = snapshot_obj.get("oi_single_source", {}) if isinstance(snapshot_obj, dict) else {}
-        if oi_lock:
-            rows.append({
-                "Signal": "OI Sync",
-                "Bias": "OK" if oi_lock.get("sync_ok", True) else "MISMATCH",
-                "Status": str(oi_lock.get("source", "AI_MASTER")),
-            })
-    except Exception:
-        pass
+
+    # Replace/ensure the core authoritative rows. Missing automatic data is N/A,
+    # never a stale numeric score.
+    def upsert(signal_name, row):
+        for idx, existing in enumerate(rows):
+            if str(existing.get("Signal", "")).strip().lower() == signal_name.lower():
+                rows[idx] = row
+                return
+        rows.append(row)
+
+    pa_usable = bool(source_health.get("price_action_usable", source_health.get("price_action_auto_ok", False)))
+    upsert("Price Action", {
+        "Signal": "Price Action",
+        "Bias": round(_v221_signed(sig.get("price_action_bias", 0)), 1) if pa_usable else "N/A",
+        "Status": "AUTO/MANUAL VERIFIED" if pa_usable else "UNAVAILABLE - NOT USED",
+        "Source": source_health.get("price_action_source", "Unknown"),
+    })
+    upsert("Option Chain / OI", {
+        "Signal": "Option Chain / OI",
+        "Bias": round(_v221_signed(sig.get("option_bias", 0)), 1),
+        "Status": str((snapshot_obj.get("option_chain", {}) or {}).get("success", False) and "LIVE" or "MISSING"),
+        "Source": (snapshot_obj.get("option_chain", {}) or {}).get("source", "AI_MASTER"),
+    })
+    upsert("Live Movement", {
+        "Signal": "Live Movement",
+        "Bias": round(_v221_signed(sig.get("movement_bias", movement.get("movement_bias", 0))), 1),
+        "Status": str(movement.get("phase", "UNAVAILABLE")),
+        "Source": f"{movement.get('sample_count',0)} persisted samples",
+    })
+    upsert("Heavyweights", {"Signal": "Heavyweights", "Bias": round(_v221_signed(sig.get("heavyweight_bias", 0)), 1), "Status": "AI_MASTER", "Source": source_health.get("heavy_source", "Unknown")})
+    upsert("FII/DII", {"Signal": "FII/DII", "Bias": round(_v221_signed(sig.get("smart_money_bias", 0)), 1), "Status": "AI_MASTER", "Source": "Journal/Department"})
+    upsert("PCR", {"Signal": "PCR", "Bias": round(_v221_signed(sig.get("pcr_bias", 0)), 1), "Status": "AI_MASTER", "Source": "Authoritative OC rows"})
+
+    oi_lock = snapshot_obj.get("oi_single_source", {}) if isinstance(snapshot_obj.get("oi_single_source", {}), dict) else {}
+    oi_status = str(oi_lock.get("status", "UNKNOWN")) if oi_lock else "UNKNOWN"
+    upsert("OI Sync", {
+        "Signal": "OI Sync",
+        "Bias": oi_status,
+        "Status": oi_status,
+        "Source": str(oi_lock.get("source", "AI_MASTER")) if oi_lock else "No OI rows",
+    })
     return rows
 
 
@@ -6344,7 +6753,7 @@ def _v221_strategy_rows(master):
     return [
         {"Strategy": "SELL CE", "Rank Score": selected_score("SELL CE"), "Sell CE": ce_plan.get("strike", "-"), "Buy CE Hedge": ce_plan.get("hedge", "-"), "Sell PE": "-", "Buy PE Hedge": "-", "Entry/Credit": ce_plan.get("entry", 0), "SL": ce_plan.get("sl", 0), "Target": ce_plan.get("target", 0), "Entry Status": entry_status_trade if action == "SELL CE" else "Not selected by AI_MASTER"},
         {"Strategy": "SELL PE", "Rank Score": selected_score("SELL PE"), "Sell CE": "-", "Buy CE Hedge": "-", "Sell PE": pe_plan.get("strike", "-"), "Buy PE Hedge": pe_plan.get("hedge", "-"), "Entry/Credit": pe_plan.get("entry", 0), "SL": pe_plan.get("sl", 0), "Target": pe_plan.get("target", 0), "Entry Status": entry_status_trade if action == "SELL PE" else "Not selected by AI_MASTER"},
-        {"Strategy": "IRON CONDOR", "Rank Score": selected_score("IRON CONDOR"), "Sell CE": ce_plan.get("strike", "-"), "Buy CE Hedge": ce_plan.get("hedge", "-"), "Sell PE": pe_plan.get("strike", "-"), "Buy PE Hedge": pe_plan.get("hedge", "-"), "Entry/Credit": round(_v221_num(ce_plan.get("entry", 0)) + _v221_num(pe_plan.get("entry", 0)), 2), "SL": f"CE {ce_plan.get('sl',0)} / PE {pe_plan.get('sl',0)}", "Target": f"CE {ce_plan.get('target',0)} / PE {pe_plan.get('target',0)}", "Entry Status": entry_status_trade if action == "IRON CONDOR" else "Not selected by AI_MASTER"},
+        {"Strategy": "IRON CONDOR", "Rank Score": selected_score("IRON CONDOR"), "Sell CE": ce_plan.get("strike", "-"), "Buy CE Hedge": ce_plan.get("hedge", "-"), "Sell PE": pe_plan.get("strike", "-"), "Buy PE Hedge": pe_plan.get("hedge", "-"), "Entry / Gross Sold Premium": f"Gross {round(_v221_num(ce_plan.get('entry', 0)) + _v221_num(pe_plan.get('entry', 0)), 2)} (hedges excluded)", "SL": f"CE {ce_plan.get('sl',0)} / PE {pe_plan.get('sl',0)}", "Target": f"CE {ce_plan.get('target',0)} / PE {pe_plan.get('target',0)}", "Entry Status": entry_status_trade if action == "IRON CONDOR" else "Not selected by AI_MASTER"},
         {"Strategy": "WAIT", "Rank Score": selected_score("WAIT"), "Sell CE": "-", "Buy CE Hedge": "-", "Sell PE": "-", "Buy PE Hedge": "-", "Entry/Credit": 0, "SL": "No trade", "Target": "No trade", "Entry Status": "Capital safe / AI_MASTER Wait" if action == "WAIT" else "Backup only"},
     ]
 
@@ -6689,12 +7098,35 @@ try:
             pe_oi=float(total_put_oi),
             barrier_touched=bool(_barrier_touched),
             barrier_respected=bool(_barrier_respected),
+            option_bias=float(option_analysis.get("bias", 0) or 0),
+            bullish_score=float(option_analysis.get("bullish_score", 0) or 0),
+            bearish_score=float(option_analysis.get("bearish_score", 0) or 0),
+            support_score=float(option_analysis.get("support_score", 0) or 0),
+            resistance_score=float(option_analysis.get("resistance_score", 0) or 0),
+            ce_writing_score=float(option_analysis.get("ce_writing_score", 0) or 0),
+            pe_writing_score=float(option_analysis.get("pe_writing_score", 0) or 0),
+            conflict_score=float(option_analysis.get("conflict_score", 0) or 0),
+            flow_state=str(option_analysis.get("flow_state", "MIXED_FLOW")),
+            snapshot_ready=bool(option_analysis.get("snapshot_ready", False)),
+            availability="READY" if option_analysis.get("success", False) else "UNAVAILABLE",
         )
 
-        _open_px_v24 = float(locals().get("candle15_open", float(price) - float(nifty_change or 0)))
-        _high_px_v24 = float(locals().get("candle15_high", today_high))
-        _low_px_v24 = float(locals().get("candle15_low", today_low))
-        _close_px_v24 = float(locals().get("candle15_close", price))
+        _auto_candle_v24 = price_action_result.get("candle15", {}) if isinstance(price_action_result, dict) else {}
+        if bool(locals().get("use_manual_15m_candle", False)):
+            _open_px_v24 = float(locals().get("candle15_open", price))
+            _high_px_v24 = float(locals().get("candle15_high", today_high))
+            _low_px_v24 = float(locals().get("candle15_low", today_low))
+            _close_px_v24 = float(locals().get("candle15_close", price))
+        elif isinstance(_auto_candle_v24, dict) and _auto_candle_v24:
+            _open_px_v24 = float(_auto_candle_v24.get("open", price))
+            _high_px_v24 = float(_auto_candle_v24.get("high", today_high))
+            _low_px_v24 = float(_auto_candle_v24.get("low", today_low))
+            _close_px_v24 = float(_auto_candle_v24.get("close", price))
+        else:
+            _open_px_v24 = float(dhan_index_ohlc.get("open", price) or price) if isinstance(dhan_index_ohlc, dict) else float(price)
+            _high_px_v24 = float(dhan_index_ohlc.get("high", today_high) or today_high) if isinstance(dhan_index_ohlc, dict) else float(today_high)
+            _low_px_v24 = float(dhan_index_ohlc.get("low", today_low) or today_low) if isinstance(dhan_index_ohlc, dict) else float(today_low)
+            _close_px_v24 = float(price)
         _v24_price_report = PriceActionDirector().build_report(
             price=float(price), ema20=float(ema20), ema50=float(ema50), vwap=float(vwap),
             current_range=max(float(today_high) - float(today_low), 0.0), atr=float(atr5),
@@ -6702,6 +7134,9 @@ try:
             open_price=_open_px_v24, high=_high_px_v24, low=_low_px_v24, close=_close_px_v24,
             points_moved_from_open=float(price) - _open_px_v24,
             day_high=float(today_high), day_low=float(today_low),
+            movement=live_movement,
+            data_available=bool(price_action_direction_usable),
+            source=price_action_source,
         )
 
         _v24_behaviour_report = MarketBehaviourDirector().build_report(
@@ -6894,8 +7329,20 @@ try:
         # Full option rows/heavyweight rows already exist in the current script
         # and must not be deep-copied again into Department 0.
         _did_payload_v24 = {
-            "market": {"price": price, "change": nifty_change, "change_pct": nifty_change_pct, "vix": vix, "pcr": pcr},
-            "price_action": {"ema20": ema20, "ema50": ema50, "vwap": vwap, "atr": atr5, "support": _near_support, "resistance": _near_resistance},
+            "market": {
+                "price": price, "change": nifty_change, "change_pct": nifty_change_pct,
+                "vix": vix, "vix_source": vix_source, "pcr": pcr,
+                "movement": dict(live_movement or {}),
+            },
+            "source_registry": dict(source_registry or {}),
+            "price_action": {
+                "ema20": ema20 if price_action_direction_usable else None,
+                "ema50": ema50 if price_action_direction_usable else None,
+                "vwap": vwap if price_action_direction_usable else None,
+                "atr": atr5, "support": _near_support, "resistance": _near_resistance,
+                "source": price_action_source, "automatic": bool(price_action_auto_ok),
+                "used_for_direction": bool(price_action_direction_usable),
+            },
             "option": {
                 "snapshot_id": option_analysis.get("snapshot_id", ""),
                 "rows_count": len(_v24_rows),
@@ -7114,10 +7561,16 @@ try:
             co_case_file=_co_case_v26,
         )
         _communication_trace_v32 = _communication_batch_v32.to_compact_dict()
+        _oi_lock_v24 = market_snapshot.get("oi_single_source", {}) if isinstance(locals().get("market_snapshot", {}), dict) else {}
+        _flow_fresh_v24 = bool((v205_data_flow or {}).get("fresh", False)) if isinstance(locals().get("v205_data_flow", {}), dict) else False
+        _market_open_quality_v24 = bool(_market_open_v1951)
         _data_quality_ok_v24 = bool(
-            _did_snapshot_v24.quality_score >= 60
+            _did_snapshot_v24.quality_score >= 70
             and option_analysis.get("success", False)
+            and bool(_oi_lock_v24.get("sync_ok", False))
+            and bool(price_action_direction_usable)
             and _co_case_v26.accepted
+            and (not _market_open_quality_v24 or _flow_fresh_v24)
         )
         _v24_decision = AIMaster().decide(
             snapshot_id=_snapshot_id_v24, data_quality_ok=_data_quality_ok_v24,
@@ -7270,13 +7723,13 @@ try:
                 _is_selected = _v24_decision.action == _name
                 _rows.append({
                     "Strategy": _name,
-                    "Confidence %": round(_score_map_v24.get(_name, 0.0), 1),
+                    "Strategy Score %": round(_score_map_v24.get(_name, 0.0), 1),
                     "Status": "SELECTED" if _is_selected else ("WATCH" if _score_map_v24.get(_name, 0) >= 60 else "WEAK"),
                     "Sell CE": _ce_plan_v24.get("strike", "-") if _name in ("SELL CE", "IRON CONDOR") else "-",
                     "Buy CE Hedge": _ce_plan_v24.get("hedge", "-") if _name in ("SELL CE", "IRON CONDOR") else "-",
                     "Sell PE": _pe_plan_v24.get("strike", "-") if _name in ("SELL PE", "IRON CONDOR") else "-",
                     "Buy PE Hedge": _pe_plan_v24.get("hedge", "-") if _name in ("SELL PE", "IRON CONDOR") else "-",
-                    "Entry/Credit": (round(_v221_num(_ce_plan_v24.get("entry")) + _v221_num(_pe_plan_v24.get("entry")), 2) if _name == "IRON CONDOR" else _ce_plan_v24.get("entry", 0) if _name == "SELL CE" else _pe_plan_v24.get("entry", 0) if _name == "SELL PE" else 0),
+                    "Entry / Gross Sold Premium": (f"Gross {round(_v221_num(_ce_plan_v24.get('entry')) + _v221_num(_pe_plan_v24.get('entry')), 2)} (hedges excluded)" if _name == "IRON CONDOR" else _ce_plan_v24.get("entry", 0) if _name == "SELL CE" else _pe_plan_v24.get("entry", 0) if _name == "SELL PE" else 0),
                     "SL": (f"CE {_ce_plan_v24.get('sl',0)} / PE {_pe_plan_v24.get('sl',0)}" if _name == "IRON CONDOR" else _ce_plan_v24.get("sl", 0) if _name == "SELL CE" else _pe_plan_v24.get("sl", 0) if _name == "SELL PE" else "No trade"),
                     "Target": (f"CE {_ce_plan_v24.get('target',0)} / PE {_pe_plan_v24.get('target',0)}" if _name == "IRON CONDOR" else _ce_plan_v24.get("target", 0) if _name == "SELL CE" else _pe_plan_v24.get("target", 0) if _name == "SELL PE" else "No trade"),
                 })
@@ -7293,7 +7746,7 @@ try:
                 _rows.append({
                     "Candidate": _label,
                     "AI Status": "APPROVED" if _approved else "WATCHLIST / WAITING CONFIRMATION",
-                    "Confidence %": round(_v221_num(_candidate.get("score", 0)), 1),
+                    "Candidate Quality % (Not Execution Confidence)": round(_v221_num(_candidate.get("score", 0)), 1),
                     "Strike": _plan.get("strike", "-"),
                     "Entry": _plan.get("entry", 0),
                     "SL": _plan.get("sl", 0),
@@ -7303,29 +7756,60 @@ try:
                 })
             return _rows
 
+        _projection_v505 = _v221_build_projection(market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {})
+        _evidence_rows_v505 = _v221_build_evidence_rows(
+            market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {}, {}
+        )
+        _oi_status_v505 = str(_oi_lock_v24.get("status", "UNKNOWN")) if isinstance(_oi_lock_v24, dict) else "UNKNOWN"
+        _flow_status_v505 = str((v205_data_flow or {}).get("status", "UNKNOWN")) if isinstance(locals().get("v205_data_flow", {}), dict) else "UNKNOWN"
+        _data_conf_v505 = int(max(0, min(100, round(float(_did_snapshot_v24.quality_score or 0)))))
+        _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
+
         AI_MASTER.update({
-            "version": "V50.4_LIVE_MARKET_READINESS",
+            "version": "V50.5_RECOVERY_DATA_INTEGRITY_PDF",
+            "created_at": fmt_time(),
+            "snapshot_id": _snapshot_id_v24,
+            "short_snapshot_id": str(_snapshot_id_v24)[-8:],
             "final_action": _v24_decision.action,
             "execution_status": _exec_v24,
             "confidence": _v24_decision.confidence,
+            "decision_confidence": _v24_decision.confidence,
+            "direction_confidence": _direction_conf_v505,
+            "data_confidence": _data_conf_v505,
+            "projection": _projection_v505,
+            "evidence_rows": _evidence_rows_v505,
+            "oi_sync_status": _oi_status_v505,
+            "source_registry": dict(source_registry or {}),
+            "movement": dict(live_movement or {}),
             "strategy": {"type": _v24_decision.action, "plan_source": "V24_DEPARTMENT_PIPELINE"},
             "reasons": [
                 str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
                 *list((_v24_decision.reasoning_report or {}).get("supporting_evidence", []) or [])[:3],
             ],
-            "warnings": list(_v24_decision.warnings),
+            "warnings": list(dict.fromkeys([
+                *list(_v24_decision.warnings),
+                *( ["Automatic price action unavailable - directional PA score excluded."] if not price_action_auto_ok else [] ),
+                *( [f"India VIX source is {vix_source}; automatic VIX unavailable."] if not vix_live_ok else [] ),
+                *( ["Iron Condor figure is gross sold premium; hedge premiums are not available for net credit."] ),
+            ])),
             "advice": str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
             "reasoning_report": dict(_v24_decision.reasoning_report or {}),
             "master_intelligence": _master_intelligence_trace_v49,
             "final_headquarters": _headquarters_trace_v50,
             "source_of_truth": "ONE_SNAPSHOT_ONE_CO_ONE_AI_MASTER_ONE_FINAL_JUDGEMENT",
-            "data_flow_status": "FRESH" if _data_quality_ok_v24 else "CAUTION",
+            "data_flow_status": _flow_status_v505,
             "ce_plan": _ce_plan_v24,
             "pe_plan": _pe_plan_v24,
             "strategy_scores": _score_map_v24,
             "strategy_rows": _v24_strategy_rows(),
             "candidate_rows": _v24_candidate_rows(),
-            "data_department": {"snapshot_id": _did_snapshot_v24.snapshot_id, "quality_score": _did_snapshot_v24.quality_score, "raw_signature": _did_snapshot_v24.raw_signature},
+            "data_department": {
+                "snapshot_id": _did_snapshot_v24.snapshot_id,
+                "quality_score": _did_snapshot_v24.quality_score,
+                "raw_signature": _did_snapshot_v24.raw_signature,
+                "source_registry": dict(source_registry or {}),
+                "movement_phase": str((live_movement or {}).get("phase", "UNAVAILABLE")),
+            },
             # Compact UI trace only. Rich dataclass reports are intentionally not
             # retained inside AI_MASTER because final_decision also references
             # AI_MASTER and Streamlit reruns would otherwise retain duplicate
@@ -7350,7 +7834,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_4_LIVE_READINESS_FIX",
+                "version": "V50_5_RECOVERY_DATA_INTEGRITY",
                 "pipeline_status": "READY",
                 "pipeline_error": "",
                 "import_errors": {},
@@ -7484,7 +7968,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.4_LIVE_MARKET_READINESS",
+            "version": "V50.5_RECOVERY_DATA_INTEGRITY_PDF",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -7509,7 +7993,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.4_LIVE_MARKET_READINESS",
+        "version": "V50.5_RECOVERY_DATA_INTEGRITY_PDF",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -7534,6 +8018,7 @@ except Exception as _v24_pipeline_error:
 # V19.16 TRADER COMMAND CENTER HELPERS
 # =========================================================
 def _v1916_build_health_snapshot():
+    """Module availability and live-data readiness are deliberately separate."""
     try:
         engine_flags = {
             "snapshot_engine": bool(V19_SNAPSHOT_ENGINE_READY),
@@ -7549,54 +8034,29 @@ def _v1916_build_health_snapshot():
         }
     except Exception:
         engine_flags = {}
-
-    ready_count = sum(1 for v in engine_flags.values() if v)
+    ready_count = sum(1 for value in engine_flags.values() if value)
     total_count = len(engine_flags)
-
-    try:
-        oc_rows = len(option_chain.get("rows", []) or []) if isinstance(option_chain, dict) else 0
-    except Exception:
-        oc_rows = 0
-
-    try:
-        dhan_ok = bool(dhan_ready)
-    except Exception:
-        dhan_ok = False
-
-    try:
-        data_source = option_chain.get("source", "UNKNOWN") if isinstance(option_chain, dict) else "UNKNOWN"
-    except Exception:
-        data_source = "UNKNOWN"
-
-    try:
-        market_txt = market_text
-    except Exception:
-        try:
-            market_txt, _ = market_status()
-        except Exception:
-            market_txt = "UNKNOWN"
-
-    if oc_rows > 0 and dhan_ok:
-        freshness = "LIVE"
-        note = "DhanHQ quote and option-chain rows available."
-    elif oc_rows > 0:
-        freshness = "PARTIAL"
-        note = "Option-chain rows available, but Dhan heartbeat not fully confirmed."
+    registry = source_registry if isinstance(globals().get("source_registry", {}), dict) else {}
+    flow = v205_data_flow if isinstance(globals().get("v205_data_flow", {}), dict) else {}
+    core_names = ("nifty", "expiry", "option_chain", "oi", "price_action", "vix", "heavyweights")
+    core_ready = sum(1 for name in core_names if bool((registry.get(name, {}) or {}).get("ready", False)))
+    market_txt = globals().get("market_text", "UNKNOWN")
+    flow_status = str(flow.get("status", "UNKNOWN"))
+    if flow_status == "FRESH" and core_ready == len(core_names):
+        freshness, note = "LIVE", "All core feeds ready and one-snapshot flow is fresh."
+    elif core_ready >= 4:
+        freshness, note = "PARTIAL", f"{core_ready}/{len(core_names)} core feeds ready; flow {flow_status}."
     else:
-        freshness = "STALE"
-        note = "Option-chain rows missing or not loaded."
-
+        freshness, note = "STALE", f"Only {core_ready}/{len(core_names)} core feeds ready; flow {flow_status}."
     return {
-        "engines_ready": ready_count,
-        "engines_total": total_count,
-        "engine_flags": engine_flags,
-        "dhan_ok": dhan_ok,
-        "option_rows": oc_rows,
-        "data_source": data_source,
-        "market_status": market_txt,
-        "freshness": freshness,
-        "freshness_note": note,
-        "last_refresh": fmt_time() if "fmt_time" in globals() else "",
+        "engines_ready": ready_count, "engines_total": total_count, "engine_flags": engine_flags,
+        "modules_ready": ready_count, "modules_total": total_count,
+        "core_feeds_ready": core_ready, "core_feeds_total": len(core_names),
+        "dhan_ok": bool((registry.get("nifty", {}) or {}).get("ready", False)),
+        "option_rows": int((flow or {}).get("oc_rows", 0) or 0),
+        "data_source": str((registry.get("option_chain", {}) or {}).get("source", "UNKNOWN")),
+        "market_status": market_txt, "freshness": freshness, "freshness_note": note,
+        "flow_status": flow_status, "last_refresh": fmt_time() if "fmt_time" in globals() else "",
     }
 
 
@@ -7715,17 +8175,37 @@ def _v201_projection():
 def _v201_change_line(proj):
     current = int(proj.get("probability", 50) or 50)
     direction = str(proj.get("direction", "RANGE"))
-    key = "v201_last_projection_prob"
-    prev = st.session_state.get(key, None)
-    st.session_state[key] = current
-    if prev is None:
-        return "First snapshot — next refresh se change compare hoga."
-    delta = current - int(prev)
+    previous = None
+    if V505_LIVE_STATE_READY:
+        try:
+            memory = update_projection_memory(
+                st.session_state,
+                direction=direction,
+                probability=current,
+                observed_at=datetime.now(IST),
+            )
+            previous = memory.get("previous")
+        except Exception:
+            previous = None
+    if previous is None:
+        key = "v201_last_projection_prob"
+        prev_value = st.session_state.get(key, None)
+        prev_direction = st.session_state.get(key + "_direction", direction)
+        st.session_state[key] = current
+        st.session_state[key + "_direction"] = direction
+        if prev_value is not None:
+            previous = {"probability": prev_value, "direction": prev_direction}
+    if previous is None:
+        return "First verified snapshot - next fresh snapshot will be compared."
+    prev_prob = int(previous.get("probability", current) or current)
+    prev_direction = str(previous.get("direction", direction))
+    delta = current - prev_prob
+    if direction != prev_direction:
+        return f"Phase changed: {prev_direction} -> {direction}."
     if abs(delta) < 3:
-        return "No major change vs last refresh."
-    side = "Bullish" if direction == "UP" else "Bearish" if direction == "DOWN" else "Range"
+        return "No major change vs last verified snapshot."
     word = "increased" if delta > 0 else "reduced"
-    return f"{side} pressure {abs(delta)}% {word} vs last refresh."
+    return f"{direction.title()} pressure {abs(delta)}% {word} vs last verified snapshot."
 
 
 def _v201_top_factors(limit=3):
@@ -7782,7 +8262,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.4 Live Readiness</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.5 Recovery & Data Integrity</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -7830,7 +8310,7 @@ st.markdown(
 
 # V20.1 compact market movement state used by AI Final Authority.
 _oc_age_note = "Live" if option_chain.get("success") else "Not Live"
-_pa_status = "Live" if price_action_result.get("success") else "Manual"
+_pa_status = "Auto" if price_action_auto_ok else ("Manual" if price_action_manual_active else "Unavailable")
 _pos_status = "Saved" if ACTIVE_POSITION_STORE.exists() else "Not saved"
 _mg = locals().get("v164_move_guard", {}) or {}
 _mg_label = str(_mg.get("label", "NORMAL") or "NORMAL")
@@ -7839,7 +8319,7 @@ _mg_daily = float(_mg.get("daily_pct", 0) or 0)
 
 st.markdown(
     f"<div class='v201-top-status'>"
-    f"📍 {market_text} | 📡 {source_text} | 🌪️ VIX {vix:.2f} | 📊 PCR {pcr:.2f} | "
+    f"📍 {market_text} | 📡 {source_text} | 🌪️ VIX {vix:.2f} ({vix_source}) | 📊 PCR {pcr:.2f} | "
     f"📰 News {news['label']} {news['score']}/100 | ⚡ {_mg_label} {_mg_move:+.1f} pts"
     f"</div>",
     unsafe_allow_html=True,
@@ -7918,8 +8398,10 @@ _v504_pipeline_state = str(_v504_pipeline_ui.get("pipeline_status", AI_MASTER.ge
 _v504_dhan_quote_ok = bool(dhan_bundle.get("success", False)) if isinstance(dhan_bundle, dict) else False
 _v504_expiry_ok = bool(expiry_result.get("success", False)) if isinstance(expiry_result, dict) else False
 _v504_oc_ok = bool(option_chain.get("success", False)) if isinstance(option_chain, dict) else False
-_v504_pa_ok = bool(price_action_result.get("success", False)) if isinstance(locals().get("price_action_result", {}), dict) else False
-_v504_vix_ok = bool(yahoo_vix.get("success", False)) if isinstance(locals().get("yahoo_vix", {}), dict) else False
+_v504_pa_ok = bool((source_registry.get("price_action", {}) or {}).get("automatic", False)) if isinstance(locals().get("source_registry", {}), dict) else False
+_v504_vix_ok = bool((source_registry.get("vix", {}) or {}).get("automatic", False)) if isinstance(locals().get("source_registry", {}), dict) else False
+_v504_pa_label = str((source_registry.get("price_action", {}) or {}).get("status", "UNAVAILABLE")) if isinstance(locals().get("source_registry", {}), dict) else "UNAVAILABLE"
+_v504_vix_label = str((source_registry.get("vix", {}) or {}).get("status", "UNAVAILABLE")) if isinstance(locals().get("source_registry", {}), dict) else "UNAVAILABLE"
 _v504_hw_ok = bool(heavy_analysis.get("success", False)) if isinstance(heavy_analysis, dict) else False
 _v504_quality = float(_v504_pipeline_ui.get("data_quality_score", data_quality) or 0) if isinstance(_v504_pipeline_ui, dict) else float(data_quality or 0)
 _v504_flow_state = str((v205_data_flow or {}).get("status", "UNKNOWN")) if isinstance(locals().get("v205_data_flow", {}), dict) else "UNKNOWN"
@@ -7939,7 +8421,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.4 Live Market Readiness Gate")
+st.markdown("### ✅ V50.5 Live Market Readiness Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -7947,8 +8429,8 @@ _render_safe_table([{
     "Dhan Quote": "READY" if _v504_dhan_quote_ok else "MISSING",
     "Expiry List": "READY" if _v504_expiry_ok else "MISSING",
     "Option Chain": "READY" if _v504_oc_ok else "MISSING",
-    "Price Action": "AUTO" if _v504_pa_ok else "MANUAL/FALLBACK",
-    "VIX": "AUTO" if _v504_vix_ok else "MANUAL/FALLBACK",
+    "Price Action": _v504_pa_label,
+    "VIX": _v504_vix_label,
     "Heavyweights": "READY" if _v504_hw_ok else "MISSING",
     "Snapshot Flow": _v504_flow_state,
     "Data Quality": f"{_v504_quality:.0f}%",
@@ -7995,7 +8477,9 @@ _news_line_v222 = f"News Risk: {news['label']} ({news['score']}/100)"
 st.markdown(f"""
 <div class='v201-ai-card {_status_class}'>
 <h2>{_status_text} — {_final_v222}</h2>
-<b>Confidence:</b> {_conf_v222}% &nbsp; | &nbsp;
+<b>Decision Confidence:</b> {_m_v222.get('decision_confidence', _conf_v222)}% &nbsp; | &nbsp;
+<b>Direction Confidence:</b> {_m_v222.get('direction_confidence', _proj_v222.get('probability', 50))}% &nbsp; | &nbsp;
+<b>Data Confidence:</b> {_m_v222.get('data_confidence', _v504_quality):.0f}%<br>
 <b>Market Outlook:</b> {_proj_v222.get('direction')} {_proj_v222.get('probability')}%
 <span style='opacity:.72'>(Bull {_proj_v222.get('bullish')}% / Bear {_proj_v222.get('bearish')}%)</span><br>
 <b>Change:</b> {_change_v222}<br>
@@ -8012,6 +8496,88 @@ try:
         st.warning("⚠️ Brain Sync caution: " + " | ".join(_v204_brain_sync.get("stale_reasons", []) or ["Data freshness check failed"]))
 except Exception:
     pass
+
+# V50.5 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
+# inside Streamlit, so it works as a normal mobile download.
+try:
+    if V505_PDF_REPORT_READY:
+        _pdf_source_rows_v505 = []
+        for _source_name_v505, _source_info_v505 in (AI_MASTER.get("source_registry", {}) or {}).items():
+            if isinstance(_source_info_v505, dict):
+                _pdf_source_rows_v505.append({
+                    "Feed": str(_source_name_v505).replace("_", " ").title(),
+                    "Ready": "YES" if _source_info_v505.get("ready", False) else "NO",
+                    "Status": _source_info_v505.get("status", "UNKNOWN"),
+                    "Source": _source_info_v505.get("source", "-"),
+                })
+        _pdf_department_rows_v505 = []
+        for _dept_name_v505, _dept_info_v505 in (AI_MASTER.get("department_reports", {}) or {}).items():
+            if isinstance(_dept_info_v505, dict):
+                _pdf_department_rows_v505.append({
+                    "Department": str(_dept_name_v505).replace("_", " ").title(),
+                    "Confidence": _dept_info_v505.get("confidence", 0),
+                    "Summary": _dept_info_v505.get("summary", "-"),
+                })
+        _pdf_option_rows_v505 = []
+        for _row_v505 in (option_analysis.get("rows", []) if isinstance(locals().get("option_analysis", {}), dict) else []):
+            if isinstance(_row_v505, dict):
+                _pdf_option_rows_v505.append({
+                    "Strike": _row_v505.get("strike", "-"),
+                    "CE LTP": _row_v505.get("ce_ltp", 0),
+                    "CE OI Chg": _row_v505.get("ce_oi_change", 0),
+                    "CE Flow": _row_v505.get("ce_flow", _row_v505.get("ce_signal", "-")),
+                    "PE LTP": _row_v505.get("pe_ltp", 0),
+                    "PE OI Chg": _row_v505.get("pe_oi_change", 0),
+                    "PE Flow": _row_v505.get("pe_flow", _row_v505.get("pe_signal", "-")),
+                })
+        _movement_pdf_v505 = AI_MASTER.get("movement", {}) if isinstance(AI_MASTER.get("movement", {}), dict) else {}
+        _pdf_payload_v505 = {
+            "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
+            "summary": {
+                "Version": AI_MASTER.get("version", "V50.5"),
+                "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
+                "Market": market_text,
+                "Nifty": round(float(price), 2),
+                "Nifty Change %": round(float(nifty_change_pct), 2),
+                "VIX": f"{float(vix):.2f} ({vix_source})",
+                "PCR": round(float(pcr), 2),
+                "Final Action": AI_MASTER.get("final_action", "WAIT"),
+                "Execution": AI_MASTER.get("execution_status", "WAIT"),
+                "Decision Confidence": AI_MASTER.get("decision_confidence", AI_MASTER.get("confidence", 0)),
+                "Direction": (AI_MASTER.get("projection", {}) or {}).get("direction", "RANGE"),
+                "Direction Confidence": AI_MASTER.get("direction_confidence", (AI_MASTER.get("projection", {}) or {}).get("probability", 50)),
+                "Data Confidence": AI_MASTER.get("data_confidence", data_quality),
+                "Data Flow": AI_MASTER.get("data_flow_status", "UNKNOWN"),
+                "OI Sync": AI_MASTER.get("oi_sync_status", "UNKNOWN"),
+                "Movement Phase": _movement_pdf_v505.get("phase", "UNAVAILABLE"),
+                "Recovery From Low": _movement_pdf_v505.get("recovery_from_low", 0),
+            },
+            "source_rows": _pdf_source_rows_v505,
+            "evidence_rows": AI_MASTER.get("evidence_rows", []),
+            "strategy_rows": AI_MASTER.get("strategy_rows", []),
+            "candidate_rows": AI_MASTER.get("candidate_rows", []),
+            "option_rows": _pdf_option_rows_v505,
+            "department_rows": _pdf_department_rows_v505,
+            "reasons": AI_MASTER.get("reasons", []),
+            "warnings": list(dict.fromkeys([
+                *list(AI_MASTER.get("warnings", []) or []),
+                *list(AI_MASTER.get("blockers", []) or []),
+            ])),
+        }
+        _pdf_bytes_v505 = build_ai_report_pdf(_pdf_payload_v505)
+        st.download_button(
+            "📄 Download Full App PDF Report",
+            data=_pdf_bytes_v505,
+            file_name=f"nifty_seller_ai_{datetime.now(IST).strftime('%Y%m%d_%H%M%S')}.pdf",
+            mime="application/pdf",
+            width="stretch",
+            key=f"v505_pdf_{AI_MASTER.get('short_snapshot_id','NA')}",
+        )
+        st.caption("Mobile-safe app-generated PDF. Browser Print/Save ki zaroorat nahi.")
+    else:
+        st.warning("PDF generator unavailable. requirements.txt me reportlab install confirm karo.")
+except Exception as _pdf_error_v505:
+    st.warning("PDF report generation failed: " + str(_pdf_error_v505))
 
 # V50.4.1 UI PRIORITY: keep the three execution-facing tables directly
 # below AI FINAL AUTHORITY. Display order only; no engine/decision logic changed.
@@ -8040,7 +8606,7 @@ try:
         _best_row_v221 = _strategy_rows_v221[0]
         st.markdown(
             f"**AI_MASTER Action:** {AI_MASTER.get('final_action','WAIT')} "
-            f"({AI_MASTER.get('confidence',0)}%) | "
+            f"(Decision Confidence {AI_MASTER.get('decision_confidence', AI_MASTER.get('confidence',0))}%) | "
             f"**Execution:** {AI_MASTER.get('execution_status','WAIT')}"
         )
     else:
@@ -8059,7 +8625,7 @@ try:
         st.caption(
             f"AI_MASTER: SNAP {AI_MASTER.get('short_snapshot_id','NA')} | "
             f"{AI_MASTER.get('data_flow_status','NA')} | OI {AI_MASTER.get('oi_sync_status','NA')} | "
-            "Candidate Matrix fresh CE/PE rows dikhati hai; advice/ranking sirf AI_MASTER se aati hai."
+            "Candidate Quality execution confidence nahi hai. Advice/permission sirf AI_MASTER Final Authority se aati hai."
         )
     else:
         st.info("AI Candidate Matrix ke liye live option-chain active hona zaroori hai.")

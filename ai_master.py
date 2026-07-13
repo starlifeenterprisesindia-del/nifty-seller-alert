@@ -94,7 +94,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V50.3_FINAL_AI_HEADQUARTERS_AI_COURT_AUTHORITY"
+    VERSION = "V50.5_RECOVERY_AND_DATA_INTEGRITY_AUTHORITY"
 
     def decide(
         self,
@@ -335,21 +335,38 @@ class AIMaster:
         money = _details(smart_money_report)
 
         trend = str(price.get("trend", {}).get("trend", ""))
-        if "Bullish" in trend:
+        structure = str(price.get("trend", {}).get("structure", ""))
+        if structure in {"BULLISH", "MIXED_BULLISH"} or ("Bullish" in trend and "Pullback" not in trend):
             bullish += 2
-        if "Bearish" in trend:
+        if structure in {"BEARISH", "MIXED_BEARISH"} or ("Bearish" in trend and "Recovery" not in trend):
+            bearish += 2
+
+        # Current impulse is separate from the broader EMA structure. A strong
+        # recovery neutralizes a stale bearish continuation reading.
+        movement = price.get("movement", {}) if isinstance(price.get("movement", {}), Mapping) else {}
+        phase = str(movement.get("phase", ""))
+        if phase == "STRONG_RECOVERY":
+            bullish += 3
+        elif phase == "RECOVERY":
+            bullish += 2
+        elif phase == "STRONG_PULLBACK_DOWN":
+            bearish += 3
+        elif phase == "PULLBACK_DOWN":
             bearish += 2
 
         pcr = str(option.get("pcr", {}).get("sentiment", ""))
-        if pcr == "Bullish":
+        if "Bullish" in pcr and "Extreme" not in pcr:
             bullish += 1
-        elif pcr == "Bearish":
+        elif "Bearish" in pcr:
             bearish += 1
 
         pressure = str(option.get("strike", {}).get("pressure", ""))
         if pressure == "PE Support":
             bullish += 1
         elif pressure == "CE Resistance":
+            bearish += 1
+        elif pressure == "Two-Sided Writing / Range":
+            bullish += 1
             bearish += 1
 
         fii = str(money.get("fii", {}).get("fii", ""))
@@ -412,8 +429,11 @@ class AIMaster:
         mappings = [
             ("Trend", price.get("trend", {}).get("trend")),
             ("Move stage", price.get("move_stage", {}).get("stage")),
+            ("Movement", price.get("movement", {}).get("label")),
+            ("Recovery from low", price.get("movement", {}).get("recovery_from_low")),
             ("Barrier", price.get("barrier", {}).get("barrier_zone")),
             ("OI", option.get("oi", {}).get("signal")),
+            ("OI flow", option.get("flow", {}).get("state")),
             ("Volume", option.get("volume", {}).get("status")),
             ("Strike pressure", option.get("strike", {}).get("pressure")),
             ("Market energy", behaviour.get("energy", {}).get("market_energy")),

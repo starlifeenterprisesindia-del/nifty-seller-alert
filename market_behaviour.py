@@ -1,6 +1,6 @@
 """
 market_behaviour.py
-Version : V23.2
+Version : V50.5
 Department : Market Behaviour
 Status : Phase-1
 
@@ -42,10 +42,14 @@ class BreakoutSpecialist:
 
 
 class ReversalSpecialist:
-    def analyze(self, stage):
+    def analyze(self, stage, movement_phase=""):
+        if movement_phase in ("STRONG_RECOVERY", "RECOVERY"):
+            return {"reversal_risk": "Active Recovery", "movement_phase": movement_phase}
+        if movement_phase in ("STRONG_PULLBACK_DOWN", "PULLBACK_DOWN"):
+            return {"reversal_risk": "Active Pullback", "movement_phase": movement_phase}
         if stage in ("Late Move", "Exhaustion Move"):
-            return {"reversal_risk": "High"}
-        return {"reversal_risk": "Low"}
+            return {"reversal_risk": "High", "movement_phase": movement_phase}
+        return {"reversal_risk": "Low", "movement_phase": movement_phase}
 
 
 class FakeBreakoutSpecialist:
@@ -72,17 +76,25 @@ class TimeBehaviourSpecialist:
 
 
 class MarketEnergySpecialist:
-    def analyze(self, stage):
+    def analyze(self, stage, movement_phase=""):
+        if movement_phase in ("STRONG_RECOVERY", "STRONG_PULLBACK_DOWN"):
+            return {"market_energy": "High", "impulse": movement_phase}
+        if movement_phase in ("RECOVERY", "PULLBACK_DOWN"):
+            return {"market_energy": "Medium", "impulse": movement_phase}
         energy = "High"
         if stage == "Late Move":
             energy = "Medium"
         if stage == "Exhaustion Move":
             energy = "Low"
-        return {"market_energy": energy}
+        return {"market_energy": energy, "impulse": movement_phase or "NORMAL"}
 
 
 class MovePotentialSpecialist:
     def analyze(self, energy, reversal):
+        if reversal == "Active Recovery":
+            return {"move_potential": "Recovery In Progress"}
+        if reversal == "Active Pullback":
+            return {"move_potential": "Pullback In Progress"}
         if energy == "High":
             return {"move_potential": "Further Move Possible"}
         if reversal == "High":
@@ -95,9 +107,10 @@ class MarketBehaviourDirector:
     def build_report(self, price_details, option_details, hour):
         barrier = BarrierIntelligenceSpecialist().analyze(price_details, option_details)
         stage = price_details.get("move_stage", {}).get("stage", "")
+        movement_phase = price_details.get("movement", {}).get("phase", "")
         volume = option_details.get("volume", {}).get("status", "")
         breakout = BreakoutSpecialist().analyze(barrier["barrier_view"], volume)
-        reversal = ReversalSpecialist().analyze(stage)
+        reversal = ReversalSpecialist().analyze(stage, movement_phase)
         fake = FakeBreakoutSpecialist().analyze(
             breakout["breakout_probability"], volume
         )
@@ -105,7 +118,7 @@ class MarketBehaviourDirector:
             price_details.get("range", {}).get("range_status", "")
         )
         tm = TimeBehaviourSpecialist().analyze(hour)
-        energy = MarketEnergySpecialist().analyze(stage)
+        energy = MarketEnergySpecialist().analyze(stage, movement_phase)
         potential = MovePotentialSpecialist().analyze(
             energy["market_energy"], reversal["reversal_risk"]
         )
@@ -119,10 +132,11 @@ class MarketBehaviourDirector:
             "time": tm,
             "energy": energy,
             "potential": potential,
+            "movement": {"phase": movement_phase, "stage": stage},
         }
 
         return MarketBehaviourReport(
-            summary="Market Behaviour analysis completed",
+            summary=f"Market Behaviour: {movement_phase or stage or 'NORMAL'}",
             confidence=75.0,
             details=details,
         )

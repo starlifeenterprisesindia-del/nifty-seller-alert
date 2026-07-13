@@ -130,6 +130,8 @@ def build_market_snapshot(ctx, fmt_time_func=None):
     heavyweight_analysis = ctx.get("heavyweight_analysis", {}) if isinstance(ctx.get("heavyweight_analysis", {}), dict) else {}
     news = ctx.get("news", {}) if isinstance(ctx.get("news", {}), dict) else {}
     final_decision_obj = ctx.get("final_decision", {}) if isinstance(ctx.get("final_decision", {}), dict) else {}
+    movement = ctx.get("movement", {}) if isinstance(ctx.get("movement", {}), dict) else {}
+    source_registry = ctx.get("source_registry", {}) if isinstance(ctx.get("source_registry", {}), dict) else {}
 
     created_at = ""
     try:
@@ -212,7 +214,22 @@ def build_market_snapshot(ctx, fmt_time_func=None):
             "smart_money_bias": _safe_float(ctx.get("smart_money_bias", 0), 0),
             "pcr_bias": _safe_float(ctx.get("pcr_bias", 0), 0),
             "market_bias": _safe_float(ctx.get("market_bias", 0), 0),
+            "movement_bias": _safe_float(ctx.get("movement_bias", movement.get("movement_bias", 0)), 0),
+            "movement_phase": str(movement.get("phase", "UNAVAILABLE")),
             "conflict_mode": bool(ctx.get("conflict_mode", False)),
+        },
+        "movement": {
+            "ready": bool(movement.get("ready", False)),
+            "phase": str(movement.get("phase", "UNAVAILABLE")),
+            "label": str(movement.get("label", "")),
+            "last_move": movement.get("last_move"),
+            "move_1m": movement.get("move_1m"),
+            "move_3m": movement.get("move_3m"),
+            "move_5m": movement.get("move_5m"),
+            "recovery_from_low": _safe_float(movement.get("recovery_from_low", 0), 0),
+            "pullback_from_high": _safe_float(movement.get("pullback_from_high", 0), 0),
+            "movement_bias": _safe_float(movement.get("movement_bias", 0), 0),
+            "sample_count": _safe_int(movement.get("sample_count", 0), 0),
         },
         "risk": {
             "data_quality": _safe_int(ctx.get("data_quality", 0), 0),
@@ -234,6 +251,11 @@ def build_market_snapshot(ctx, fmt_time_func=None):
             "nifty_source": ctx.get("nifty_source", ""),
             "heavy_source": ctx.get("heavy_source", ""),
             "vix_source": ctx.get("vix_source", ""),
+            "price_action_source": ctx.get("price_action_source", ""),
+            "price_action_auto_ok": bool(ctx.get("price_action_auto_ok", False)),
+            "price_action_usable": bool(ctx.get("price_action_direction_usable", False)),
+            "vix_live_ok": bool(ctx.get("vix_live_ok", False)),
+            "registry": source_registry,
         },
         "candidates": {
             "best_ce_strike": (ctx.get("best_ce") or {}).get("strike") if isinstance(ctx.get("best_ce"), dict) else None,
@@ -242,7 +264,9 @@ def build_market_snapshot(ctx, fmt_time_func=None):
         },
         "oi_single_source": {
             "source": oi_source,
-            "sync_ok": len(oi_mismatches) == 0,
+            "available": bool(oi_row_aggregate.get("has_rows")),
+            "sync_ok": bool(oi_row_aggregate.get("has_rows")) and len(oi_mismatches) == 0,
+            "status": ("OK" if oi_row_aggregate.get("has_rows") and not oi_mismatches else "MISMATCH" if oi_row_aggregate.get("has_rows") else "UNKNOWN"),
             "mismatches": oi_mismatches[:6],
             "row_aggregate": oi_row_aggregate,
             "authoritative": {
@@ -272,6 +296,8 @@ def build_market_snapshot(ctx, fmt_time_func=None):
         "option_bias": snapshot["signals"]["option_bias"],
         "price_action_bias": snapshot["signals"].get("price_action_bias", 0),
         "heavyweight_bias": snapshot["signals"].get("heavyweight_bias", 0),
+        "movement_bias": snapshot["signals"].get("movement_bias", 0),
+        "movement_phase": snapshot["signals"].get("movement_phase", ""),
         "risk": snapshot["risk"].get("seller_risk", 0),
         "action": snapshot["ai"].get("final_action", "WAIT"),
     }
@@ -296,6 +322,9 @@ def snapshot_delta(current_snapshot, previous_snapshot=None):
     heavy_delta = abs(_safe_float(cur_s.get("heavyweight_bias")) - _safe_float(prev_s.get("heavyweight_bias")))
     risk_delta = abs(_safe_float(cur_r.get("seller_risk")) - _safe_float(prev_r.get("seller_risk")))
     news_delta = abs(_safe_float(cur_r.get("news_risk")) - _safe_float(prev_r.get("news_risk")))
+    cur_move = current_snapshot.get("movement", {}) if isinstance(current_snapshot.get("movement", {}), dict) else {}
+    prev_move = previous_snapshot.get("movement", {}) if isinstance(previous_snapshot.get("movement", {}), dict) else {}
+    movement_delta = abs(_safe_float(cur_move.get("movement_bias")) - _safe_float(prev_move.get("movement_bias")))
 
     if price_delta >= 20:
         changes.append(f"Nifty moved {price_delta:.1f} points.")
@@ -307,8 +336,12 @@ def snapshot_delta(current_snapshot, previous_snapshot=None):
         changes.append(f"Seller risk changed {risk_delta:.0f} points.")
     if news_delta >= 10:
         changes.append(f"News risk changed {news_delta:.0f} points.")
+    if movement_delta >= 18:
+        changes.append(f"Live movement bias changed {movement_delta:.0f} points.")
+    if str(cur_move.get("phase", "")) != str(prev_move.get("phase", "")):
+        changes.append(f"Movement phase: {prev_move.get('phase','NA')} -> {cur_move.get('phase','NA')}.")
 
-    material = min(100, price_delta * 0.8 + option_delta * 1.5 + heavy_delta * 1.2 + risk_delta + news_delta)
+    material = min(100, price_delta * 0.8 + option_delta * 1.5 + heavy_delta * 1.2 + risk_delta + news_delta + movement_delta)
     return {"status": "CHANGED" if changes else "STABLE", "material_change": int(round(material)), "changes": changes or ["No material market change."]}
 
 
@@ -364,6 +397,12 @@ def snapshot_health(snapshot):
     if not src.get("dhan_ready", False):
         warnings.append("Dhan credentials/source not ready.")
         points -= 10
+    if not src.get("price_action_auto_ok", False):
+        warnings.append("Automatic price action unavailable.")
+        points -= 15
+    if not src.get("vix_live_ok", False):
+        warnings.append("India VIX is manual/fallback, not automatic.")
+        points -= 8
 
     bias_values = [
         abs(_safe_float(sig.get("option_bias", 0), 0)),
