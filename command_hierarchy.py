@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V50.3
+Version: V50.8
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -184,20 +184,67 @@ class BranchBoss:
                 return action
         return "INFORMATION_ONLY"
 
-    @staticmethod
-    def _branch_vote(summary: str, facts: Mapping[str, Any], recommendation: str) -> str:
-        text = (summary + " " + str(facts) + " " + recommendation).lower()
-        bullish_tokens = ("bullish", "buying", "pe support", "supporting market", "sell pe", "uptrend")
-        bearish_tokens = ("bearish", "selling", "ce resistance", "pressuring market", "sell ce", "downtrend")
-        risk_tokens = ("high impact", "high volatility", "fake breakout", "exhaustion", "wait")
-        bullish = sum(token in text for token in bullish_tokens)
-        bearish = sum(token in text for token in bearish_tokens)
-        risk = sum(token in text for token in risk_tokens)
-        if risk >= 2 or recommendation == "WAIT":
+    def _branch_vote(self, summary: str, facts: Mapping[str, Any], recommendation: str) -> str:
+        text = (summary + " " + str(facts)).lower()
+
+        if self.branch == "PRICE_ACTION":
+            trend = facts.get("trend", {}) if isinstance(facts.get("trend", {}), Mapping) else {}
+            structure = str(trend.get("structure", "")).upper()
+            confirmation = str(trend.get("directional_confirmation", "")).upper()
+            if confirmation == "BULLISH_CONFIRMED" or structure == "BULLISH":
+                return "BULLISH"
+            if confirmation == "BEARISH_CONFIRMED" or structure == "BEARISH":
+                return "BEARISH"
+            return "NEUTRAL"
+
+        if self.branch == "OPTION":
+            oi = facts.get("oi", {}) if isinstance(facts.get("oi", {}), Mapping) else {}
+            strike = facts.get("strike", {}) if isinstance(facts.get("strike", {}), Mapping) else {}
+            bias = self._number(oi.get("bias", 0.0))
+            pressure = str(strike.get("pressure", ""))
+            if bias >= 15 and pressure != "CE Resistance":
+                return "BULLISH"
+            if bias <= -15 and pressure != "PE Support":
+                return "BEARISH"
+            if pressure == "PE Support" and bias > -15:
+                return "BULLISH"
+            if pressure == "CE Resistance" and bias < 15:
+                return "BEARISH"
+            # Opposing structural OI and snapshot flow are a mixed option case,
+            # not a fabricated one-way vote.
+            return "NEUTRAL"
+
+        if self.branch == "SMART_MONEY":
+            explicit_bull = any(token in text for token in ("supporting market", "strong breadth", "fii=buying", "fii buying"))
+            explicit_bear = any(token in text for token in ("pressuring market", "weak breadth", "fii=selling", "fii selling"))
+            if explicit_bull and not explicit_bear:
+                return "BULLISH"
+            if explicit_bear and not explicit_bull:
+                return "BEARISH"
+            return "NEUTRAL"
+
+        if self.branch == "STRATEGY":
+            if recommendation == "WAIT":
+                return "CAUTION"
+            if recommendation == "SELL PE":
+                return "BULLISH"
+            if recommendation == "SELL CE":
+                return "BEARISH"
+            return "NEUTRAL"
+
+        if self.branch == "RISK":
+            return "CAUTION" if any(token in text for token in ("high impact", "high volatility", "high reversal", "block trade")) else "NEUTRAL"
+
+        # Generic fallback deliberately avoids bare words such as "buying" and
+        # "selling" because option writing and premium buying have opposite
+        # directional meanings.
+        bullish = sum(token in text for token in ("bullish", "pe support", "supporting market", "uptrend"))
+        bearish = sum(token in text for token in ("bearish", "ce resistance", "pressuring market", "downtrend"))
+        if recommendation == "WAIT":
             return "CAUTION"
-        if bullish >= bearish + 1:
+        if bullish > bearish:
             return "BULLISH"
-        if bearish >= bullish + 1:
+        if bearish > bullish:
             return "BEARISH"
         return "NEUTRAL"
 
@@ -257,20 +304,18 @@ class CommandingOfficer:
         if caution:
             warnings.append("Branches on caution: " + ", ".join(caution))
 
-        price_text = self._branch_text(branch_map.get("PRICE_ACTION"))
-        option_text = self._branch_text(branch_map.get("OPTION"))
-        money_text = self._branch_text(branch_map.get("SMART_MONEY"))
-        strategy_text = self._branch_text(branch_map.get("STRATEGY"))
-        behaviour_text = self._branch_text(branch_map.get("MARKET_BEHAVIOUR"))
+        price_vote = branch_map.get("PRICE_ACTION").branch_vote if branch_map.get("PRICE_ACTION") else "NEUTRAL"
+        option_vote = branch_map.get("OPTION").branch_vote if branch_map.get("OPTION") else "NEUTRAL"
+        money_vote = branch_map.get("SMART_MONEY").branch_vote if branch_map.get("SMART_MONEY") else "NEUTRAL"
+        strategy_vote = branch_map.get("STRATEGY").branch_vote if branch_map.get("STRATEGY") else "NEUTRAL"
 
-        if "bullish" in price_text and ("bearish" in option_text or "selling" in money_text):
-            conflicts.append("Bullish price action conflicts with option/money flow")
-        if "bearish" in price_text and ("bullish" in option_text or "buying" in money_text):
-            conflicts.append("Bearish price action conflicts with option/money flow")
-        if "breakout" in behaviour_text and "resistance" in option_text and "increasing" not in behaviour_text:
-            conflicts.append("Breakout thesis lacks confirming option pressure")
-        if "wait" not in strategy_text and conflicts:
-            conflicts.append("Strategy recommendation exists despite cross-branch conflict")
+        opposing_votes = {"BULLISH": "BEARISH", "BEARISH": "BULLISH"}
+        if price_vote in opposing_votes and option_vote == opposing_votes[price_vote]:
+            conflicts.append(f"{price_vote.title()} price action conflicts with option flow")
+        if price_vote in opposing_votes and money_vote == opposing_votes[price_vote]:
+            conflicts.append(f"{price_vote.title()} price action conflicts with smart-money flow")
+        if strategy_vote in opposing_votes and option_vote == opposing_votes[strategy_vote]:
+            conflicts.append("Strategy direction conflicts with current option evidence")
 
         cross_examinations = self._cross_examine(branch_map)
         for item in cross_examinations:

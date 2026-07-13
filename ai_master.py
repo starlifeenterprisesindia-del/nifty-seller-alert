@@ -1,6 +1,6 @@
 """
 ai_master.py
-Version : V50.3
+Version : V50.8
 Role    : Final AI Authority
 Status  : V50 Final Headquarters authority lock
 
@@ -94,7 +94,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V50.5_RECOVERY_AND_DATA_INTEGRITY_AUTHORITY"
+    VERSION = "V50.8_COMBINED_INTEGRITY_AUTHORITY"
 
     def decide(
         self,
@@ -127,7 +127,7 @@ class AIMaster:
         if not snapshot_id:
             warnings.append("Missing snapshot ID")
         if not data_quality_ok:
-            warnings.append("Data quality failed")
+            warnings.append("Live execution data gate incomplete (freshness/OI/price-action check)")
 
         strategy_scores, recommended = self._strategy_view(strategy_report)
         market_bias = self._market_bias(
@@ -154,12 +154,21 @@ class AIMaster:
 
         score_gap = self._score_gap(strategy_scores)
         top_score = max(strategy_scores.values(), default=0.0)
+        execution_confirmation_ok, execution_confirmation_note = self._execution_confirmation(
+            recommended=recommended,
+            price_report=price_report,
+            option_report=option_report,
+        )
+        if recommended in {"SELL CE", "SELL PE", "IRON CONDOR"} and not execution_confirmation_ok:
+            warnings.append(execution_confirmation_note)
 
-        # Trade permission is decided before candidate approval.
+        # Trade permission is decided before candidate approval. Candidate quality
+        # is never a substitute for directional confirmation.
         trade_allowed = (
             data_quality_ok
             and co_accepted
             and not risk_block
+            and execution_confirmation_ok
             and recommended in {"SELL CE", "SELL PE", "IRON CONDOR"}
             and top_score >= 65.0
             and score_gap >= 6.0
@@ -254,6 +263,8 @@ class AIMaster:
                 "co_case_id": co_case_id,
                 "co_case_strength": co_case_strength,
                 "co_accepted": co_accepted,
+                "execution_confirmation_ok": execution_confirmation_ok,
+                "execution_confirmation_note": execution_confirmation_note,
                 "reasoning_version": reasoning_report.get("version", ""),
                 "reasoning_explanation_only": True,
                 "master_intelligence_version": master_view.get("version", "") if master_view else "",
@@ -344,14 +355,17 @@ class AIMaster:
         # Current impulse is separate from the broader EMA structure. A strong
         # recovery neutralizes a stale bearish continuation reading.
         movement = price.get("movement", {}) if isinstance(price.get("movement", {}), Mapping) else {}
+        trend_details = price.get("trend", {}) if isinstance(price.get("trend", {}), Mapping) else {}
         phase = str(movement.get("phase", ""))
-        if phase == "STRONG_RECOVERY":
+        recovery_confirmed = bool(trend_details.get("recovery_confirmed", movement.get("recovery_confirmed", False)))
+        pullback_confirmed = bool(trend_details.get("pullback_confirmed", movement.get("pullback_confirmed", False)))
+        if phase == "STRONG_RECOVERY" and recovery_confirmed:
             bullish += 3
-        elif phase == "RECOVERY":
+        elif phase == "RECOVERY" and recovery_confirmed:
             bullish += 2
-        elif phase == "STRONG_PULLBACK_DOWN":
+        elif phase == "STRONG_PULLBACK_DOWN" and pullback_confirmed:
             bearish += 3
-        elif phase == "PULLBACK_DOWN":
+        elif phase == "PULLBACK_DOWN" and pullback_confirmed:
             bearish += 2
 
         pcr = str(option.get("pcr", {}).get("sentiment", ""))
@@ -385,6 +399,47 @@ class AIMaster:
         if bearish >= bullish + 2:
             return "BEARISH"
         return "NEUTRAL"
+
+    def _execution_confirmation(
+        self,
+        *,
+        recommended: str,
+        price_report: Any,
+        option_report: Any,
+    ) -> tuple[bool, str]:
+        if recommended == "WAIT":
+            return True, "WAIT requires no directional execution confirmation"
+
+        price = _details(price_report)
+        option = _details(option_report)
+        trend = price.get("trend", {}) if isinstance(price.get("trend", {}), Mapping) else {}
+        movement = price.get("movement", {}) if isinstance(price.get("movement", {}), Mapping) else {}
+        barrier = price.get("barrier", {}) if isinstance(price.get("barrier", {}), Mapping) else {}
+        sample_count = int(float(movement.get("sample_count", 0) or 0))
+        confirmation = str(trend.get("directional_confirmation", movement.get("directional_confirmation", "UNCONFIRMED")))
+        zone = str(barrier.get("barrier_zone", ""))
+
+        if sample_count < 3:
+            return False, "Execution confirmation incomplete: fewer than three persisted samples"
+        if recommended == "SELL PE":
+            if confirmation != "BULLISH_CONFIRMED":
+                return False, "Execution confirmation incomplete: SELL PE needs price above EMA20/EMA50/VWAP"
+            if "Near Resistance" in zone:
+                return False, "Execution confirmation incomplete: bullish recovery is still at resistance"
+            return True, "Bullish execution confirmation complete"
+        if recommended == "SELL CE":
+            if confirmation != "BEARISH_CONFIRMED":
+                return False, "Execution confirmation incomplete: SELL CE needs price below EMA20/EMA50/VWAP"
+            if "Near Support" in zone:
+                return False, "Execution confirmation incomplete: bearish pullback is still at support"
+            return True, "Bearish execution confirmation complete"
+        if recommended == "IRON CONDOR":
+            pressure = str(option.get("strike", {}).get("pressure", ""))
+            phase = str(movement.get("phase", ""))
+            if pressure != "Two-Sided Writing / Range" or phase not in {"RANGE", "NORMAL"}:
+                return False, "Execution confirmation incomplete: Iron Condor needs stable range plus two-sided writing"
+            return True, "Range execution confirmation complete"
+        return False, "Unsupported execution action"
 
     def _risk_gate(
         self,

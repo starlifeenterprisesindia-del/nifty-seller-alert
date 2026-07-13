@@ -187,9 +187,11 @@ def build_final_decision(
     delta_status = str(snapshot_delta.get("status", "") or "").upper()
     material_change = _clip(snapshot_delta.get("material_change", 0))
 
-    freeze_confirmed = bool(freeze_state.get("confirmed", False))
-    freeze_count = _safe_int(freeze_state.get("same_count", 0), 0)
+    freeze_count = _safe_int(freeze_state.get("same_count", freeze_state.get("count", 0)), 0)
     freeze_required = max(1, _safe_int(freeze_state.get("required", 3), 3))
+    # A completed 3/3 counter is authoritative even if an older boolean flag
+    # was not refreshed in the same payload.
+    freeze_confirmed = bool(freeze_state.get("confirmed", False)) or freeze_count >= freeze_required
 
     plan = _plan_validation(analysis_action, strategy)
 

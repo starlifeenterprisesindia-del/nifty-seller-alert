@@ -194,7 +194,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_6_DHAN_AUTO_FEEDS_DIAGNOSTIC",
+        "version": "V50_8_COMBINED_INTEGRITY_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1346,7 +1346,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.6 Dhan Auto Feeds",
+    page_title="Nifty Seller AI V50.8 Dhan Auto Feeds",
     page_icon="🧠",
     layout="wide",
 )
@@ -2409,7 +2409,19 @@ def analyze_option_chain(option_chain):
     conflict_score = min(bullish_total, bearish_total) / max(bullish_total, bearish_total, 1.0) * 100.0
     # Two-way evidence must reduce directional certainty.
     damp = max(0.35, 1.0 - conflict_score / 125.0)
-    bias = signed_clamp(raw_bias * damp, -85, 85)
+    raw_flow_bias = signed_clamp(raw_bias * damp, -85, 85)
+
+    # Current snapshot flow is primary, but absolute OTM OI structure prevents a
+    # false -85 reading when the chain simultaneously has dominant PE support
+    # and a bullish structural PCR (or the opposite case).
+    otm_ce_oi = sum(float(r.get("ce_oi", 0) or 0) for r in analyzed if float(r.get("strike", 0) or 0) >= spot)
+    otm_pe_oi = sum(float(r.get("pe_oi", 0) or 0) for r in analyzed if float(r.get("strike", 0) or 0) <= spot)
+    structural_pcr = safe_divide(otm_pe_oi, otm_ce_oi, 1.0)
+    structural_bias = signed_clamp((structural_pcr - 1.0) * 55.0, -35, 35)
+    if raw_flow_bias * structural_bias < 0 and abs(structural_bias) >= 12:
+        bias = signed_clamp(raw_flow_bias * 0.55 + structural_bias * 0.45, -45, 45)
+    else:
+        bias = signed_clamp(raw_flow_bias * 0.82 + structural_bias * 0.18, -85, 85)
 
     # Normalize against the actual maximum weighted evidence. The previous
     # half-denominator saturated both CE and PE writing at 100, which could
@@ -2447,6 +2459,9 @@ def analyze_option_chain(option_chain):
         "success": True,
         "rows": analyzed,
         "bias": round(float(bias), 2),
+        "raw_flow_bias": round(float(raw_flow_bias), 2),
+        "structural_pcr": round(float(structural_pcr), 2),
+        "structural_bias": round(float(structural_bias), 2),
         "bullish_score": round(float(bullish_score), 1),
         "bearish_score": round(float(bearish_score), 1),
         "support_score": round(float(support_score), 1),
@@ -3877,7 +3892,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.6 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -4474,7 +4489,7 @@ smart_money_bias = signed_clamp(smart_money_bias)
 
 heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
 
-# V50.6 central source registry: every status panel and department reads the
+# V50.8 central source registry: every status panel and department reads the
 # same truth instead of independently saying OI OK / UNKNOWN or VIX live/manual.
 _pa_registry_status = (
     "AUTO_DHAN" if price_action_auto_ok and str(price_action_source).lower().startswith("dhan")
@@ -4599,7 +4614,7 @@ elif final_direction <= -24 and confidence >= 58:
 else:
     final_trade = "WAIT"
 
-# V50.6 compatibility safety: the legacy path is evidence-only, but it must
+# V50.8 compatibility safety: the legacy path is evidence-only, but it must
 # never preserve a continuation trade against the verified live movement phase.
 _movement_phase_legacy = str((live_movement or {}).get("phase", "NORMAL")) if isinstance(locals().get("live_movement", {}), dict) else "NORMAL"
 if _movement_phase_legacy in {"STRONG_RECOVERY", "RECOVERY"} and final_trade == "SELL CE":
@@ -6758,7 +6773,7 @@ def _v221_side_plan(side, row, confidence_value):
     }
 
 
-def _v221_build_projection(snapshot_obj):
+def _v221_build_projection(snapshot_obj, price_report_obj=None):
     """Display projection from the one authoritative snapshot.
 
     Broad EMA structure and the active recovery/pullback phase are separate.
@@ -6779,6 +6794,12 @@ def _v221_build_projection(snapshot_obj):
     pcrb = _v221_signed(sig.get("pcr_bias", 0))
     move_bias = _v221_signed(sig.get("movement_bias", movement.get("movement_bias", 0)))
     phase = str(sig.get("movement_phase", movement.get("phase", "NORMAL")))
+    price_details = getattr(price_report_obj, "details", {}) if price_report_obj is not None else {}
+    if not isinstance(price_details, dict):
+        price_details = {}
+    trend_details = price_details.get("trend", {}) if isinstance(price_details.get("trend", {}), dict) else {}
+    recovery_confirmed = bool(trend_details.get("recovery_confirmed", False))
+    pullback_confirmed = bool(trend_details.get("pullback_confirmed", False))
 
     news_score_local = _v221_num(risk.get("news_risk", 0), 0)
     vix_val = _v221_num(market.get("india_vix", vix if "vix" in globals() else 0), 0)
@@ -6788,13 +6809,13 @@ def _v221_build_projection(snapshot_obj):
     bullish = int(round(max(0, min(100, 50 + raw / 2 - risk_penalty / 2))))
 
     if phase == "STRONG_RECOVERY":
-        bullish = max(bullish, 56)
+        bullish = max(bullish, 62 if recovery_confirmed else 54)
     elif phase == "RECOVERY":
-        bullish = max(bullish, 53)
+        bullish = max(bullish, 58 if recovery_confirmed else 52)
     elif phase == "STRONG_PULLBACK_DOWN":
-        bullish = min(bullish, 44)
+        bullish = min(bullish, 38 if pullback_confirmed else 46)
     elif phase == "PULLBACK_DOWN":
-        bullish = min(bullish, 47)
+        bullish = min(bullish, 42 if pullback_confirmed else 48)
 
     # Incomplete core evidence must not produce an exaggerated 70-80% outlook.
     if not pa_usable:
@@ -6802,10 +6823,10 @@ def _v221_build_projection(snapshot_obj):
     bearish = int(max(0, min(100, 100 - bullish)))
 
     if phase in {"STRONG_RECOVERY", "RECOVERY"}:
-        direction = "RECOVERY"
+        direction = "RECOVERY CONFIRMED" if recovery_confirmed else "RECOVERY ATTEMPT"
         probability = bullish
     elif phase in {"STRONG_PULLBACK_DOWN", "PULLBACK_DOWN"}:
-        direction = "PULLBACK DOWN"
+        direction = "PULLBACK CONFIRMED" if pullback_confirmed else "PULLBACK ATTEMPT"
         probability = bearish
     else:
         direction = "UP" if bullish > bearish + 2 else "DOWN" if bearish > bullish + 2 else "RANGE"
@@ -6819,6 +6840,8 @@ def _v221_build_projection(snapshot_obj):
         "probability": probability,
         "movement_phase": phase,
         "price_action_usable": pa_usable,
+        "recovery_confirmed": recovery_confirmed,
+        "pullback_confirmed": pullback_confirmed,
         "source": "ONE_SNAPSHOT_WITH_LIVE_MOVEMENT",
     }
 
@@ -7718,7 +7741,6 @@ try:
             and option_analysis.get("success", False)
             and bool(_oi_lock_v24.get("sync_ok", False))
             and bool(price_action_direction_usable)
-            and _co_case_v26.accepted
             and (not _market_open_quality_v24 or _flow_fresh_v24)
         )
         _v24_decision = AIMaster().decide(
@@ -7891,11 +7913,15 @@ try:
                 ("Best PE", "PE", _pe_plan_v24, _watch_v24.get("best_pe")),
             ):
                 _candidate = _candidate if isinstance(_candidate, dict) else {}
-                _approved = _v24_decision.trade_allowed and (_v24_decision.action in (f"SELL {_side}", "IRON CONDOR"))
+                _side_selected = _v24_decision.action in (f"SELL {_side}", "IRON CONDOR")
+                _approved = _v24_decision.trade_allowed and bool(_market_open_v1951) and _side_selected
+                _preview = _v24_decision.trade_allowed and (not bool(_market_open_v1951)) and _side_selected
+                _directional_fit = round(_score_map_v24.get(f"SELL {_side}", 0.0), 1)
                 _rows.append({
                     "Candidate": _label,
-                    "AI Status": "APPROVED" if _approved else "WATCHLIST / WAITING CONFIRMATION",
-                    "Candidate Quality % (Not Execution Confidence)": round(_v221_num(_candidate.get("score", 0)), 1),
+                    "AI Status": "APPROVED" if _approved else "PREVIEW ONLY — MARKET CLOSED" if _preview else "WATCHLIST / FUTURE CANDIDATE — EXECUTION BLOCKED",
+                    "Directional Fit %": _directional_fit,
+                    "Liquidity / Strike Quality %": round(_v221_num(_candidate.get("score", 0)), 1),
                     "Strike": _plan.get("strike", "-"),
                     "Entry": _plan.get("entry", 0),
                     "SL": _plan.get("sl", 0),
@@ -7905,17 +7931,18 @@ try:
                 })
             return _rows
 
-        _projection_v505 = _v221_build_projection(market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {})
+        _projection_v505 = _v221_build_projection(market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {}, _v24_price_report)
         _evidence_rows_v505 = _v221_build_evidence_rows(
             market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {}, {}
         )
         _oi_status_v505 = str(_oi_lock_v24.get("status", "UNKNOWN")) if isinstance(_oi_lock_v24, dict) else "UNKNOWN"
         _flow_status_v505 = str((v205_data_flow or {}).get("status", "UNKNOWN")) if isinstance(locals().get("v205_data_flow", {}), dict) else "UNKNOWN"
-        _data_conf_v505 = int(max(0, min(100, round(float(_did_snapshot_v24.quality_score or 0)))))
+        _raw_data_conf_v505 = int(max(0, min(100, round(float(_did_snapshot_v24.quality_score or 0)))))
+        _data_conf_v505 = _raw_data_conf_v505 if _data_quality_ok_v24 else min(_raw_data_conf_v505, 69)
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.6_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8_DHAN_AUTO_FEEDS_PDF",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -7940,6 +7967,10 @@ try:
                 *( ["Automatic price action unavailable - directional PA score excluded."] if not price_action_auto_ok else [] ),
                 *( [f"India VIX source is {vix_source}; automatic VIX unavailable."] if not vix_live_ok else [] ),
                 *( ["Iron Condor figure is gross sold premium; hedge premiums are not available for net credit."] ),
+            ])),
+            "blockers": list(dict.fromkeys([
+                *([f"Risk Engine: {_x}" for _x in (risk_engine_report.get("hard_blockers", []) or [])[:6]] if isinstance(locals().get("risk_engine_report", {}), dict) else []),
+                *(["Risk guidance is BLOCK TRADE."] if isinstance(locals().get("risk_engine_report", {}), dict) and str(risk_engine_report.get("guidance", "")).upper() == "BLOCK TRADE" else []),
             ])),
             "advice": str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
             "reasoning_report": dict(_v24_decision.reasoning_report or {}),
@@ -7983,7 +8014,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_6_DHAN_AUTO_FEEDS",
+                "version": "V50_8_COMBINED_INTEGRITY",
                 "pipeline_status": "READY",
                 "pipeline_error": "",
                 "import_errors": {},
@@ -8117,7 +8148,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.6_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8_DHAN_AUTO_FEEDS_PDF",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8142,7 +8173,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.6_DHAN_AUTO_FEEDS_PDF",
+        "version": "V50.8_DHAN_AUTO_FEEDS_PDF",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8411,7 +8442,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.6 Dhan Auto Feeds</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8 Dhan Auto Feeds</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -8570,7 +8601,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.6 Live Market Readiness Gate")
+st.markdown("### ✅ V50.8 Live Market Readiness Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -8650,7 +8681,7 @@ try:
 except Exception:
     pass
 
-# V50.6 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
+# V50.8 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
 # inside Streamlit, so it works as a normal mobile download.
 try:
     if V505_PDF_REPORT_READY:
@@ -8687,7 +8718,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.6"),
+                "Version": AI_MASTER.get("version", "V50.8"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),

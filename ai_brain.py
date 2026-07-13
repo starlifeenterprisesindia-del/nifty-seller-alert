@@ -1,5 +1,5 @@
 """
-Nifty Seller AI — AI Brain Module v19.4
+Nifty Seller AI — AI Brain Module v19.4 / V50.8 integrity fix
 
 This module reads a market snapshot and produces explainable AI scoring.
 It does not fetch data and does not modify portfolio/refresh/DhanHQ logic.
@@ -169,9 +169,10 @@ def build_ai_explanation(snapshot, final_decision=None):
     action = str(fd.get("action", snapshot.get("ai", {}).get("final_action", "WAIT"))).upper()
 
     regime, regime_reason = detect_market_regime(snapshot)
-    alignment_score, alignment_notes = direction_alignment(snapshot, action)
     bias = snapshot_bias(snapshot)
-    quality_score, quality_label = trade_quality(snapshot, action, alignment_score, regime)
+    alignment_action = action if action != "WAIT" else str(bias.get("proposed_action", "WAIT")).upper()
+    alignment_score, alignment_notes = direction_alignment(snapshot, alignment_action)
+    quality_score, quality_label = trade_quality(snapshot, alignment_action, alignment_score, regime)
 
     risk = snapshot.get("risk", {}) if isinstance(snapshot.get("risk", {}), dict) else {}
     data_quality = _safe_float(risk.get("data_quality", 0))
@@ -213,6 +214,7 @@ def build_ai_explanation(snapshot, final_decision=None):
         "version": "V19.4 AI Brain Module",
         "decision_id": decision_id,
         "action": action,
+        "alignment_action": alignment_action,
         "regime": regime,
         "regime_reason": regime_reason,
         "alignment_score": alignment_score,

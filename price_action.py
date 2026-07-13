@@ -1,6 +1,6 @@
 """
 price_action.py
-Version: V50.5
+Version: V50.8
 Department: Price Action
 
 Reads chart structure plus same-day live movement memory. It never issues a
@@ -26,14 +26,28 @@ def _num(value, default=0.0):
 
 
 class TrendSpecialist:
-    def analyze(self, price, ema20, ema50, movement=None):
+    def analyze(self, price, ema20, ema50, vwap=None, atr=None, movement=None):
         movement = movement if isinstance(movement, Mapping) else {}
         phase = str(movement.get("phase", "NORMAL"))
-        if price > ema20 > ema50:
+        sample_count = int(_num(movement.get("sample_count", 0), 0))
+        price = _num(price)
+        ema20 = _num(ema20)
+        ema50 = _num(ema50)
+        vwap_value = _num(vwap, 0.0)
+        confirmation_buffer = max(2.0, _num(atr, 0.0) * 0.05)
+
+        above_ema20 = price >= ema20 + confirmation_buffer
+        above_ema50 = price >= ema50 + confirmation_buffer
+        above_vwap = vwap_value <= 0 or price >= vwap_value + confirmation_buffer
+        below_ema20 = price <= ema20 - confirmation_buffer
+        below_ema50 = price <= ema50 - confirmation_buffer
+        below_vwap = vwap_value <= 0 or price <= vwap_value - confirmation_buffer
+
+        if above_ema20 and ema20 > ema50:
             trend = "Bullish Trend"
             structure = "BULLISH"
             strength = 85
-        elif price < ema20 < ema50:
+        elif below_ema20 and ema20 < ema50:
             trend = "Bearish Trend"
             structure = "BEARISH"
             strength = 85
@@ -50,21 +64,49 @@ class TrendSpecialist:
             structure = "NEUTRAL"
             strength = 40
 
-        # Structure and current impulse are intentionally kept separate.
-        if phase == "STRONG_RECOVERY" and structure in {"BEARISH", "MIXED_BEARISH"}:
-            trend = "Bearish Structure / Strong Recovery"
-            strength = 72
-        elif phase == "RECOVERY" and structure in {"BEARISH", "MIXED_BEARISH"}:
-            trend = "Bearish Structure / Recovery Active"
-            strength = 64
-        elif phase == "STRONG_PULLBACK_DOWN" and structure in {"BULLISH", "MIXED_BULLISH"}:
-            trend = "Bullish Structure / Strong Pullback"
-            strength = 72
-        elif phase == "PULLBACK_DOWN" and structure in {"BULLISH", "MIXED_BULLISH"}:
-            trend = "Bullish Structure / Pullback Active"
-            strength = 64
+        recovery_phase = phase in {"RECOVERY", "STRONG_RECOVERY"}
+        pullback_phase = phase in {"PULLBACK_DOWN", "STRONG_PULLBACK_DOWN"}
+        recovery_confirmed = bool(recovery_phase and sample_count >= 3 and above_ema20 and above_ema50 and above_vwap)
+        pullback_confirmed = bool(pullback_phase and sample_count >= 3 and below_ema20 and below_ema50 and below_vwap)
 
-        return {"trend": trend, "structure": structure, "strength": strength}
+        if recovery_confirmed:
+            trend = "Bullish Recovery Confirmed"
+            structure = "BULLISH"
+            strength = max(strength, 85 if phase == "STRONG_RECOVERY" else 78)
+        elif recovery_phase:
+            trend = "Recovery Attempt / Confirmation Pending"
+            structure = "MIXED_BULLISH" if price >= min(ema20, ema50) else structure
+            strength = min(max(strength, 52), 58)
+        elif pullback_confirmed:
+            trend = "Bearish Pullback Confirmed"
+            structure = "BEARISH"
+            strength = max(strength, 85 if phase == "STRONG_PULLBACK_DOWN" else 78)
+        elif pullback_phase:
+            trend = "Pullback Attempt / Confirmation Pending"
+            structure = "MIXED_BEARISH" if price <= max(ema20, ema50) else structure
+            strength = min(max(strength, 52), 58)
+
+        directional_confirmation = (
+            "BULLISH_CONFIRMED" if recovery_confirmed or (above_ema20 and above_ema50 and above_vwap)
+            else "BEARISH_CONFIRMED" if pullback_confirmed or (below_ema20 and below_ema50 and below_vwap)
+            else "UNCONFIRMED"
+        )
+        return {
+            "trend": trend,
+            "structure": structure,
+            "strength": strength,
+            "directional_confirmation": directional_confirmation,
+            "recovery_confirmed": recovery_confirmed,
+            "pullback_confirmed": pullback_confirmed,
+            "above_ema20": above_ema20,
+            "above_ema50": above_ema50,
+            "above_vwap": above_vwap,
+            "below_ema20": below_ema20,
+            "below_ema50": below_ema50,
+            "below_vwap": below_vwap,
+            "confirmation_buffer_points": round(confirmation_buffer, 2),
+            "sample_count": sample_count,
+        }
 
 
 class VWAPSpecialist:
@@ -212,16 +254,23 @@ class PriceActionDirector:
                 details=details,
             )
 
+        trend_details = self.trend.analyze(k["price"], k["ema20"], k["ema50"], k.get("vwap"), k.get("atr"), movement)
+        movement_details = self.movement.analyze(movement)
+        movement_details.update({
+            "recovery_confirmed": bool(trend_details.get("recovery_confirmed", False)),
+            "pullback_confirmed": bool(trend_details.get("pullback_confirmed", False)),
+            "directional_confirmation": trend_details.get("directional_confirmation", "UNCONFIRMED"),
+        })
         details = {
             "availability": {"status": "READY", "source": source, "used_for_direction": True},
-            "trend": self.trend.analyze(k["price"], k["ema20"], k["ema50"], movement),
+            "trend": trend_details,
             "vwap": self.vwap.analyze(k["price"], k.get("vwap")),
             "atr": self.atr.analyze(k["current_range"], k.get("atr")),
             "barrier": self.barrier.analyze(k["price"], k.get("support"), k.get("resistance")),
             "candle": self.candle.analyze(k["open_price"], k["high"], k["low"], k["close"]),
             "move_stage": self.stage.analyze(k["points_moved_from_open"], k.get("atr"), movement),
             "range": self.range.analyze(k["day_high"], k["day_low"], k.get("atr")),
-            "movement": self.movement.analyze(movement),
+            "movement": movement_details,
         }
         summary = f'{details["trend"]["trend"]} | {details["move_stage"]["stage"]} | {details["barrier"]["barrier_zone"]}'
         confidence = details["trend"]["strength"]

@@ -1,5 +1,5 @@
 """
-Nifty Seller AI - V50.5 live market state.
+Nifty Seller AI - V50.8 live market state.
 
 Purpose:
 - Preserve same-day compact price/snapshot memory across Streamlit reruns and
@@ -74,6 +74,27 @@ def _write_json(path: Path, value: Any) -> bool:
         return False
 
 
+def _merge_samples(*groups: Any) -> list[dict]:
+    """Merge same-day session/disk samples without allowing refresh history loss."""
+    merged: Dict[tuple, dict] = {}
+    for group in groups:
+        if not isinstance(group, list):
+            continue
+        for item in group:
+            if not isinstance(item, Mapping):
+                continue
+            row = dict(item)
+            ts = round(_safe_float(row.get("ts"), 0.0), 3)
+            if ts <= 0:
+                continue
+            snapshot_id = str(row.get("snapshot_id", ""))
+            price = round(_safe_float(row.get("price"), 0.0), 2)
+            key = (ts, snapshot_id, price)
+            merged[key] = row
+    rows = sorted(merged.values(), key=lambda item: _safe_float(item.get("ts"), 0.0))
+    return rows[-_MAX_SAMPLES:]
+
+
 def _nearest_older(samples: list[dict], now_ts: float, seconds: int) -> Optional[dict]:
     target = now_ts - seconds
     older = [item for item in samples if _safe_float(item.get("ts"), 0.0) <= target]
@@ -131,12 +152,25 @@ def _movement_phase(
     signed_bias = max(-85.0, min(85.0, recovery_score - pullback_score))
 
     threshold_points = max(28.0, atr * 0.55)
+    recovery_hold_threshold = max(45.0, atr * 0.70)
+    pullback_hold_threshold = max(45.0, atr * 0.70)
+    sharp_down = m1 < -max(10.0, atr * 0.18) or m3 < -max(18.0, atr * 0.30)
+    sharp_up = m1 > max(10.0, atr * 0.18) or m3 > max(18.0, atr * 0.30)
+
     if from_low >= threshold_points and (m3 >= max(12.0, atr * 0.22) or m5 >= max(18.0, atr * 0.30)):
         phase = "STRONG_RECOVERY"
         label = "Strong recovery from session low"
     elif from_high >= threshold_points and (m3 <= -max(12.0, atr * 0.22) or m5 <= -max(18.0, atr * 0.30)):
         phase = "STRONG_PULLBACK_DOWN"
         label = "Strong pullback from session high"
+    elif from_low >= recovery_hold_threshold and range_position >= 0.68 and not sharp_down:
+        # A completed 100+ point recovery must not become RANGE merely because
+        # the latest three minutes paused near the session high.
+        phase = "RECOVERY"
+        label = "Recovery holding near session high"
+    elif from_high >= pullback_hold_threshold and range_position <= 0.32 and not sharp_up:
+        phase = "PULLBACK_DOWN"
+        label = "Pullback holding near session low"
     elif from_low >= max(18.0, atr * 0.35) and (m1 > 0 or m3 > 0):
         phase = "RECOVERY"
         label = "Recovery / short-covering phase"
@@ -189,11 +223,34 @@ def update_live_market_state(
 
     day = now.strftime("%Y-%m-%d")
     state_key = "v505_live_market_memory"
-    memory = state.get(state_key)
-    if not isinstance(memory, Mapping) or str(memory.get("date", "")) != day:
-        memory = _read_json(_path("market_memory", now), {"date": day, "samples": []})
-    memory = dict(memory) if isinstance(memory, Mapping) else {"date": day, "samples": []}
-    samples = [dict(item) for item in memory.get("samples", []) if isinstance(item, Mapping)]
+    session_memory = state.get(state_key)
+    if not isinstance(session_memory, Mapping) or str(session_memory.get("date", "")) != day:
+        session_memory = {"date": day, "samples": []}
+    disk_memory = _read_json(_path("market_memory", now), {"date": day, "samples": []})
+    if not isinstance(disk_memory, Mapping) or str(disk_memory.get("date", "")) != day:
+        disk_memory = {"date": day, "samples": []}
+
+    # Always merge disk + current Streamlit session. A browser reconnect,
+    # server rerun, or shortened session object can no longer reduce 7 samples
+    # back to 3 while the same trading day is active.
+    samples = _merge_samples(
+        list(disk_memory.get("samples", []) or []),
+        list(session_memory.get("samples", []) or []),
+    )
+    memory = {
+        "date": day,
+        "samples": samples,
+        "session_low": min(
+            [value for value in (
+                _safe_float(disk_memory.get("session_low"), 0.0),
+                _safe_float(session_memory.get("session_low"), 0.0),
+            ) if value > 0] or [0.0]
+        ),
+        "session_high": max(
+            _safe_float(disk_memory.get("session_high"), 0.0),
+            _safe_float(session_memory.get("session_high"), 0.0),
+        ),
+    }
 
     ts = now.timestamp()
     current = {
@@ -224,8 +281,10 @@ def update_live_market_state(
     observed_prices = [_safe_float(item.get("price"), 0.0) for item in samples if _safe_float(item.get("price"), 0.0) > 0]
     supplied_low = _safe_float(session_low, 0.0)
     supplied_high = _safe_float(session_high, 0.0)
-    low_candidates = observed_prices + ([supplied_low] if supplied_low > 0 else [])
-    high_candidates = observed_prices + ([supplied_high] if supplied_high > 0 else [])
+    remembered_low = _safe_float(memory.get("session_low"), 0.0)
+    remembered_high = _safe_float(memory.get("session_high"), 0.0)
+    low_candidates = observed_prices + ([supplied_low] if supplied_low > 0 else []) + ([remembered_low] if remembered_low > 0 else [])
+    high_candidates = observed_prices + ([supplied_high] if supplied_high > 0 else []) + ([remembered_high] if remembered_high > 0 else [])
     session_low_f = min(low_candidates) if low_candidates else price_f
     session_high_f = max(high_candidates) if high_candidates else price_f
 

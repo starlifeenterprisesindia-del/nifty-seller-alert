@@ -1,4 +1,4 @@
-"""App-native PDF report generator for Nifty Seller AI V50.5."""
+"""App-native PDF report generator for Nifty Seller AI V50.8."""
 from __future__ import annotations
 
 from io import BytesIO
@@ -34,18 +34,23 @@ def _table(data: list[dict], max_rows: int = 40) -> Table | Paragraph:
     if not data:
         return Paragraph("No data available.", getSampleStyleSheet()["BodyText"])
     columns = list(data[0].keys())
-    matrix = [[_text(col) for col in columns]]
+    body_style = ParagraphStyle(
+        "TableCell", fontName="Helvetica", fontSize=5.8, leading=7.0,
+        wordWrap="CJK", spaceAfter=0, spaceBefore=0,
+    )
+    head_style = ParagraphStyle(
+        "TableHead", parent=body_style, fontName="Helvetica-Bold",
+        fontSize=5.7, leading=6.8,
+    )
+    matrix = [[Paragraph(_text(col), head_style) for col in columns]]
     for row in data[:max_rows]:
-        matrix.append([_text(row.get(col, "-")) for col in columns])
+        matrix.append([Paragraph(_text(row.get(col, "-")), body_style) for col in columns])
     width = 265 * mm
     col_width = width / max(1, len(columns))
-    table = Table(matrix, repeatRows=1, colWidths=[col_width] * len(columns))
+    table = Table(matrix, repeatRows=1, colWidths=[col_width] * len(columns), splitByRow=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#E5E7EB")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.black),
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("FONTNAME", (0, 1), (-1, -1), "Helvetica"),
-        ("FONTSIZE", (0, 0), (-1, -1), 6.2),
         ("VALIGN", (0, 0), (-1, -1), "TOP"),
         ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#9CA3AF")),
         ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, colors.HexColor("#F9FAFB")]),

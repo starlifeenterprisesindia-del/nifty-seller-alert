@@ -1,6 +1,6 @@
 """
 strategy_department.py
-Version : V50.5
+Version : V50.8
 Department : Strategy Intelligence
 
 Scores WAIT / SELL CE / SELL PE / IRON CONDOR from department evidence only.
@@ -59,6 +59,11 @@ class StrategyScoringSpecialist:
         movement_phase = str(movement.get("phase", "NORMAL"))
         recovery_points = float(movement.get("recovery_from_low", 0) or 0)
         pullback_points = float(movement.get("pullback_from_high", 0) or 0)
+        sample_count = int(float(movement.get("sample_count", 0) or 0))
+        trend_details = price.get("trend", {}) if isinstance(price.get("trend", {}), dict) else {}
+        recovery_confirmed = bool(trend_details.get("recovery_confirmed", movement.get("recovery_confirmed", False)))
+        pullback_confirmed = bool(trend_details.get("pullback_confirmed", movement.get("pullback_confirmed", False)))
+        directional_confirmation = str(trend_details.get("directional_confirmation", movement.get("directional_confirmation", "UNCONFIRMED")))
 
         if not price_available:
             scores["WAIT"] += 22
@@ -79,27 +84,41 @@ class StrategyScoringSpecialist:
                 scores["WAIT"] += 8
                 reasons["IRON CONDOR"].append("Mixed/sideways structure")
 
-        # Active movement phase overrides continuation entries, not the final authority.
+        # Active movement phase and EMA/VWAP confirmation are separate.
         if movement_phase == "STRONG_RECOVERY":
-            scores["WAIT"] += 26
+            scores["WAIT"] += 20 if recovery_confirmed else 26
             scores["SELL CE"] -= 34
-            scores["SELL PE"] += 4
-            reasons["WAIT"].append(f"Strong recovery active ({recovery_points:.0f} pts from low)")
+            scores["SELL PE"] += 6 if recovery_confirmed else 0
+            reasons["WAIT"].append(
+                f"Strong recovery confirmed ({recovery_points:.0f} pts from low)"
+                if recovery_confirmed else f"Strong recovery attempt ({recovery_points:.0f} pts from low); EMA/VWAP confirmation pending"
+            )
             reasons["SELL CE"].append("Fresh CE selling blocked during recovery")
         elif movement_phase == "RECOVERY":
-            scores["WAIT"] += 16
+            scores["WAIT"] += 10 if recovery_confirmed else 16
             scores["SELL CE"] -= 22
-            reasons["WAIT"].append("Recovery developing; bearish continuation unconfirmed")
+            if recovery_confirmed:
+                scores["SELL PE"] += 4
+                reasons["WAIT"].append("Recovery confirmed; entry still requires barrier and risk clearance")
+            else:
+                reasons["WAIT"].append("Recovery developing; EMA/VWAP confirmation incomplete")
         elif movement_phase == "STRONG_PULLBACK_DOWN":
-            scores["WAIT"] += 26
+            scores["WAIT"] += 20 if pullback_confirmed else 26
             scores["SELL PE"] -= 34
-            scores["SELL CE"] += 4
-            reasons["WAIT"].append(f"Strong pullback down ({pullback_points:.0f} pts from high)")
+            scores["SELL CE"] += 6 if pullback_confirmed else 0
+            reasons["WAIT"].append(
+                f"Strong pullback confirmed ({pullback_points:.0f} pts from high)"
+                if pullback_confirmed else f"Strong pullback attempt ({pullback_points:.0f} pts from high); EMA/VWAP confirmation pending"
+            )
             reasons["SELL PE"].append("Fresh PE selling blocked during pullback")
         elif movement_phase == "PULLBACK_DOWN":
-            scores["WAIT"] += 16
+            scores["WAIT"] += 10 if pullback_confirmed else 16
             scores["SELL PE"] -= 22
-            reasons["WAIT"].append("Downward pullback developing")
+            if pullback_confirmed:
+                scores["SELL CE"] += 4
+                reasons["WAIT"].append("Pullback confirmed; entry still requires barrier and risk clearance")
+            else:
+                reasons["WAIT"].append("Downward pullback developing; EMA/VWAP confirmation incomplete")
 
         if stage in {"Late Move", "Exhaustion Move"}:
             scores["WAIT"] += 18
@@ -233,6 +252,32 @@ class StrategyScoringSpecialist:
         if gap == "High Gap":
             scores["WAIT"] += 10
             reasons["WAIT"].append("High opening gap")
+
+        # Final confirmation guard. OI/PCR can identify a future candidate, but
+        # cannot by itself create an 80% directional execution score.
+        if sample_count < 3:
+            scores["SELL CE"] = min(scores["SELL CE"], 60.0)
+            scores["SELL PE"] = min(scores["SELL PE"], 60.0)
+            scores["WAIT"] = max(scores["WAIT"], 85.0)
+            reasons["WAIT"].append("Fewer than three persisted movement samples")
+
+        if movement_phase in {"RECOVERY", "STRONG_RECOVERY"} and not recovery_confirmed:
+            scores["SELL PE"] = min(scores["SELL PE"], 62.0)
+            scores["WAIT"] = max(scores["WAIT"], 82.0)
+            reasons["SELL PE"].append("Directional fit capped until price clears EMA20/EMA50/VWAP")
+        if movement_phase in {"PULLBACK_DOWN", "STRONG_PULLBACK_DOWN"} and not pullback_confirmed:
+            scores["SELL CE"] = min(scores["SELL CE"], 62.0)
+            scores["WAIT"] = max(scores["WAIT"], 82.0)
+            reasons["SELL CE"].append("Directional fit capped until price confirms below EMA20/EMA50/VWAP")
+
+        if "Near Resistance" in barrier_zone and movement_phase in {"RECOVERY", "STRONG_RECOVERY"}:
+            scores["SELL PE"] = min(scores["SELL PE"], 69.0 if recovery_confirmed else 60.0)
+            scores["WAIT"] = max(scores["WAIT"], 88.0 if stage in {"Late Move", "Exhaustion Move"} else 82.0)
+            reasons["WAIT"].append("Recovery is at resistance; breakout hold is not yet execution-safe")
+        if "Near Support" in barrier_zone and movement_phase in {"PULLBACK_DOWN", "STRONG_PULLBACK_DOWN"}:
+            scores["SELL CE"] = min(scores["SELL CE"], 69.0 if pullback_confirmed else 60.0)
+            scores["WAIT"] = max(scores["WAIT"], 88.0 if stage in {"Late Move", "Exhaustion Move"} else 82.0)
+            reasons["WAIT"].append("Pullback is at support; breakdown hold is not yet execution-safe")
 
         result: Dict[str, StrategyScore] = {}
         for name, raw_score in scores.items():
