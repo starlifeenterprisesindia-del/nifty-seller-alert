@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V50.8
+Version: V50.8.1
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -313,7 +313,10 @@ class CommandingOfficer:
         if price_vote in opposing_votes and option_vote == opposing_votes[price_vote]:
             conflicts.append(f"{price_vote.title()} price action conflicts with option flow")
         if price_vote in opposing_votes and money_vote == opposing_votes[price_vote]:
-            conflicts.append(f"{price_vote.title()} price action conflicts with smart-money flow")
+            if price_vote == "BULLISH":
+                conflicts.append("Bullish recovery is not yet confirmed by smart-money flow")
+            else:
+                conflicts.append("Bearish pressure is not yet confirmed by smart-money flow")
         if strategy_vote in opposing_votes and option_vote == opposing_votes[strategy_vote]:
             conflicts.append("Strategy direction conflicts with current option evidence")
 

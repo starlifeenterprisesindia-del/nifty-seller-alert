@@ -1,5 +1,5 @@
 """
-Nifty Seller AI - V50.8 live market state.
+Nifty Seller AI - V50.8.1 live market state.
 
 Purpose:
 - Preserve same-day compact price/snapshot memory across Streamlit reruns and

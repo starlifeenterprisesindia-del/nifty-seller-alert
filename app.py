@@ -194,7 +194,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_8_COMBINED_INTEGRITY_DIAGNOSTIC",
+        "version": "V50_8_1_MINOR_CLEANUP_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1346,7 +1346,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8 Dhan Auto Feeds",
+    page_title="Nifty Seller AI V50.8.1 Dhan Auto Feeds",
     page_icon="🧠",
     layout="wide",
 )
@@ -3892,7 +3892,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.1 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -4489,7 +4489,7 @@ smart_money_bias = signed_clamp(smart_money_bias)
 
 heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
 
-# V50.8 central source registry: every status panel and department reads the
+# V50.8.1 central source registry: every status panel and department reads the
 # same truth instead of independently saying OI OK / UNKNOWN or VIX live/manual.
 _pa_registry_status = (
     "AUTO_DHAN" if price_action_auto_ok and str(price_action_source).lower().startswith("dhan")
@@ -4614,7 +4614,7 @@ elif final_direction <= -24 and confidence >= 58:
 else:
     final_trade = "WAIT"
 
-# V50.8 compatibility safety: the legacy path is evidence-only, but it must
+# V50.8.1 compatibility safety: the legacy path is evidence-only, but it must
 # never preserve a continuation trade against the verified live movement phase.
 _movement_phase_legacy = str((live_movement or {}).get("phase", "NORMAL")) if isinstance(locals().get("live_movement", {}), dict) else "NORMAL"
 if _movement_phase_legacy in {"STRONG_RECOVERY", "RECOVERY"} and final_trade == "SELL CE":
@@ -7942,7 +7942,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8.1_DHAN_AUTO_FEEDS_PDF",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8014,7 +8014,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_8_COMBINED_INTEGRITY",
+                "version": "V50_8_1_MINOR_CLEANUP",
                 "pipeline_status": "READY",
                 "pipeline_error": "",
                 "import_errors": {},
@@ -8148,7 +8148,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8.1_DHAN_AUTO_FEEDS_PDF",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8173,7 +8173,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8_DHAN_AUTO_FEEDS_PDF",
+        "version": "V50.8.1_DHAN_AUTO_FEEDS_PDF",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8442,7 +8442,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8 Dhan Auto Feeds</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.1 Dhan Auto Feeds</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -8601,7 +8601,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.8 Live Market Readiness Gate")
+st.markdown("### ✅ V50.8.1 Live Market Readiness Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -8681,7 +8681,7 @@ try:
 except Exception:
     pass
 
-# V50.8 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
+# V50.8.1 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
 # inside Streamlit, so it works as a normal mobile download.
 try:
     if V505_PDF_REPORT_READY:
@@ -8697,8 +8697,11 @@ try:
         _pdf_department_rows_v505 = []
         for _dept_name_v505, _dept_info_v505 in (AI_MASTER.get("department_reports", {}) or {}).items():
             if isinstance(_dept_info_v505, dict):
+                _dept_display_v5081 = {
+                    "candidate": "Candidate Liquidity / Strike Quality",
+                }.get(str(_dept_name_v505).lower(), str(_dept_name_v505).replace("_", " ").title())
                 _pdf_department_rows_v505.append({
-                    "Department": str(_dept_name_v505).replace("_", " ").title(),
+                    "Department": _dept_display_v5081,
                     "Confidence": _dept_info_v505.get("confidence", 0),
                     "Summary": _dept_info_v505.get("summary", "-"),
                 })
@@ -8718,7 +8721,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.8"),
+                "Version": AI_MASTER.get("version", "V50.8.1"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),

@@ -1,6 +1,6 @@
 """
 option_intelligence.py
-Version: V50.8
+Version: V50.8.1
 Department: Option Intelligence
 
 Consumes the already-built authoritative option analysis. It distinguishes

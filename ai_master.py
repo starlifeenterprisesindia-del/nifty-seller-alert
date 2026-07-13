@@ -1,6 +1,6 @@
 """
 ai_master.py
-Version : V50.8
+Version : V50.8.1
 Role    : Final AI Authority
 Status  : V50 Final Headquarters authority lock
 
@@ -94,7 +94,7 @@ class AIMaster:
     - candidate_report
     """
 
-    VERSION = "V50.8_COMBINED_INTEGRITY_AUTHORITY"
+    VERSION = "V50.8.1_MINOR_CLEANUP_AUTHORITY"
 
     def decide(
         self,

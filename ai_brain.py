@@ -1,5 +1,5 @@
 """
-Nifty Seller AI — AI Brain Module v19.4 / V50.8 integrity fix
+Nifty Seller AI — AI Brain Module v19.4 / V50.8.1 wording cleanup
 
 This module reads a market snapshot and produces explainable AI scoring.
 It does not fetch data and does not modify portfolio/refresh/DhanHQ logic.

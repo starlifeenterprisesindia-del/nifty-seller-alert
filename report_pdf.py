@@ -1,4 +1,4 @@
-"""App-native PDF report generator for Nifty Seller AI V50.8."""
+"""App-native PDF report generator for Nifty Seller AI V50.8.1."""
 from __future__ import annotations
 
 from io import BytesIO
