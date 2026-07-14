@@ -1,6 +1,6 @@
 """
 price_action.py
-Version: V50.8.1
+Version: V50.8.3
 Department: Price Action
 
 Reads chart structure plus same-day live movement memory. It never issues a
@@ -130,23 +130,83 @@ class ATRSpecialist:
 
 
 class BarrierSpecialist:
-    def analyze(self, price, support, resistance):
-        nearest = None
-        zone = "No Major Barrier Nearby"
-        distance = None
-        if resistance is not None:
-            resistance_distance = _num(resistance) - price
-            if resistance_distance >= 0:
-                nearest, distance = "Resistance", resistance_distance
-                if resistance_distance <= 20:
-                    zone = "Near Resistance"
-        if support is not None:
-            support_distance = price - _num(support)
-            if support_distance >= 0 and (distance is None or support_distance < distance):
-                nearest, distance = "Support", support_distance
-                if support_distance <= 20:
-                    zone = "Near Support"
-        return {"nearest_barrier": nearest, "barrier_zone": zone, "distance_points": round(distance, 2) if distance is not None else None}
+    def analyze(
+        self,
+        price,
+        support,
+        resistance,
+        *,
+        support_source="Structural Support",
+        resistance_source="Structural Resistance",
+        atr=None,
+    ):
+        price = _num(price)
+        support_value = _num(support, 0.0) if support is not None else None
+        resistance_value = _num(resistance, 0.0) if resistance is not None else None
+
+        # A fixed 20-point gate was too brittle around daily pivots.  The bounded
+        # ATR-aware threshold stays conservative while recognising a nearby R1/S1
+        # barrier during normal intraday volatility.
+        atr_value = max(_num(atr, 0.0), 0.0)
+        near_threshold = min(35.0, max(20.0, atr_value * 1.5))
+
+        support_distance = None
+        resistance_distance = None
+        if support_value is not None and support_value > 0 and support_value <= price:
+            support_distance = price - support_value
+        if resistance_value is not None and resistance_value > 0 and resistance_value >= price:
+            resistance_distance = resistance_value - price
+
+        near_support = support_distance is not None and support_distance <= near_threshold
+        near_resistance = resistance_distance is not None and resistance_distance <= near_threshold
+
+        if near_support and near_resistance:
+            zone = "Near Resistance | Near Support"
+            label = (
+                f"Between {support_source} {support_value:.2f} support ({support_distance:.0f} pts) "
+                f"and {resistance_source} {resistance_value:.2f} resistance ({resistance_distance:.0f} pts)"
+            )
+        elif near_resistance:
+            zone = "Near Resistance"
+            label = f"Near Resistance — {resistance_source} {resistance_value:.2f} ({resistance_distance:.0f} pts)"
+        elif near_support:
+            zone = "Near Support"
+            label = f"Near Support — {support_source} {support_value:.2f} ({support_distance:.0f} pts)"
+        else:
+            zone = "No Major Barrier Nearby"
+            candidates = []
+            if support_distance is not None:
+                candidates.append((support_distance, "Support", support_source, support_value))
+            if resistance_distance is not None:
+                candidates.append((resistance_distance, "Resistance", resistance_source, resistance_value))
+            if candidates:
+                distance, nearest, source, level = min(candidates, key=lambda item: item[0])
+                label = f"No Major Barrier Nearby — nearest {nearest}: {source} {level:.2f} ({distance:.0f} pts)"
+            else:
+                distance, nearest = None, None
+                label = zone
+
+        if near_support or near_resistance:
+            candidates = []
+            if support_distance is not None:
+                candidates.append((support_distance, "Support"))
+            if resistance_distance is not None:
+                candidates.append((resistance_distance, "Resistance"))
+            distance, nearest = min(candidates, key=lambda item: item[0]) if candidates else (None, None)
+
+        return {
+            "nearest_barrier": nearest,
+            "barrier_zone": zone,
+            "barrier_label": label,
+            "distance_points": round(distance, 2) if distance is not None else None,
+            "support_level": round(support_value, 2) if support_value is not None and support_value > 0 else None,
+            "support_source": str(support_source),
+            "support_distance_points": round(support_distance, 2) if support_distance is not None else None,
+            "resistance_level": round(resistance_value, 2) if resistance_value is not None and resistance_value > 0 else None,
+            "resistance_source": str(resistance_source),
+            "resistance_distance_points": round(resistance_distance, 2) if resistance_distance is not None else None,
+            "near_threshold_points": round(near_threshold, 2),
+        }
 
 
 class CandleSpecialist:
@@ -242,7 +302,7 @@ class PriceActionDirector:
                 "trend": {"trend": "Unknown - automatic price action unavailable", "structure": "UNKNOWN", "strength": 0},
                 "vwap": {"vwap_status": "Unknown", "strength": 0},
                 "atr": {"atr_status": "Unknown", "range_ratio": 0},
-                "barrier": {"nearest_barrier": None, "barrier_zone": "Unknown", "distance_points": None},
+                "barrier": {"nearest_barrier": None, "barrier_zone": "Unknown", "barrier_label": "Unknown", "distance_points": None},
                 "candle": {"candle_type": "Unknown", "body_ratio": 0},
                 "move_stage": {"stage": "Unknown", "exhaustion_risk": "Unknown", "move_atr_ratio": 0},
                 "range": {"range_status": "Unknown"},
@@ -266,13 +326,20 @@ class PriceActionDirector:
             "trend": trend_details,
             "vwap": self.vwap.analyze(k["price"], k.get("vwap")),
             "atr": self.atr.analyze(k["current_range"], k.get("atr")),
-            "barrier": self.barrier.analyze(k["price"], k.get("support"), k.get("resistance")),
+            "barrier": self.barrier.analyze(
+                k["price"],
+                k.get("support"),
+                k.get("resistance"),
+                support_source=k.get("support_source", "Structural Support"),
+                resistance_source=k.get("resistance_source", "Structural Resistance"),
+                atr=k.get("atr"),
+            ),
             "candle": self.candle.analyze(k["open_price"], k["high"], k["low"], k["close"]),
             "move_stage": self.stage.analyze(k["points_moved_from_open"], k.get("atr"), movement),
             "range": self.range.analyze(k["day_high"], k["day_low"], k.get("atr")),
             "movement": movement_details,
         }
-        summary = f'{details["trend"]["trend"]} | {details["move_stage"]["stage"]} | {details["barrier"]["barrier_zone"]}'
+        summary = f'{details["trend"]["trend"]} | {details["move_stage"]["stage"]} | {details["barrier"].get("barrier_label", details["barrier"]["barrier_zone"])}'
         confidence = details["trend"]["strength"]
         if str(source).lower().startswith("manual"):
             confidence = min(confidence, 45)

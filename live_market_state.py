@@ -1,5 +1,5 @@
 """
-Nifty Seller AI - V50.8.1 live market state.
+Nifty Seller AI - V50.8.3 live market state.
 
 Purpose:
 - Preserve same-day compact price/snapshot memory across Streamlit reruns and
@@ -96,11 +96,24 @@ def _merge_samples(*groups: Any) -> list[dict]:
 
 
 def _nearest_older(samples: list[dict], now_ts: float, seconds: int) -> Optional[dict]:
+    """Return a genuinely nearby historical sample, never an hours-old fallback.
+
+    A browser reconnect may restore the full same-day history. That history is
+    useful for session high/low, but it must not be used as a 1/3/5-minute
+    reference when the most recent prior sample is far away in time.
+    """
     target = now_ts - seconds
     older = [item for item in samples if _safe_float(item.get("ts"), 0.0) <= target]
     if not older:
         return None
-    return min(older, key=lambda item: abs(_safe_float(item.get("ts"), 0.0) - target))
+    candidate = min(older, key=lambda item: abs(_safe_float(item.get("ts"), 0.0) - target))
+    candidate_ts = _safe_float(candidate.get("ts"), 0.0)
+    tolerance = max(75.0, float(seconds) * 0.75)
+    if candidate_ts <= 0 or abs(candidate_ts - target) > tolerance:
+        return None
+    if now_ts - candidate_ts > float(seconds) + tolerance:
+        return None
+    return candidate
 
 
 def _window_move(samples: list[dict], price: float, now_ts: float, seconds: int) -> Optional[float]:
@@ -288,7 +301,10 @@ def update_live_market_state(
     session_low_f = min(low_candidates) if low_candidates else price_f
     session_high_f = max(high_candidates) if high_candidates else price_f
 
-    previous_price = _safe_float(samples[-2].get("price"), price_f) if len(samples) >= 2 else price_f
+    previous_sample = samples[-2] if len(samples) >= 2 else None
+    previous_age = ts - _safe_float(previous_sample.get("ts"), 0.0) if isinstance(previous_sample, Mapping) else 0.0
+    continuity_ok = bool(previous_sample is not None and 0 <= previous_age <= 120.0)
+    previous_price = _safe_float(previous_sample.get("price"), price_f) if continuity_ok else price_f
     last_move = round(price_f - previous_price, 2)
     move_1m = _window_move(samples, price_f, ts, 60)
     move_3m = _window_move(samples, price_f, ts, 180)
@@ -313,9 +329,13 @@ def update_live_market_state(
     state[state_key] = memory
     _write_json(_path("market_memory", now), memory)
 
+    recent_sample_count = sum(1 for item in samples if ts - _safe_float(item.get("ts"), 0.0) <= 900.0)
     return {
-        "ready": len(samples) >= 2,
+        "ready": recent_sample_count >= 2,
         "sample_count": len(samples),
+        "recent_sample_count": recent_sample_count,
+        "continuity_status": "LIVE_SEQUENCE" if continuity_ok else ("GAP_RESET" if len(samples) >= 2 else "FIRST_SAMPLE"),
+        "previous_sample_age_seconds": round(previous_age, 1) if previous_sample is not None else None,
         "last_move": last_move,
         "move_1m": move_1m,
         "move_3m": move_3m,
@@ -327,24 +347,67 @@ def update_live_market_state(
     }
 
 
-def load_previous_snapshot(observed_at: Optional[datetime] = None) -> Dict[str, Any]:
-    value = _read_json(_path("latest_snapshot", observed_at), {})
-    return value if isinstance(value, dict) else {}
+def _fresh_persisted_payload(
+    kind: str,
+    observed_at: Optional[datetime] = None,
+    *,
+    max_age_seconds: int = 600,
+) -> Dict[str, Any]:
+    """Load only a recent same-day comparison payload.
+
+    Previous snapshots and OI maps are comparison evidence, not live authority.
+    After a long browser/server gap they are discarded so an old comparison can
+    never masquerade as a fresh refresh delta.
+    """
+    now = _now(observed_at)
+    path = _path(kind, now)
+    value = _read_json(path, {})
+    if not isinstance(value, dict):
+        return {}
+    persisted_epoch = _safe_float(value.get("_persisted_at_epoch"), 0.0)
+    if persisted_epoch <= 0:
+        try:
+            persisted_epoch = path.stat().st_mtime
+        except Exception:
+            return {}
+    age = now.timestamp() - persisted_epoch
+    if age < -30 or age > max(30, int(max_age_seconds)):
+        return {}
+    return value
+
+
+def load_previous_snapshot(
+    observed_at: Optional[datetime] = None,
+    *,
+    max_age_seconds: int = 600,
+) -> Dict[str, Any]:
+    return _fresh_persisted_payload("latest_snapshot", observed_at, max_age_seconds=max_age_seconds)
 
 
 def save_latest_snapshot(snapshot: Mapping[str, Any], observed_at: Optional[datetime] = None) -> bool:
     if not isinstance(snapshot, Mapping):
         return False
-    return _write_json(_path("latest_snapshot", observed_at), dict(snapshot))
+    now = _now(observed_at)
+    payload = dict(snapshot)
+    payload["_persisted_at"] = now.isoformat(timespec="seconds")
+    payload["_persisted_at_epoch"] = round(now.timestamp(), 3)
+    return _write_json(_path("latest_snapshot", now), payload)
 
 
-def load_option_delta_state(observed_at: Optional[datetime] = None) -> Dict[str, Any]:
-    value = _read_json(_path("option_delta", observed_at), {})
-    return value if isinstance(value, dict) else {}
+def load_option_delta_state(
+    observed_at: Optional[datetime] = None,
+    *,
+    max_age_seconds: int = 600,
+) -> Dict[str, Any]:
+    return _fresh_persisted_payload("option_delta", observed_at, max_age_seconds=max_age_seconds)
 
 
 def save_option_delta_state(value: Mapping[str, Any], observed_at: Optional[datetime] = None) -> bool:
-    return _write_json(_path("option_delta", observed_at), dict(value))
+    now = _now(observed_at)
+    payload = dict(value)
+    payload["_persisted_at"] = now.isoformat(timespec="seconds")
+    payload["_persisted_at_epoch"] = round(now.timestamp(), 3)
+    return _write_json(_path("option_delta", now), payload)
 
 
 def update_projection_memory(

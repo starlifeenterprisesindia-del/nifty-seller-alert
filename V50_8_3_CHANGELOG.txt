@@ -1,0 +1,15 @@
+Nifty Seller AI V50.8.3 — State Freshness & Persistence Integrity
+
+Fixes:
+1. One shared same-day bounded state across phone/laptop/browser sessions.
+2. Completed-case, Self Review, Promotion, Learning and department histories cannot move backwards when another session reconnects.
+3. Previous snapshot and option-delta files are comparison-only and rejected after 10 minutes.
+4. 1/3/5-minute movement never uses an hours-old sample after a session gap.
+5. Live Dhan quote and option-chain payloads carry fetch epochs and are rejected if older than 12 seconds during market hours.
+6. Dhan/Yahoo 5-minute candle evidence is rejected when older than 12 minutes during market hours.
+7. UI/PDF show State Sync, feed age and movement continuity.
+8. Includes V50.8.2 Barrier Integrity.
+
+No action rules, strategy weights, candidate rules, confidence thresholds, risk thresholds, Dhan credentials, or AI_MASTER authority were changed.
+
+Important: This shared state survives browser reconnects and parallel phone/laptop sessions while the Streamlit deployment filesystem remains alive. A full redeploy may reset local runtime history; permanent multi-deployment history would require an external database.

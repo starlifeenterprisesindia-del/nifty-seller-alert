@@ -1,6 +1,6 @@
 """
 strategy_department.py
-Version : V50.8.1
+Version : V50.8.3
 Department : Strategy Intelligence
 
 Scores WAIT / SELL CE / SELL PE / IRON CONDOR from department evidence only.

@@ -12,6 +12,8 @@ import streamlit as st
 import streamlit.components.v1 as components
 import yfinance as yf
 
+from barrier_engine import build_barrier_candidates, select_nearest_barriers, traditional_pivots
+
 try:
     from live_market_state import (
         update_live_market_state,
@@ -30,6 +32,16 @@ try:
     V505_PDF_REPORT_READY = True
 except Exception:
     V505_PDF_REPORT_READY = False
+
+try:
+    from runtime_state_integrity import (
+        restore_authoritative_state,
+        persist_authoritative_state,
+        state_sync_summary,
+    )
+    V5083_STATE_SYNC_READY = True
+except Exception:
+    V5083_STATE_SYNC_READY = False
 
 
 # V19.5.1 Full Audit Fix module import.
@@ -194,7 +206,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_8_1_MINOR_CLEANUP_DIAGNOSTIC",
+        "version": "V50_8_2_BARRIER_INTEGRITY_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1346,7 +1358,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8.1 Dhan Auto Feeds",
+    page_title="Nifty Seller AI V50.8.3 Dhan Auto Feeds",
     page_icon="🧠",
     layout="wide",
 )
@@ -1371,6 +1383,23 @@ if "last_manual_refresh" not in st.session_state:
 # session_state. Remove them once; compact plain-dict history is used now.
 for _legacy_v24_key in ("v24_market_memory", "v24_learning_department"):
     st.session_state.pop(_legacy_v24_key, None)
+
+# V50.8.3 State Integrity: Streamlit session_state is browser-session scoped.
+# Restore one shared same-day bounded history before any department runs, so
+# phone/laptop/reconnect sessions cannot show completed cases moving backwards.
+if V5083_STATE_SYNC_READY:
+    try:
+        _v5083_state_boot = restore_authoritative_state(
+            st.session_state, observed_at=datetime.now(IST)
+        )
+    except Exception as _v5083_restore_error:
+        _v5083_state_boot = {
+            "status": "RESTORE_FAILED",
+            "restored_keys": 0,
+            "error": str(_v5083_restore_error),
+        }
+else:
+    _v5083_state_boot = {"status": "MODULE_MISSING", "restored_keys": 0}
 
 # V21.6: ONE SAFE REFRESH CONTROLLER
 # Manual button, floating button and auto-refresh all come through this same function.
@@ -1539,6 +1568,29 @@ def fmt_time(dt=None):
     return dt.strftime("%d-%m-%Y %I:%M:%S %p")
 
 
+def v5083_payload_age_seconds(payload):
+    """Age of a live payload using its original fetch epoch (cache-safe)."""
+    try:
+        fetched_epoch = float((payload or {}).get("fetched_epoch", 0) or 0)
+        if fetched_epoch <= 0:
+            return None
+        return max(0.0, datetime.now(IST).timestamp() - fetched_epoch)
+    except Exception:
+        return None
+
+
+def v5083_fail_stale_live_payload(payload, label, max_age_seconds=12):
+    """Fail closed when a cached/live payload is older than its permitted age."""
+    result = dict(payload or {}) if isinstance(payload, dict) else {"success": False}
+    age = v5083_payload_age_seconds(result)
+    result["age_seconds"] = round(age, 1) if age is not None else None
+    if result.get("success") and age is not None and age > float(max_age_seconds):
+        result["success"] = False
+        result["stale_rejected"] = True
+        result["message"] = f"{label} stale payload rejected ({age:.1f}s old)."
+    return result
+
+
 def market_status():
     now = now_ist()
     open_time = now.replace(hour=9, minute=15, second=0, microsecond=0)
@@ -1678,7 +1730,15 @@ def get_dhan_market_bundle(
         payload = response.json()
         if payload.get("status") != "success":
             return {"success": False, "message": f"Dhan Market Quote failed: {payload}"}
-        return {"success": True, "data": payload.get("data", {}), "fetched_at": fmt_time(), "message": "OK"}
+        _fetched_now = datetime.now(IST)
+        return {
+            "success": True,
+            "data": payload.get("data", {}),
+            "fetched_at": fmt_time(_fetched_now),
+            "fetched_at_iso": _fetched_now.isoformat(timespec="seconds"),
+            "fetched_epoch": round(_fetched_now.timestamp(), 3),
+            "message": "OK",
+        }
     except Exception as exc:
         return {"success": False, "message": f"Dhan Market Quote error: {exc}"}
 
@@ -1803,6 +1863,8 @@ def get_dhan_option_chain(client_id, access_token, expiry, underlying_scrip=DEFA
         call_oi_change = sum(r["ce_oi_change"] for r in rows)
         put_oi_change = sum(r["pe_oi_change"] for r in rows)
 
+        _fetched_now = datetime.now(IST)
+        _fetched_label = _fetched_now.strftime("%H:%M:%S")
         return {
             "success": True,
             "source": "DhanHQ",
@@ -1815,8 +1877,10 @@ def get_dhan_option_chain(client_id, access_token, expiry, underlying_scrip=DEFA
             "call_oi_change": call_oi_change,
             "put_oi_change": put_oi_change,
             "pcr": safe_divide(total_put_oi, total_call_oi, 0.0),
-            "fetched_at": fmt_time(),
-            "snapshot_id": f"{expiry}|{fmt_time()}|{sum(r['ce_oi'] + r['pe_oi'] for r in rows)}",
+            "fetched_at": fmt_time(_fetched_now),
+            "fetched_at_iso": _fetched_now.isoformat(timespec="seconds"),
+            "fetched_epoch": round(_fetched_now.timestamp(), 3),
+            "snapshot_id": f"{expiry}|{_fetched_label}|{sum(r['ce_oi'] + r['pe_oi'] for r in rows)}",
             "message": "OK",
         }
     except Exception as exc:
@@ -1920,11 +1984,14 @@ def _build_price_action_from_candles(df, source):
         dates = sorted(set(work.index.date))
         prev_day_high_v = float(high.max())
         prev_day_low_v = float(low.min())
+        prev_day_close_v = float(close.iloc[-1])
         if len(dates) >= 2:
             prev_df = work[work.index.date == dates[-2]]
             if not prev_df.empty:
                 prev_day_high_v = float(prev_df["High"].max())
                 prev_day_low_v = float(prev_df["Low"].min())
+                prev_day_close_v = float(prev_df["Close"].iloc[-1])
+        pivot_levels_v = traditional_pivots(prev_day_high_v, prev_day_low_v, prev_day_close_v)
 
         today_high_v = float(today_df["High"].max())
         today_low_v = float(today_df["Low"].min())
@@ -1956,6 +2023,8 @@ def _build_price_action_from_candles(df, source):
             "atr5": atr5_v,
             "previous_day_high": prev_day_high_v,
             "previous_day_low": prev_day_low_v,
+            "previous_day_close": prev_day_close_v,
+            "pivot_levels": pivot_levels_v,
             "today_high": today_high_v,
             "today_low": today_low_v,
             "opening_range_high": or_high_v,
@@ -1965,6 +2034,8 @@ def _build_price_action_from_candles(df, source):
             "candle_age_seconds": age_seconds,
             "candle_count": int(len(work)),
             "fetched_at": fmt_time(),
+            "fetched_at_iso": datetime.now(IST).isoformat(timespec="seconds"),
+            "fetched_epoch": round(datetime.now(IST).timestamp(), 3),
             "source": source,
             "message": "OK",
         }
@@ -2119,7 +2190,7 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
     # compact same-day option state instead of calling it the first snapshot.
     if (not previous_map) and V505_LIVE_STATE_READY:
         try:
-            persisted = load_option_delta_state()
+            persisted = load_option_delta_state(datetime.now(IST), max_age_seconds=600)
             last_id = persisted.get("snapshot_id", last_id)
             previous_map = {}
             for key, value in (persisted.get("current_map", {}) or {}).items():
@@ -2158,7 +2229,7 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
                     "current_map": {f"{key[0]}|{key[1]}": value for key, value in current_map.items()},
                     "deltas": {f"{key[0]}|{key[1]}": value for key, value in deltas.items()},
                     "saved_at": datetime.now(IST).isoformat(timespec="seconds"),
-                })
+                }, datetime.now(IST))
             except Exception:
                 pass
 
@@ -3892,7 +3963,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8.1 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.3 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -4051,6 +4122,8 @@ with st.sidebar.expander("3️⃣ Price Action", expanded=False):
     atr5 = manual_atr5
     previous_day_high = manual_previous_day_high
     previous_day_low = manual_previous_day_low
+    previous_day_close = None
+    pivot_levels = {}
     today_high = manual_today_high
     today_low = manual_today_low
     opening_range_high = manual_opening_range_high
@@ -4233,6 +4306,8 @@ heavyweight_ids = resolve_heavyweight_security_ids(master_result.get("df", pd.Da
 dhan_bundle = get_dhan_market_bundle(
     client_id, access_token, heavyweight_ids, nifty_security_id, DEFAULT_INDIA_VIX_SECURITY_ID
 ) if (prefer_dhan and dhan_ready) else {"success": False, "message": "Dhan disabled."}
+if market_status()[0] == "Market Open":
+    dhan_bundle = v5083_fail_stale_live_payload(dhan_bundle, "Dhan market quote", 12)
 
 # Nifty
 nifty_source = "Manual"
@@ -4316,7 +4391,7 @@ if auto_price_action:
     if price_action_result.get("success"):
         _pa_age_seconds = float(price_action_result.get("candle_age_seconds", 0) or 0)
         _pa_market_open = market_status()[0] == "Market Open"
-        if _pa_market_open and _pa_age_seconds > 900:
+        if _pa_market_open and _pa_age_seconds > 720:
             price_action_result = {
                 **price_action_result,
                 "success": False,
@@ -4330,6 +4405,8 @@ if auto_price_action:
         atr5 = float(price_action_result.get("atr5", atr5))
         previous_day_high = float(price_action_result.get("previous_day_high", previous_day_high))
         previous_day_low = float(price_action_result.get("previous_day_low", previous_day_low))
+        previous_day_close = price_action_result.get("previous_day_close", previous_day_close)
+        pivot_levels = dict(price_action_result.get("pivot_levels", {}) or {})
         today_high = float(price_action_result.get("today_high", today_high))
         today_low = float(price_action_result.get("today_low", today_low))
         opening_range_high = float(price_action_result.get("opening_range_high", opening_range_high))
@@ -4382,6 +4459,8 @@ if prefer_dhan and dhan_ready:
             strikes_each_side,
             50,
         )
+        if market_status()[0] == "Market Open":
+            option_chain = v5083_fail_stale_live_payload(option_chain, "Dhan option chain", 12)
     else:
         option_chain = {"success": False, "message": "Expiry list unavailable: " + str(expiry_result.get("message", "Unknown Dhan expiry error"))}
 
@@ -4413,10 +4492,27 @@ news = build_news_risk(manual_news_risk, te_result, alpha_result, reaction_score
 # =========================================================
 # SELLER INTELLIGENCE ENGINE
 # =========================================================
-support_levels = [previous_day_low, today_low, opening_range_low]
-resistance_levels = [previous_day_high, today_high, opening_range_high]
-nearest_support = max([x for x in support_levels if x <= price], default=min(support_levels))
-nearest_resistance = min([x for x in resistance_levels if x >= price], default=max(resistance_levels))
+# V50.8.3 Barrier Integrity: merge structural levels with previous-session
+# traditional pivots.  This fixes cases where the chart is sitting just below
+# Pivot R1 (for example 24,223) while day-high-only logic incorrectly reports
+# "No Major Barrier Nearby".
+_barrier_candidates_v5082 = build_barrier_candidates(
+    previous_day_high=previous_day_high,
+    previous_day_low=previous_day_low,
+    today_high=today_high,
+    today_low=today_low,
+    opening_range_high=opening_range_high,
+    opening_range_low=opening_range_low,
+    pivot_levels=pivot_levels,
+)
+_nearest_barriers_v5082 = select_nearest_barriers(price, _barrier_candidates_v5082)
+_support_barrier_v5082 = _nearest_barriers_v5082.get("support") or {}
+_resistance_barrier_v5082 = _nearest_barriers_v5082.get("resistance") or {}
+
+nearest_support = float(_support_barrier_v5082.get("level", previous_day_low))
+nearest_resistance = float(_resistance_barrier_v5082.get("level", previous_day_high))
+nearest_support_source = str(_support_barrier_v5082.get("source", "Structural Support"))
+nearest_resistance_source = str(_resistance_barrier_v5082.get("source", "Structural Resistance"))
 support_distance = max(price - nearest_support, 0)
 resistance_distance = max(nearest_resistance - price, 0)
 
@@ -4489,7 +4585,7 @@ smart_money_bias = signed_clamp(smart_money_bias)
 
 heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("success") else 0.0
 
-# V50.8.1 central source registry: every status panel and department reads the
+# V50.8.3 central source registry: every status panel and department reads the
 # same truth instead of independently saying OI OK / UNKNOWN or VIX live/manual.
 _pa_registry_status = (
     "AUTO_DHAN" if price_action_auto_ok and str(price_action_source).lower().startswith("dhan")
@@ -4614,7 +4710,7 @@ elif final_direction <= -24 and confidence >= 58:
 else:
     final_trade = "WAIT"
 
-# V50.8.1 compatibility safety: the legacy path is evidence-only, but it must
+# V50.8.3 compatibility safety: the legacy path is evidence-only, but it must
 # never preserve a continuation trade against the verified live movement phase.
 _movement_phase_legacy = str((live_movement or {}).get("phase", "NORMAL")) if isinstance(locals().get("live_movement", {}), dict) else "NORMAL"
 if _movement_phase_legacy in {"STRONG_RECOVERY", "RECOVERY"} and final_trade == "SELL CE":
@@ -6888,7 +6984,10 @@ def _v221_build_evidence_rows(snapshot_obj, intelligence_obj):
         "Signal": "Live Movement",
         "Bias": round(_v221_signed(sig.get("movement_bias", movement.get("movement_bias", 0))), 1),
         "Status": str(movement.get("phase", "UNAVAILABLE")),
-        "Source": f"{movement.get('sample_count',0)} persisted samples",
+        "Source": (
+            f"{movement.get('recent_sample_count', movement.get('sample_count',0))} recent / "
+            f"{movement.get('sample_count',0)} persisted | {movement.get('continuity_status','UNKNOWN')}"
+        ),
     })
     upsert("Heavyweights", {"Signal": "Heavyweights", "Bias": round(_v221_signed(sig.get("heavyweight_bias", 0)), 1), "Status": "AI_MASTER", "Source": source_health.get("heavy_source", "Unknown")})
     upsert("FII/DII", {"Signal": "FII/DII", "Bias": round(_v221_signed(sig.get("smart_money_bias", 0)), 1), "Status": "AI_MASTER", "Source": "Journal/Department"})
@@ -7303,6 +7402,7 @@ try:
             price=float(price), ema20=float(ema20), ema50=float(ema50), vwap=float(vwap),
             current_range=max(float(today_high) - float(today_low), 0.0), atr=float(atr5),
             support=_near_support, resistance=_near_resistance,
+            support_source=nearest_support_source, resistance_source=nearest_resistance_source,
             open_price=_open_px_v24, high=_high_px_v24, low=_low_px_v24, close=_close_px_v24,
             points_moved_from_open=float(price) - _open_px_v24,
             day_high=float(today_high), day_low=float(today_low),
@@ -7942,7 +8042,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8.1_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8.3_DHAN_AUTO_FEEDS_PDF",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8014,7 +8114,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_8_1_MINOR_CLEANUP",
+                "version": "V50_8_2_BARRIER_INTEGRITY",
                 "pipeline_status": "READY",
                 "pipeline_error": "",
                 "import_errors": {},
@@ -8148,7 +8248,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8.1_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8.3_DHAN_AUTO_FEEDS_PDF",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8173,7 +8273,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8.1_DHAN_AUTO_FEEDS_PDF",
+        "version": "V50.8.3_DHAN_AUTO_FEEDS_PDF",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8434,6 +8534,25 @@ def _v201_candidate_rows():
         return []
 
 
+# V50.8.3 State Integrity handoff: all bounded department/governance histories
+# have now been updated for this verified snapshot. Merge them into one shared
+# same-day state so another browser session cannot overwrite newer evidence.
+if V5083_STATE_SYNC_READY:
+    try:
+        _v5083_state_save = persist_authoritative_state(
+            st.session_state,
+            snapshot_id=str((AI_MASTER if isinstance(globals().get("AI_MASTER", {}), dict) else {}).get("snapshot_id", "")),
+            observed_at=datetime.now(IST),
+        )
+    except Exception as _v5083_save_error:
+        _v5083_state_save = {
+            "status": "SHARED_STATE_WRITE_FAILED",
+            "saved_keys": 0,
+            "error": str(_v5083_save_error),
+        }
+else:
+    _v5083_state_save = {"status": "MODULE_MISSING", "saved_keys": 0}
+
 # =========================================================
 # UI
 # =========================================================
@@ -8442,7 +8561,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.1 Dhan Auto Feeds</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.3 Dhan Auto Feeds</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -8460,12 +8579,14 @@ try:
     _v20_health = _v1916_build_health_snapshot()
     _v20_rr = _v20_risk_summary()
     _safety_score = _v20_rr.get('safety_score', 100 - int(_v20_rr.get('risk_score', 0) or 0)) if _v20_rr else 'NA'
+    _state_sync_label_v5083 = "SHARED" if str((_v5083_state_save or {}).get("status", "")).upper() == "SHARED_STATE_OK" else "CAUTION"
     st.markdown(
         f"<div class='v201-top-status'>"
         f"🟢 {_v20_health.get('freshness','NA')} | "
         f"⚙️ Engines {_v20_health.get('engines_ready',0)}/{_v20_health.get('engines_total',0)} | "
         f"📊 OC {_v20_health.get('option_rows',0)} | "
         f"🛡️ Risk {_safety_score}/100 | "
+        f"🧬 State {_state_sync_label_v5083} | "
         f"🕒 Last {_v20_health.get('last_refresh','NA')}"
         f"</div>",
         unsafe_allow_html=True,
@@ -8507,7 +8628,8 @@ st.markdown(
 try:
     _flow_line_v205 = (v205_data_flow or {}).get("line", "") if isinstance(v205_data_flow, dict) else ""
     if _flow_line_v205:
-        st.caption("📡 " + _flow_line_v205)
+        _state_line_v5083 = "State Sync OK" if str((_v5083_state_save or {}).get("status", "")).upper() == "SHARED_STATE_OK" else "State Sync CAUTION"
+        st.caption("📡 " + _flow_line_v205 + " | " + _state_line_v5083)
 except Exception:
     pass
 
@@ -8601,7 +8723,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.8.1 Live Market Readiness Gate")
+st.markdown("### ✅ V50.8.3 Live Market Readiness Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -8613,6 +8735,7 @@ _render_safe_table([{
     "VIX": _v504_vix_label,
     "Heavyweights": "READY" if _v504_hw_ok else "MISSING",
     "Snapshot Flow": _v504_flow_state,
+    "State Sync": "READY" if str((_v5083_state_save or {}).get("status", "")).upper() == "SHARED_STATE_OK" else "CAUTION",
     "Data Quality": f"{_v504_quality:.0f}%",
     "Real Money": "NOT CERTIFIED — LIVE VALIDATION",
 }], max_rows=1)
@@ -8681,7 +8804,7 @@ try:
 except Exception:
     pass
 
-# V50.8.1 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
+# V50.8.3 app-native PDF: unlike browser Print/Save, this creates real PDF bytes
 # inside Streamlit, so it works as a normal mobile download.
 try:
     if V505_PDF_REPORT_READY:
@@ -8721,7 +8844,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.8.1"),
+                "Version": AI_MASTER.get("version", "V50.8.3"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),
@@ -8736,7 +8859,13 @@ try:
                 "Data Confidence": AI_MASTER.get("data_confidence", data_quality),
                 "Data Flow": AI_MASTER.get("data_flow_status", "UNKNOWN"),
                 "OI Sync": AI_MASTER.get("oi_sync_status", "UNKNOWN"),
+                "State Continuity": (_v5083_state_save or {}).get("status", "UNKNOWN"),
+                "State Restored Keys": (_v5083_state_boot or {}).get("restored_keys", 0),
+                "Dhan Quote Age Sec": round(v5083_payload_age_seconds(dhan_bundle) or 0.0, 1),
+                "Option Chain Age Sec": round(v5083_payload_age_seconds(option_chain) or 0.0, 1),
                 "Movement Phase": _movement_pdf_v505.get("phase", "UNAVAILABLE"),
+                "Movement Continuity": _movement_pdf_v505.get("continuity_status", "UNKNOWN"),
+                "Movement Recent Samples": _movement_pdf_v505.get("recent_sample_count", _movement_pdf_v505.get("sample_count", 0)),
                 "Recovery From Low": _movement_pdf_v505.get("recovery_from_low", 0),
             },
             "source_rows": _pdf_source_rows_v505,
@@ -9047,6 +9176,9 @@ with st.expander("📊 Market Snapshot", expanded=False):
     m3.metric("EMA20", f"{ema20:.2f}")
     m4.metric("VWAP", f"{vwap:.2f}")
     m5.metric("Nearest S/R", f"{nearest_support:.0f} / {nearest_resistance:.0f}")
+    st.caption(
+        f"Barrier sources: {nearest_support_source} support | {nearest_resistance_source} resistance"
+    )
 
 
 with st.expander("🧠 Option Chain AI Engine — OI + Price + Greeks", expanded=False):
