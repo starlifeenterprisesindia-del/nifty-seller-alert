@@ -1,0 +1,19 @@
+NIFTY SELLER AI V50.8.4 — DEPLOYMENT
+====================================
+1. Keep the current V50.8.3 ZIP as backup.
+2. Extract this release and upload all files from the V50.8.4 folder to the same GitHub repository root.
+3. Replace old files when GitHub asks. Do not upload .runtime_state, __pycache__ or .pytest_cache folders.
+4. Commit the changes.
+5. In Streamlit Community Cloud, reboot the app once so the new Python files load.
+6. Confirm the page title/version reads V50.8.4 DSP Evidence Integrity.
+7. During market hours, refresh twice with a normal interval. Check:
+   - Dhan Quote Age and Option Chain Age are fresh.
+   - OI Sync = OK.
+   - DSP Branch Evidence Integrity Certificate has no critical FAIL.
+   - Option rows show Basis, dPx, dOI and Flow.
+   - One canonical snapshot ID is shown through AI_MASTER/PDF.
+8. Download one PDF and compare the selected strikes/LTP/OI against the broker screen at approximately the same second.
+
+Local regression command (optional):
+python -m compileall -q .
+pytest -q tests

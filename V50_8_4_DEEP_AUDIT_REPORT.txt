@@ -1,0 +1,137 @@
+NIFTY SELLER AI V50.8.4 — DEEP DSP EVIDENCE INTEGRITY AUDIT
+================================================================
+Base package: V50.8.3 State Freshness & Persistence Integrity
+Release purpose: correct confirmed evidence-routing defects without creating a second brain.
+Architecture retained: One Snapshot -> DSP evidence -> CO cross-examination -> AI_MASTER -> one final decision/advisor.
+
+CONFIRMED DEFECTS CORRECTED
+---------------------------
+1. Option flow first-sample defect
+   Previous behaviour could compare current premium with zero while using day OI change.
+   Correction: the first live sample uses matching day premium change + day OI change. Fresh snapshot evidence is used only after a valid same-expiry, monotonic, market-open prior snapshot exists.
+
+2. Canonical option-flow truth table
+   One pure classifier now owns CE/PE flow interpretation:
+   - Price down + OI up  = writing
+   - Price up + OI up    = fresh buying / long buildup
+   - Price up + OI down  = short covering
+   - Price down + OI down= long unwinding
+   Both current Option Analysis and legacy OI Flow Engine consume the same classifier.
+
+3. Candidate DSP false-writing defect
+   Positive OI alone was previously rewarded as writing.
+   Correction: Candidate Intelligence receives the canonical flow code, signal, basis and readiness from Option Intelligence. CE/PE buying and short covering are treated as seller risk; unconfirmed flow remains neutral.
+
+4. Snapshot-ready case mismatch
+   The readiness counter checked a different text case from the classifier output.
+   Correction: SNAPSHOT basis is normalized and readiness now becomes true only after enough valid fresh sides.
+
+5. Pre-open evidence contamination
+   Pre-open option prices, previous-session candles and movement samples could look like live direction.
+   Correction: pre-open evidence is reference-only; no RECOVERY/PULLBACK confirmation or live movement sequence is created before the market-open sequence.
+
+6. Pivot/session provenance
+   Before market open, previous-session selection could move two sessions back.
+   Correction: the latest completed prior trading session is selected explicitly. Pivot formula, source date and integrity are exposed and audited.
+
+7. Multiple user-facing snapshot identities
+   Market snapshot and Department-0 payload snapshot were both displayed as if they were the same authority.
+   Correction: one canonical market snapshot ID flows through DSP, CO, AI_MASTER, UI and PDF. Payload hash remains a diagnostic field only.
+
+8. Movement count ambiguity
+   Recent-window count and persisted same-day count were mixed.
+   Correction: both counts and continuity status are displayed separately. A continuity gap resets directional movement calculations.
+
+9. Incomplete Market Journey text
+   The report could display 'range pts'.
+   Correction: range output now states two-sided upside/downside room with units.
+
+10. Missing all-branch evidence gate
+    Branches could report confidence without a common pre-CO evidence certificate.
+    Correction: all 17 DSP/governance branches pass an Evidence Integrity Gate. A critical branch failure is changed to INTEGRITY_HOLD, BranchBoss votes NEUTRAL, and AI_MASTER fails closed to WAIT.
+
+BRANCH-BY-BRANCH AUDIT
+----------------------
+DATA — CRITICAL
+- Canonical snapshot ID, source quality and validation state are checked.
+- Snapshot mismatch or quality below the minimum creates an integrity hold.
+
+OPTION — CRITICAL
+- Raw row availability, OI synchronization, snapshot readiness and each CE/PE flow label are checked against the canonical price/OI evidence.
+- PDF now exposes Day OI, flow basis, premium delta, OI delta and final label.
+
+PRICE ACTION — CRITICAL
+- Current-session candle usability, freshness, pivot provenance and support/resistance ordering are checked.
+- Previous-session candles may provide reference levels but cannot confirm live direction before a current-session candle exists.
+
+MARKET BEHAVIOUR — CRITICAL
+- Requires Price Action and Option witnesses; missing witnesses produce caution/hold evidence instead of hidden certainty.
+
+MARKET PSYCHOLOGY — OBSERVATION ONLY
+- Remains evidence-only to CO. It cannot issue an execution instruction.
+- Structured state is certified before CO routing.
+
+TIME INTELLIGENCE — OBSERVATION ONLY
+- Session phase must be exposed. Opening-shock/lunch/late-move reliability remains a confidence condition, not a second decision.
+
+MARKET JOURNEY — OBSERVATION ONLY
+- Current price, room estimates, barrier/time context and complete units are checked.
+
+HEAVYWEIGHT INTELLIGENCE — OBSERVATION ONLY
+- Expected-vs-received driver coverage is certified. Materially incomplete coverage cannot be presented as complete confirmation.
+
+NEWS INTELLIGENCE — OBSERVATION ONLY
+- Coverage/investigation state must be visible. Partial or unavailable news evidence remains informational.
+
+SMART MONEY — CRITICAL
+- Institutional partial/unavailable state is explicitly capped/neutralized. It cannot invent directional certainty from missing FII/DII evidence.
+
+EXPERIENCE — OBSERVATION ONLY
+- Bounded same-day state is retained. Execution language is prohibited.
+
+SELF REVIEW — OBSERVATION ONLY
+- Review history remains bounded and evidence-only. Execution language is prohibited.
+
+PROMOTION BOARD — OBSERVATION ONLY
+- Governance/service-profile evidence cannot issue market action.
+
+TRUE LEARNING — OBSERVATION ONLY
+- Hypotheses remain review recommendations; no autonomous threshold/weight/action change is introduced.
+
+RISK — CRITICAL
+- Report presence and usable confidence are required. Missing risk evidence creates a hold before CO.
+
+CANDIDATE — CRITICAL
+- Candidate supply is checked and flow quality comes only from canonical Option evidence.
+- Candidate DSP remains watchlist/ranking evidence; it cannot approve execution.
+
+STRATEGY — CRITICAL
+- Strategy matrix must be present, but AI_MASTER remains the only final authority.
+- Any upstream critical integrity failure blocks execution regardless of strategy score.
+
+CO / AI_MASTER AUTHORITY
+------------------------
+- Sanitized DSP evidence only is admitted to the CO case file.
+- Critical integrity failure => branch unavailable + neutral vote + AI_MASTER data gate false.
+- One final action remains owned by AI_MASTER. No new decision brain, loop, thread, API fetcher, threshold authority or execution authority was added.
+
+VALIDATION COMPLETED
+--------------------
+- Python compileall: PASS
+- Non-UI module import test: 46/46 PASS
+- Reproducible pytest suite: 11/11 PASS
+- Canonical option-flow truth table: PASS
+- First-snapshot/day-change consistency: PASS
+- Pre-open movement isolation: PASS
+- Snapshot continuity/count exposure: PASS
+- All 17 branch certificates: PASS
+- Critical branch fail-closed test: PASS
+- BranchBoss neutralization test: PASS
+- Candidate canonical-flow routing: PASS
+- Primary DSP pipeline smoke test: PASS
+- App-native PDF byte generation: PASS
+- Static single-snapshot / single-authority wiring: PASS
+
+LIMITATION / LIVE VALIDATION REQUIRED
+-------------------------------------
+The container does not contain Streamlit runtime or the user's Dhan credentials, so an authenticated live Dhan/Streamlit deployment run could not be executed here. The release passed syntax, module, synthetic evidence, branch-routing and PDF tests. After deployment, verify two consecutive market-open refreshes so the first report shows DAY_CHANGE_ONLY/SNAPSHOT_PENDING and the next valid report shows SNAPSHOT_READY with visible dPx/dOI evidence.

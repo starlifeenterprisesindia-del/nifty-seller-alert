@@ -1,6 +1,6 @@
 """
 candidate_department.py
-Version : V23.5
+Version : V50.8.4
 Department : Candidate Intelligence
 Status : Phase-1 Professional Candidate Architecture
 
@@ -134,20 +134,75 @@ class LiquiditySpecialist:
 
 
 class OIWritingSpecialist:
-    def score(self, oi_change: float, option_type: str) -> Dict[str, Any]:
-        oi_change = float(oi_change or 0)
+    """
+    Candidate-quality scorer for *verified* option-flow evidence.
 
-        if oi_change > 0:
-            score = min(100.0, 55.0 + abs(oi_change) * 0.02)
-            status = f"Fresh {option_type} Writing"
-        elif oi_change < 0:
-            score = max(10.0, 45.0 - abs(oi_change) * 0.01)
-            status = f"{option_type} Unwinding"
+    Positive OI by itself is never treated as writing. Writing requires the
+    canonical price+OI classifier to explicitly return CE_WRITING/PE_WRITING.
+    This keeps Candidate Intelligence subordinate to the Option DSP evidence
+    and prevents a second, contradictory flow brain.
+    """
+
+    WRITING_CODES = {"CE_WRITING", "PE_WRITING"}
+    BUYING_CODES = {"CE_LONG_BUILDUP", "PE_LONG_BUILDUP"}
+    COVERING_CODES = {"CE_SHORT_COVERING", "PE_SHORT_COVERING"}
+    UNWINDING_CODES = {"CE_LONG_UNWINDING", "PE_LONG_UNWINDING"}
+
+    def score(
+        self,
+        oi_change: float,
+        option_type: str,
+        flow_code: str = "",
+        flow_signal: str = "",
+        evidence_ready: bool = False,
+    ) -> Dict[str, Any]:
+        option_type = str(option_type or "").upper()
+        flow_code = str(flow_code or "").upper()
+        flow_signal = str(flow_signal or "").strip()
+
+        if not evidence_ready:
+            return {
+                "score": 40.0,
+                "status": "Flow Confirmation Pending",
+                "flow_code": flow_code or "UNCONFIRMED",
+                "evidence_ready": False,
+            }
+
+        expected_prefix = f"{option_type}_" if option_type in {"CE", "PE"} else ""
+        if expected_prefix and flow_code and not flow_code.startswith(expected_prefix):
+            return {
+                "score": 10.0,
+                "status": "Flow Side Mismatch",
+                "flow_code": flow_code,
+                "evidence_ready": True,
+            }
+
+        if flow_code in self.WRITING_CODES:
+            score = 90.0
+            status = flow_signal or f"Fresh {option_type} Writing"
+        elif flow_code in self.BUYING_CODES:
+            score = 15.0
+            status = flow_signal or f"Fresh {option_type} Buying - Seller Risk"
+        elif flow_code in self.COVERING_CODES:
+            score = 25.0
+            status = flow_signal or f"{option_type} Short Covering - Seller Risk"
+        elif flow_code in self.UNWINDING_CODES:
+            score = 35.0
+            status = flow_signal or f"{option_type} Long Unwinding"
+        elif flow_code.endswith("_NEUTRAL") or flow_code in {"NEUTRAL", "NO_MATERIAL_FLOW"}:
+            score = 45.0
+            status = flow_signal or "Neutral Flow"
         else:
-            score = 40.0
-            status = "No Fresh OI Signal"
+            # Unknown/legacy labels are not converted into writing from OI sign.
+            score = 35.0
+            status = flow_signal or "Unverified Flow Label"
 
-        return {"score": round(score, 1), "status": status}
+        return {
+            "score": round(score, 1),
+            "status": status,
+            "flow_code": flow_code or "UNVERIFIED",
+            "evidence_ready": True,
+        }
 
 
 class BarrierSafetySpecialist:
@@ -214,7 +269,13 @@ class CandidateRankingSpecialist:
             row.get("oi", 0),
             row.get("bid_ask_spread", 0),
         )
-        writing = OIWritingSpecialist().score(row.get("oi_change", 0), option_type)
+        writing = OIWritingSpecialist().score(
+            row.get("oi_change", 0),
+            option_type,
+            flow_code=row.get("flow_code", ""),
+            flow_signal=row.get("flow_signal", ""),
+            evidence_ready=bool(row.get("flow_evidence_ready", False)),
+        )
         barrier = BarrierSafetySpecialist().score(option_type, strike, support, resistance)
 
         weighted_score = (

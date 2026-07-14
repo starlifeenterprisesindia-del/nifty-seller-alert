@@ -16,7 +16,10 @@ No broker execution.
 No portfolio mutation.
 Session-memory based only.
 """
-
+try:
+    from option_flow_integrity import classify_option_flow
+except Exception:
+    classify_option_flow = None
 
 def _safe_float(value, default=0.0):
     try:
@@ -71,6 +74,10 @@ def _normalize_snapshot(option_chain):
 
         ce_ltp = _safe_float(_row_value(row, "ce_ltp", "CE_LTP", "call_ltp", "CE LTP"), 0)
         pe_ltp = _safe_float(_row_value(row, "pe_ltp", "PE_LTP", "put_ltp", "PE LTP"), 0)
+        ce_price_chg = _safe_float(_row_value(row, "ce_price_change", "ce_change", "CE Price Chg"), 0)
+        pe_price_chg = _safe_float(_row_value(row, "pe_price_change", "pe_change", "PE Price Chg"), 0)
+        ce_price_pct = _safe_float(_row_value(row, "ce_price_change_pct", "ce_change_pct", "CE Price Chg %"), 0)
+        pe_price_pct = _safe_float(_row_value(row, "pe_price_change_pct", "pe_change_pct", "PE Price Chg %"), 0)
 
         ce_vol = _safe_float(_row_value(row, "ce_volume", "ce_vol", "call_volume", "CE Volume"), 0)
         pe_vol = _safe_float(_row_value(row, "pe_volume", "pe_vol", "put_volume", "PE Volume"), 0)
@@ -83,6 +90,10 @@ def _normalize_snapshot(option_chain):
             "pe_chg": pe_chg,
             "ce_ltp": ce_ltp,
             "pe_ltp": pe_ltp,
+            "ce_price_chg": ce_price_chg,
+            "pe_price_chg": pe_price_chg,
+            "ce_price_pct": ce_price_pct,
+            "pe_price_pct": pe_price_pct,
             "ce_volume": ce_vol,
             "pe_volume": pe_vol,
         }
@@ -96,56 +107,67 @@ def _top_by(data, key, reverse=True, limit=5):
     return rows[:limit]
 
 
-def _classify(prev, cur):
-    """
-    Classify strike-level flow using OI and premium movement.
-    """
+def _legacy_code(side, flow_code):
+    side = str(side).upper()
+    code = str(flow_code or "").upper().replace(f"{side}_", "")
+    prefix = "CALL" if side == "CE" else "PUT"
+    return {
+        "LONG_BUILDUP": f"{prefix}_LONG_BUILDUP",
+        "WRITING": f"{prefix}_WRITING",
+        "SHORT_COVERING": f"{prefix}_SHORT_COVERING",
+        "LONG_UNWINDING": f"{prefix}_LONG_UNWINDING",
+    }.get(code, f"{prefix}_NEUTRAL")
+
+
+def _classify(prev, cur, market_open=True):
+    """Classify with matching snapshot or day deltas; never compare LTP to zero."""
     strike = cur.get("strike")
     prev = prev or {}
+    has_prev = bool(prev)
+    basis = "SNAPSHOT" if has_prev else ("DAY_CHANGE" if market_open else "PREOPEN_REFERENCE")
 
-    ce_oi_delta = _safe_float(cur.get("ce_oi", 0)) - _safe_float(prev.get("ce_oi", 0))
-    pe_oi_delta = _safe_float(cur.get("pe_oi", 0)) - _safe_float(prev.get("pe_oi", 0))
-    ce_price_delta = _safe_float(cur.get("ce_ltp", 0)) - _safe_float(prev.get("ce_ltp", 0))
-    pe_price_delta = _safe_float(cur.get("pe_ltp", 0)) - _safe_float(prev.get("pe_ltp", 0))
+    if has_prev:
+        ce_oi_delta = _safe_float(cur.get("ce_oi")) - _safe_float(prev.get("ce_oi"))
+        pe_oi_delta = _safe_float(cur.get("pe_oi")) - _safe_float(prev.get("pe_oi"))
+        ce_price_delta = _safe_float(cur.get("ce_ltp")) - _safe_float(prev.get("ce_ltp"))
+        pe_price_delta = _safe_float(cur.get("pe_ltp")) - _safe_float(prev.get("pe_ltp"))
+        ce_price_pct = (ce_price_delta / abs(_safe_float(prev.get("ce_ltp"), 0)) * 100.0) if _safe_float(prev.get("ce_ltp"), 0) else 0.0
+        pe_price_pct = (pe_price_delta / abs(_safe_float(prev.get("pe_ltp"), 0)) * 100.0) if _safe_float(prev.get("pe_ltp"), 0) else 0.0
+        ce_oi_pct = (ce_oi_delta / abs(_safe_float(prev.get("ce_oi"), 0)) * 100.0) if _safe_float(prev.get("ce_oi"), 0) else 0.0
+        pe_oi_pct = (pe_oi_delta / abs(_safe_float(prev.get("pe_oi"), 0)) * 100.0) if _safe_float(prev.get("pe_oi"), 0) else 0.0
+    else:
+        ce_oi_delta, pe_oi_delta = _safe_float(cur.get("ce_chg")), _safe_float(cur.get("pe_chg"))
+        ce_price_delta, pe_price_delta = _safe_float(cur.get("ce_price_chg")), _safe_float(cur.get("pe_price_chg"))
+        ce_price_pct, pe_price_pct = _safe_float(cur.get("ce_price_pct")), _safe_float(cur.get("pe_price_pct"))
+        if abs(ce_price_delta) < 1e-9 and abs(ce_price_pct) > 1e-9 and (100.0 + ce_price_pct) > 1e-6:
+            ce_previous = _safe_float(cur.get("ce_ltp")) / (1.0 + ce_price_pct / 100.0)
+            ce_price_delta = _safe_float(cur.get("ce_ltp")) - ce_previous
+        if abs(pe_price_delta) < 1e-9 and abs(pe_price_pct) > 1e-9 and (100.0 + pe_price_pct) > 1e-6:
+            pe_previous = _safe_float(cur.get("pe_ltp")) / (1.0 + pe_price_pct / 100.0)
+            pe_price_delta = _safe_float(cur.get("pe_ltp")) - pe_previous
+        ce_oi_pct = (ce_oi_delta / max(abs(_safe_float(cur.get("ce_oi")) - ce_oi_delta), 1.0)) * 100.0
+        pe_oi_pct = (pe_oi_delta / max(abs(_safe_float(cur.get("pe_oi")) - pe_oi_delta), 1.0)) * 100.0
 
-    # If previous snapshot missing, fall back to exchange-provided OI change.
-    if not prev:
-        ce_oi_delta = _safe_float(cur.get("ce_chg", 0), 0)
-        pe_oi_delta = _safe_float(cur.get("pe_chg", 0), 0)
-
-    ce_label = "CALL_NEUTRAL"
-    pe_label = "PUT_NEUTRAL"
-
-    if ce_oi_delta > 0 and ce_price_delta >= 0:
-        ce_label = "CALL_LONG_BUILDUP"
-    elif ce_oi_delta > 0 and ce_price_delta < 0:
-        ce_label = "CALL_WRITING"
-    elif ce_oi_delta < 0 and ce_price_delta > 0:
-        ce_label = "CALL_SHORT_COVERING"
-    elif ce_oi_delta < 0 and ce_price_delta <= 0:
-        ce_label = "CALL_LONG_UNWINDING"
-
-    if pe_oi_delta > 0 and pe_price_delta >= 0:
-        pe_label = "PUT_LONG_BUILDUP"
-    elif pe_oi_delta > 0 and pe_price_delta < 0:
-        pe_label = "PUT_WRITING"
-    elif pe_oi_delta < 0 and pe_price_delta > 0:
-        pe_label = "PUT_SHORT_COVERING"
-    elif pe_oi_delta < 0 and pe_price_delta <= 0:
-        pe_label = "PUT_LONG_UNWINDING"
+    if classify_option_flow is None:
+        ce_result = {"flow_code": "CE_NEUTRAL", "signal": "Neutral", "evidence_ready": False}
+        pe_result = {"flow_code": "PE_NEUTRAL", "signal": "Neutral", "evidence_ready": False}
+    else:
+        ce_result = classify_option_flow("CE", price_delta=ce_price_delta, price_pct=ce_price_pct, oi_delta=ce_oi_delta, oi_pct=ce_oi_pct, basis=basis, evidence_allowed=bool(market_open))
+        pe_result = classify_option_flow("PE", price_delta=pe_price_delta, price_pct=pe_price_pct, oi_delta=pe_oi_delta, oi_pct=pe_oi_pct, basis=basis, evidence_allowed=bool(market_open))
 
     return {
         "strike": strike,
-        "ce_oi_delta": int(round(ce_oi_delta)),
-        "pe_oi_delta": int(round(pe_oi_delta)),
-        "ce_price_delta": round(ce_price_delta, 2),
-        "pe_price_delta": round(pe_price_delta, 2),
-        "ce_flow": ce_label,
-        "pe_flow": pe_label,
-        "ce_oi": int(round(_safe_float(cur.get("ce_oi", 0)))),
-        "pe_oi": int(round(_safe_float(cur.get("pe_oi", 0)))),
-        "ce_ltp": round(_safe_float(cur.get("ce_ltp", 0)), 2),
-        "pe_ltp": round(_safe_float(cur.get("pe_ltp", 0)), 2),
+        "basis": basis,
+        "ce_oi_delta": int(round(ce_oi_delta)), "pe_oi_delta": int(round(pe_oi_delta)),
+        "ce_price_delta": round(ce_price_delta, 2), "pe_price_delta": round(pe_price_delta, 2),
+        "ce_flow": _legacy_code("CE", ce_result.get("flow_code")),
+        "pe_flow": _legacy_code("PE", pe_result.get("flow_code")),
+        "ce_flow_label": ce_result.get("signal", "Neutral"),
+        "pe_flow_label": pe_result.get("signal", "Neutral"),
+        "ce_evidence_ready": bool(ce_result.get("evidence_ready", False)),
+        "pe_evidence_ready": bool(pe_result.get("evidence_ready", False)),
+        "ce_oi": int(round(_safe_float(cur.get("ce_oi")))), "pe_oi": int(round(_safe_float(cur.get("pe_oi")))),
+        "ce_ltp": round(_safe_float(cur.get("ce_ltp")), 2), "pe_ltp": round(_safe_float(cur.get("pe_ltp")), 2),
     }
 
 
@@ -231,10 +253,11 @@ def update_oi_flow(
     atm_strike = _safe_int(option_chain.get("atm_strike", 0) if isinstance(option_chain, dict) else 0, 0)
     pcr = _safe_float(option_chain.get("pcr", 0) if isinstance(option_chain, dict) else 0, 0)
 
+    market_open = bool(option_chain.get("_market_open", True)) if isinstance(option_chain, dict) else True
     classified = []
     for strike, cur in current_map.items():
         prev = prev_map.get(strike, {})
-        classified.append(_classify(prev, cur))
+        classified.append(_classify(prev, cur, market_open=market_open))
 
     classified.sort(key=lambda x: abs(_safe_int(x.get("ce_oi_delta", 0))) + abs(_safe_int(x.get("pe_oi_delta", 0))), reverse=True)
 

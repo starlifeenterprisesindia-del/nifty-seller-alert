@@ -1,6 +1,6 @@
 """
 command_hierarchy.py
-Version: V50.8.3
+Version: V50.8.4
 Role: CO Cross-Examination and Investigation Academy.
 
 One-shot flow only:
@@ -95,8 +95,16 @@ class BranchBoss:
         facts = self._compact(details)
 
         warnings: List[str] = []
+        integrity = facts.get("integrity", {}) if isinstance(facts.get("integrity", {}), Mapping) else {}
+        integrity_status = str(integrity.get("status", "UNKNOWN")).upper()
+        availability = facts.get("availability", {}) if isinstance(facts.get("availability", {}), Mapping) else {}
         if report is None:
             warnings.append("Report missing")
+        if integrity_status == "FAIL" or str(availability.get("status", "")).upper() == "INTEGRITY_HOLD":
+            warnings.append("DSP evidence integrity hold")
+            confidence = 0.0
+        elif integrity_status == "CAUTION":
+            warnings.append("DSP evidence integrity caution")
         if confidence < self.minimum_confidence:
             warnings.append("Low branch confidence")
         if not summary or summary == "No report":
@@ -110,6 +118,9 @@ class BranchBoss:
         # Observation-only departments are visible to CO but cannot present a
         # directional vote or execution recommendation before live validation.
         if self.branch in OBSERVATION_ONLY_BRANCHES:
+            recommendation = "INFORMATION_ONLY"
+            branch_vote = "NEUTRAL"
+        if integrity_status == "FAIL" or str(availability.get("status", "")).upper() == "INTEGRITY_HOLD":
             recommendation = "INFORMATION_ONLY"
             branch_vote = "NEUTRAL"
         status = "READY" if not warnings else "CAUTION"
@@ -530,22 +541,22 @@ class AIOrganizationController:
 
     BOSSES = {
         "DATA": BranchBoss("DATA", "DSP Data Intelligence", 60),
-        "OPTION": BranchBoss("OPTION", "DSP Option Intelligence", 0),
-        "PRICE_ACTION": BranchBoss("PRICE_ACTION", "DSP Price Action", 0),
-        "MARKET_BEHAVIOUR": BranchBoss("MARKET_BEHAVIOUR", "DSP Market Behaviour", 0),
+        "OPTION": BranchBoss("OPTION", "DSP Option Intelligence", 40),
+        "PRICE_ACTION": BranchBoss("PRICE_ACTION", "DSP Price Action", 45),
+        "MARKET_BEHAVIOUR": BranchBoss("MARKET_BEHAVIOUR", "DSP Market Behaviour", 45),
         "MARKET_PSYCHOLOGY": BranchBoss("MARKET_PSYCHOLOGY", "DSP Market Psychology", 0),
         "TIME_INTELLIGENCE": BranchBoss("TIME_INTELLIGENCE", "DSP Time Intelligence", 0),
         "MARKET_JOURNEY": BranchBoss("MARKET_JOURNEY", "DSP Move & Barrier Intelligence", 0),
         "HEAVYWEIGHT_INTELLIGENCE": BranchBoss("HEAVYWEIGHT_INTELLIGENCE", "DSP Heavyweight Intelligence", 0),
         "NEWS_INTELLIGENCE": BranchBoss("NEWS_INTELLIGENCE", "DSP News Intelligence", 0),
-        "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money / Institutional Behaviour", 0),
+        "SMART_MONEY": BranchBoss("SMART_MONEY", "DSP Smart Money / Institutional Behaviour", 35),
         "EXPERIENCE": BranchBoss("EXPERIENCE", "DSP Experience, Validation & Replay", 0),
         "SELF_REVIEW": BranchBoss("SELF_REVIEW", "DSP AI Self Review", 0),
         "PROMOTION_BOARD": BranchBoss("PROMOTION_BOARD", "DSP Personnel & Promotion Board", 0),
         "LEARNING": BranchBoss("LEARNING", "DSP True Learning & Improvement", 0),
-        "RISK": BranchBoss("RISK", "DSP Risk", 0),
-        "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 0),
-        "STRATEGY": BranchBoss("STRATEGY", "DSP Strategy", 0),
+        "RISK": BranchBoss("RISK", "DSP Risk", 45),
+        "CANDIDATE": BranchBoss("CANDIDATE", "DSP Candidate", 45),
+        "STRATEGY": BranchBoss("STRATEGY", "DSP Strategy", 45),
     }
 
     def build_case_file(self, *, snapshot_id: str, data_quality_score: float, reports: Mapping[str, Any]) -> COCaseFile:

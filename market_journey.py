@@ -62,7 +62,11 @@ class MarketJourneyReport:
         return asdict(self)
 
     def to_department_report(self) -> Dict[str, Any]:
-        signed = f"{self.primary_signed_points:+.0f}" if self.primary_direction in {"UP", "DOWN"} else "range"
+        signed = (
+            f"{self.primary_signed_points:+.0f}"
+            if self.primary_direction in {"UP", "DOWN"}
+            else f"two-sided +{self.upside_remaining_points:.0f}/-{self.downside_remaining_points:.0f}"
+        )
         bounce = float(self.barrier_statistics.get("bounce_probability", 50.0) or 50.0)
         break_prob = float(self.barrier_statistics.get("break_probability", 50.0) or 50.0)
         summary = (

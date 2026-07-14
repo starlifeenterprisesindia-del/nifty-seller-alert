@@ -13,6 +13,8 @@ import streamlit.components.v1 as components
 import yfinance as yf
 
 from barrier_engine import build_barrier_candidates, select_nearest_barriers, traditional_pivots
+from option_flow_integrity import classify_option_flow
+from department_integrity import audit_department_reports
 
 try:
     from live_market_state import (
@@ -206,7 +208,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_8_2_BARRIER_INTEGRITY_DIAGNOSTIC",
+        "version": "V50_8_4_DSP_EVIDENCE_INTEGRITY_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1358,7 +1360,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8.3 Dhan Auto Feeds",
+    page_title="Nifty Seller AI V50.8.4 DSP Evidence Integrity",
     page_icon="🧠",
     layout="wide",
 )
@@ -1970,48 +1972,66 @@ def _build_price_action_from_candles(df, source):
         ema20_v = float(close.ewm(span=20, adjust=False).mean().iloc[-1])
         ema50_v = float(close.ewm(span=50, adjust=False).mean().iloc[-1])
 
-        today_date = work.index[-1].date()
-        today_df = work[work.index.date == today_date].copy()
-        if today_df.empty:
-            today_df = work.tail(75).copy()
-        typical = (today_df["High"] + today_df["Low"] + today_df["Close"]) / 3.0
-        vol = today_df["Volume"] if "Volume" in today_df.columns else pd.Series([0] * len(today_df), index=today_df.index)
+        # Session-date integrity: before 09:15 there are no current-day candles.
+        # The previous build treated the latest completed day as "today" and
+        # then used the day before that for pivots.  Resolve sessions against the
+        # actual IST calendar date instead.
+        current_date = datetime.now(IST).date()
+        today_df = work[work.index.date == current_date].copy()
+        current_session_available = not today_df.empty
+        dates = sorted(set(work.index.date))
+        previous_dates = [item for item in dates if item < current_date]
+        previous_session_date = max(previous_dates) if previous_dates else (max(dates) if dates else None)
+        previous_df = work[work.index.date == previous_session_date].copy() if previous_session_date else pd.DataFrame()
+        if previous_df.empty:
+            return {"success": False, "message": f"{source}: completed previous session unavailable", "source": source}
+
+        # Current-session VWAP when available; otherwise a clearly-labelled
+        # previous-session reference for pre-open readiness only.
+        analysis_df = today_df if current_session_available else previous_df
+        typical = (analysis_df["High"] + analysis_df["Low"] + analysis_df["Close"]) / 3.0
+        vol = analysis_df["Volume"] if "Volume" in analysis_df.columns else pd.Series([0] * len(analysis_df), index=analysis_df.index)
         if float(vol.fillna(0).sum() or 0) > 0:
             vwap_v = float((typical * vol.fillna(0)).sum() / vol.fillna(0).sum())
         else:
             vwap_v = float(typical.mean())
 
-        dates = sorted(set(work.index.date))
-        prev_day_high_v = float(high.max())
-        prev_day_low_v = float(low.min())
-        prev_day_close_v = float(close.iloc[-1])
-        if len(dates) >= 2:
-            prev_df = work[work.index.date == dates[-2]]
-            if not prev_df.empty:
-                prev_day_high_v = float(prev_df["High"].max())
-                prev_day_low_v = float(prev_df["Low"].min())
-                prev_day_close_v = float(prev_df["Close"].iloc[-1])
-        pivot_levels_v = traditional_pivots(prev_day_high_v, prev_day_low_v, prev_day_close_v)
+        prev_day_high_v = float(previous_df["High"].max())
+        prev_day_low_v = float(previous_df["Low"].min())
+        prev_day_close_v = float(previous_df["Close"].iloc[-1])
+        pivot_integrity_v = "OK" if (
+            prev_day_high_v > prev_day_low_v
+            and prev_day_low_v - 0.5 <= prev_day_close_v <= prev_day_high_v + 0.5
+        ) else "FAIL"
+        pivot_levels_v = traditional_pivots(prev_day_high_v, prev_day_low_v, prev_day_close_v) if pivot_integrity_v == "OK" else {}
 
-        today_high_v = float(today_df["High"].max())
-        today_low_v = float(today_df["Low"].min())
-        or_df = today_df.between_time("09:15", "09:45")
-        if or_df.empty:
-            or_df = today_df.head(6)
-        or_high_v = float(or_df["High"].max()) if not or_df.empty else today_high_v
-        or_low_v = float(or_df["Low"].min()) if not or_df.empty else today_low_v
+        latest_close_v = float(close.iloc[-1])
+        today_high_v = float(today_df["High"].max()) if current_session_available else latest_close_v
+        today_low_v = float(today_df["Low"].min()) if current_session_available else latest_close_v
+        if current_session_available:
+            or_df = today_df.between_time("09:15", "09:45")
+            if or_df.empty:
+                or_df = today_df.head(6)
+            or_high_v = float(or_df["High"].max()) if not or_df.empty else today_high_v
+            or_low_v = float(or_df["Low"].min()) if not or_df.empty else today_low_v
+            opening_range_ready_v = len(or_df) >= 1
+        else:
+            or_high_v = latest_close_v
+            or_low_v = latest_close_v
+            opening_range_ready_v = False
 
         prev_close = close.shift(1)
         tr = pd.concat([(high - low).abs(), (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
         atr_series = tr.rolling(14).mean().dropna()
         atr5_v = float(atr_series.iloc[-1]) if not atr_series.empty else 0.0
 
-        latest_15 = today_df.tail(3) if len(today_df) >= 3 else today_df.tail(1)
+        candle_source_df = today_df if current_session_available else previous_df
+        latest_15 = candle_source_df.tail(3) if len(candle_source_df) >= 3 else candle_source_df.tail(1)
         candle15_auto = {
-            "open": float(latest_15["Open"].iloc[0]) if not latest_15.empty else float(close.iloc[-1]),
-            "high": float(latest_15["High"].max()) if not latest_15.empty else float(high.iloc[-1]),
-            "low": float(latest_15["Low"].min()) if not latest_15.empty else float(low.iloc[-1]),
-            "close": float(latest_15["Close"].iloc[-1]) if not latest_15.empty else float(close.iloc[-1]),
+            "open": float(latest_15["Open"].iloc[0]) if not latest_15.empty else latest_close_v,
+            "high": float(latest_15["High"].max()) if not latest_15.empty else latest_close_v,
+            "low": float(latest_15["Low"].min()) if not latest_15.empty else latest_close_v,
+            "close": float(latest_15["Close"].iloc[-1]) if not latest_15.empty else latest_close_v,
         }
         latest_ts = work.index[-1]
         age_seconds = max(0.0, (datetime.now(IST) - latest_ts.to_pydatetime()).total_seconds())
@@ -2024,11 +2044,19 @@ def _build_price_action_from_candles(df, source):
             "previous_day_high": prev_day_high_v,
             "previous_day_low": prev_day_low_v,
             "previous_day_close": prev_day_close_v,
+            "previous_session_date": str(previous_session_date or ""),
+            "previous_session_candle_count": int(len(previous_df)),
             "pivot_levels": pivot_levels_v,
+            "pivot_integrity": pivot_integrity_v,
+            "pivot_formula": "CLASSIC_P=(H+L+C)/3",
+            "current_session_available": bool(current_session_available),
+            "current_session_date": str(current_date),
+            "current_session_candle_count": int(len(today_df)),
             "today_high": today_high_v,
             "today_low": today_low_v,
             "opening_range_high": or_high_v,
             "opening_range_low": or_low_v,
+            "opening_range_ready": bool(opening_range_ready_v),
             "candle15": candle15_auto,
             "latest_candle_at": latest_ts.strftime("%d-%m-%Y %H:%M:%S"),
             "candle_age_seconds": age_seconds,
@@ -2171,8 +2199,14 @@ def get_yahoo_heavyweights():
 # =========================================================
 # SNAPSHOT DELTAS + OPTION INTELLIGENCE
 # =========================================================
-def attach_option_snapshot_deltas(rows, snapshot_id):
-    """Add fresh snapshot deltas and preserve them across browser reconnects."""
+def attach_option_snapshot_deltas(rows, snapshot_id, *, expiry="", fetched_epoch=0.0, market_open=True):
+    """Add valid snapshot deltas and preserve them across browser reconnects.
+
+    A delta is considered live evidence only when it belongs to the same expiry,
+    the prior payload is recent, timestamps are monotonic, and the market is
+    open.  Long gaps are reset rather than being described as an instantaneous
+    buying/writing event.
+    """
     current_map = {}
     for row in rows:
         for side in ("ce", "pe"):
@@ -2182,16 +2216,20 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
                 "volume": row.get(f"{side}_volume", 0),
             }
 
+    current_epoch = float(fetched_epoch or datetime.now(IST).timestamp())
+    current_expiry = str(expiry or "")
     last_id = st.session_state.get("oc_snapshot_id")
     previous_map = st.session_state.get("oc_snapshot_map", {})
+    previous_meta = st.session_state.get("oc_snapshot_meta", {})
     stored_deltas = st.session_state.get("oc_snapshot_deltas", {})
 
     # Full browser reconnect can create a fresh Streamlit session. Reload the
-    # compact same-day option state instead of calling it the first snapshot.
+    # compact same-day option state, but validate expiry and comparison age.
     if (not previous_map) and V505_LIVE_STATE_READY:
         try:
             persisted = load_option_delta_state(datetime.now(IST), max_age_seconds=600)
             last_id = persisted.get("snapshot_id", last_id)
+            previous_meta = dict(persisted.get("meta", {}) or {})
             previous_map = {}
             for key, value in (persisted.get("current_map", {}) or {}).items():
                 strike_text, side = str(key).split("|", 1)
@@ -2201,13 +2239,21 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
                 strike_text, side = str(key).split("|", 1)
                 stored_deltas[(float(strike_text), side)] = value
         except Exception:
-            previous_map, stored_deltas = {}, {}
+            previous_map, previous_meta, stored_deltas = {}, {}, {}
+
+    previous_epoch = float((previous_meta or {}).get("fetched_epoch", 0) or 0)
+    previous_expiry = str((previous_meta or {}).get("expiry", "") or "")
+    comparison_gap = current_epoch - previous_epoch if previous_epoch > 0 else None
+    same_expiry = bool(not previous_expiry or not current_expiry or previous_expiry == current_expiry)
+    gap_ok = bool(comparison_gap is not None and 0.0 <= comparison_gap <= 180.0)
+    previous_was_market_open = bool((previous_meta or {}).get("market_open", False))
+    comparison_allowed = bool(market_open and previous_was_market_open and previous_map and same_expiry and gap_ok)
 
     if snapshot_id != last_id:
         deltas = {}
         for key, current in current_map.items():
             previous = previous_map.get(key)
-            if previous:
+            if previous and comparison_allowed:
                 deltas[key] = {
                     "price": current["ltp"] - previous.get("ltp", 0),
                     "price_pct": pct_change(current["ltp"], previous.get("ltp", 0)),
@@ -2215,17 +2261,37 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
                     "oi_pct": pct_change(current["oi"], previous.get("oi", 0)),
                     "volume": current["volume"] - previous.get("volume", 0),
                     "ready": True,
+                    "gap_seconds": round(float(comparison_gap or 0), 1),
+                    "continuity": "LIVE_SEQUENCE",
                 }
             else:
-                deltas[key] = {"price": 0.0, "price_pct": 0.0, "oi": 0, "oi_pct": 0.0, "volume": 0, "ready": False}
+                reason = (
+                    "PREOPEN" if not market_open else
+                    "EXPIRY_RESET" if previous and not same_expiry else
+                    "GAP_RESET" if previous and comparison_gap is not None else
+                    "FIRST_SAMPLE"
+                )
+                deltas[key] = {
+                    "price": 0.0, "price_pct": 0.0, "oi": 0,
+                    "oi_pct": 0.0, "volume": 0, "ready": False,
+                    "gap_seconds": round(float(comparison_gap or 0), 1) if comparison_gap is not None else None,
+                    "continuity": reason,
+                }
+        meta = {
+            "fetched_epoch": current_epoch,
+            "expiry": current_expiry,
+            "market_open": bool(market_open),
+        }
         st.session_state["oc_snapshot_map"] = current_map
         st.session_state["oc_snapshot_id"] = snapshot_id
+        st.session_state["oc_snapshot_meta"] = meta
         st.session_state["oc_snapshot_deltas"] = deltas
         stored_deltas = deltas
         if V505_LIVE_STATE_READY:
             try:
                 save_option_delta_state({
                     "snapshot_id": snapshot_id,
+                    "meta": meta,
                     "current_map": {f"{key[0]}|{key[1]}": value for key, value in current_map.items()},
                     "deltas": {f"{key[0]}|{key[1]}": value for key, value in deltas.items()},
                     "saved_at": datetime.now(IST).isoformat(timespec="seconds"),
@@ -2244,82 +2310,44 @@ def attach_option_snapshot_deltas(rows, snapshot_id):
             row[f"{side}_snap_oi_change_pct"] = delta.get("oi_pct", 0.0)
             row[f"{side}_snap_volume_change"] = delta.get("volume", 0)
             row[f"{side}_snapshot_ready"] = bool(delta.get("ready", False))
+            row[f"{side}_snapshot_gap_seconds"] = delta.get("gap_seconds")
+            row[f"{side}_snapshot_continuity"] = delta.get("continuity", "UNKNOWN")
         output.append(row)
     return output
 
 
-def classify_oi_price_signal(side, row):
-    """Conventional OI/price inference; not proof of buyer/seller identity."""
+def classify_oi_price_signal(side, row, *, market_open=True):
+    """Canonical OI/premium inference with visible evidence provenance."""
     prefix = side.lower()
-    use_snapshot = bool(row.get(f"{prefix}_snapshot_ready", False)) and (
-        abs(row.get(f"{prefix}_snap_price_change_pct", 0)) >= 0.02
-        or abs(row.get(f"{prefix}_snap_oi_change_pct", 0)) >= 0.02
-    )
+    use_snapshot = bool(row.get(f"{prefix}_snapshot_ready", False))
 
     if use_snapshot:
         price_delta = row.get(f"{prefix}_snap_price_change", 0.0)
         price_pct = row.get(f"{prefix}_snap_price_change_pct", 0.0)
         oi_delta = row.get(f"{prefix}_snap_oi_change", 0)
         oi_pct = row.get(f"{prefix}_snap_oi_change_pct", 0.0)
-        basis = "Snapshot"
+        basis = "SNAPSHOT"
     else:
         price_delta = row.get(f"{prefix}_price_change", 0.0)
         price_pct = row.get(f"{prefix}_price_change_pct", 0.0)
         oi_delta = row.get(f"{prefix}_oi_change", 0)
         oi_pct = row.get(f"{prefix}_oi_change_pct", 0.0)
-        basis = "Day"
+        basis = "DAY_CHANGE" if market_open else "PREOPEN_DAY_CHANGE"
 
-    if price_delta > 0 and oi_delta > 0:
-        signal = f"Likely Fresh {side} Buying"
-        market_bias = 1 if side == "CE" else -1
-    elif price_delta < 0 and oi_delta > 0:
-        signal = f"Likely Fresh {side} Writing"
-        market_bias = -1 if side == "CE" else 1
-    elif price_delta > 0 and oi_delta < 0:
-        signal = f"{side} Short Covering"
-        market_bias = 1 if side == "CE" else -1
-    elif price_delta < 0 and oi_delta < 0:
-        signal = f"{side} Long Unwinding"
-        market_bias = -0.45 if side == "CE" else 0.45
-    else:
-        signal = "Neutral"
-        market_bias = 0
-
-    strength = 25
-    strength += min(abs(price_pct) * 8, 25)
-    strength += min(abs(oi_pct) * 2.5, 25)
-
-    volume_ratio = row.get(f"{prefix}_volume_ratio", 0.0)
-    if volume_ratio >= 2:
-        strength += 15
-    elif volume_ratio >= 1.2:
-        strength += 10
-    elif volume_ratio >= 0.7:
-        strength += 5
-
-    spread_pct = row.get(f"{prefix}_spread_pct", 0.0)
-    if 0 < spread_pct <= 0.5:
-        strength += 10
-    elif spread_pct <= 1.0:
-        strength += 6
-    elif spread_pct > 2.0:
-        strength -= 10
-
-    if use_snapshot:
-        strength += 8
-
-    strength = int(round(clamp(strength, 0, 98)))
-    directional_score = market_bias * strength
-    return {
-        "signal": signal,
-        "basis": basis,
-        "strength": strength,
-        "directional_score": directional_score,
-        "price_pct": price_pct,
-        "oi_pct": oi_pct,
-        "oi_delta": oi_delta,
-    }
-
+    result = classify_option_flow(
+        side,
+        price_delta=price_delta,
+        price_pct=price_pct,
+        oi_delta=oi_delta,
+        oi_pct=oi_pct,
+        basis=basis,
+        volume_ratio=row.get(f"{prefix}_volume_ratio", 0.0),
+        spread_pct=row.get(f"{prefix}_spread_pct", 0.0),
+        evidence_allowed=bool(market_open),
+    )
+    result["snapshot_gap_seconds"] = row.get(f"{prefix}_snapshot_gap_seconds")
+    result["snapshot_continuity"] = row.get(f"{prefix}_snapshot_continuity", "UNKNOWN")
+    return result
 
 def score_sell_candidate(side, row, signal_info, spot):
     prefix = side.lower()
@@ -2392,7 +2420,7 @@ def score_sell_candidate(side, row, signal_info, spot):
     return int(round(clamp(score, 0, 98))), ", ".join(reasons[:4])
 
 
-def analyze_option_chain(option_chain):
+def analyze_option_chain(option_chain, *, market_open=True):
     """Interpret current option flow without over-weighting stale day changes.
 
     Snapshot-to-snapshot OI/price evidence gets full weight. Exchange day-change
@@ -2403,7 +2431,13 @@ def analyze_option_chain(option_chain):
     if not option_chain.get("success"):
         return {"success": False, "rows": [], "bias": 0, "message": option_chain.get("message", "No option chain")}
 
-    rows = attach_option_snapshot_deltas(option_chain["rows"], option_chain["snapshot_id"])
+    rows = attach_option_snapshot_deltas(
+        option_chain["rows"],
+        option_chain["snapshot_id"],
+        expiry=option_chain.get("expiry", ""),
+        fetched_epoch=option_chain.get("fetched_epoch", 0),
+        market_open=bool(market_open),
+    )
     spot = float(option_chain["underlying"])
     atm = float(option_chain["atm_strike"])
     analyzed = []
@@ -2420,8 +2454,8 @@ def analyze_option_chain(option_chain):
     all_sides = 0
 
     for row in rows:
-        ce_info = classify_oi_price_signal("CE", row)
-        pe_info = classify_oi_price_signal("PE", row)
+        ce_info = classify_oi_price_signal("CE", row, market_open=market_open)
+        pe_info = classify_oi_price_signal("PE", row, market_open=market_open)
         ce_sell_score, ce_reason = score_sell_candidate("CE", row, ce_info, spot)
         pe_sell_score, pe_reason = score_sell_candidate("PE", row, pe_info, spot)
 
@@ -2433,7 +2467,7 @@ def analyze_option_chain(option_chain):
 
         for side, info in (("CE", ce_info), ("PE", pe_info)):
             all_sides += 1
-            if info.get("basis") == "Snapshot":
+            if str(info.get("basis", "")).upper() == "SNAPSHOT":
                 basis_weight = 1.0
                 ready_sides += 1
             else:
@@ -2462,14 +2496,34 @@ def analyze_option_chain(option_chain):
         analyzed.append({
             **row,
             "ce_signal": ce_info["signal"],
+            "ce_flow": ce_info["signal"],
+            "ce_flow_code": ce_info["flow_code"],
             "ce_signal_basis": ce_info["basis"],
+            "ce_flow_basis": ce_info["basis"],
             "ce_signal_strength": ce_info["strength"],
+            "ce_flow_evidence_ready": bool(ce_info.get("evidence_ready", False)),
+            "ce_flow_price_delta": ce_info.get("price_delta", 0),
+            "ce_flow_price_pct": ce_info.get("price_pct", 0),
+            "ce_flow_oi_delta": ce_info.get("oi_delta", 0),
+            "ce_flow_oi_pct": ce_info.get("oi_pct", 0),
+            "ce_flow_continuity": ce_info.get("snapshot_continuity", "UNKNOWN"),
+            "ce_flow_gap_seconds": ce_info.get("snapshot_gap_seconds"),
             "ce_directional_score": round(float(ce_info.get("directional_score", 0)), 1),
             "ce_sell_score": ce_sell_score,
             "ce_sell_reason": ce_reason,
             "pe_signal": pe_info["signal"],
+            "pe_flow": pe_info["signal"],
+            "pe_flow_code": pe_info["flow_code"],
             "pe_signal_basis": pe_info["basis"],
+            "pe_flow_basis": pe_info["basis"],
             "pe_signal_strength": pe_info["strength"],
+            "pe_flow_evidence_ready": bool(pe_info.get("evidence_ready", False)),
+            "pe_flow_price_delta": pe_info.get("price_delta", 0),
+            "pe_flow_price_pct": pe_info.get("price_pct", 0),
+            "pe_flow_oi_delta": pe_info.get("oi_delta", 0),
+            "pe_flow_oi_pct": pe_info.get("oi_pct", 0),
+            "pe_flow_continuity": pe_info.get("snapshot_continuity", "UNKNOWN"),
+            "pe_flow_gap_seconds": pe_info.get("snapshot_gap_seconds"),
             "pe_directional_score": round(float(pe_info.get("directional_score", 0)), 1),
             "pe_sell_score": pe_sell_score,
             "pe_sell_reason": pe_reason,
@@ -2505,7 +2559,13 @@ def analyze_option_chain(option_chain):
     ce_writing_score = resistance_score
     pe_writing_score = support_score
     snapshot_ready_ratio = safe_divide(ready_sides, all_sides, 0.0)
-    snapshot_ready = snapshot_ready_ratio >= 0.35
+    snapshot_ready = bool(market_open and snapshot_ready_ratio >= 0.35)
+
+    if not market_open:
+        # Previous-close/day-change option data is useful for readiness only;
+        # it must not be presented as live intraday confirmation.
+        bias = signed_clamp(bias, -25, 25)
+        raw_flow_bias = signed_clamp(raw_flow_bias, -25, 25)
 
     if support_score >= 48 and resistance_score >= 48 and abs(support_score - resistance_score) <= 22:
         flow_state = "TWO_SIDED_WRITING_RANGE"
@@ -2520,6 +2580,9 @@ def analyze_option_chain(option_chain):
         flow_state = "BEARISH_FLOW"
     else:
         flow_state = "MIXED_FLOW"
+
+    if not market_open:
+        flow_state = "PREOPEN_REFERENCE"
 
     ce_candidates = [r for r in analyzed if float(r["strike"]) >= spot]
     pe_candidates = [r for r in analyzed if float(r["strike"]) <= spot]
@@ -2543,6 +2606,8 @@ def analyze_option_chain(option_chain):
         "flow_state": flow_state,
         "snapshot_ready": bool(snapshot_ready),
         "snapshot_ready_ratio": round(float(snapshot_ready_ratio), 2),
+        "market_open": bool(market_open),
+        "flow_integrity": "PASS",
         "best_ce": best_ce,
         "best_pe": best_pe,
         "snapshot_id": option_chain.get("snapshot_id", ""),
@@ -3963,7 +4028,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8.3 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.4 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -4399,6 +4464,9 @@ if auto_price_action:
             }
     if price_action_result.get("success"):
         price_action_auto_ok = True
+        _price_action_current_session_available = bool(price_action_result.get("current_session_available", True))
+        _price_action_pivot_integrity = str(price_action_result.get("pivot_integrity", "UNKNOWN"))
+        _price_action_previous_session_date = str(price_action_result.get("previous_session_date", ""))
         ema20 = float(price_action_result.get("ema20", ema20))
         ema50 = float(price_action_result.get("ema50", ema50))
         vwap = float(price_action_result.get("vwap", vwap))
@@ -4411,6 +4479,11 @@ if auto_price_action:
         today_low = float(price_action_result.get("today_low", today_low))
         opening_range_high = float(price_action_result.get("opening_range_high", opening_range_high))
         opening_range_low = float(price_action_result.get("opening_range_low", opening_range_low))
+        if (not _price_action_current_session_available) and isinstance(dhan_index_ohlc, dict) and dhan_index_ohlc:
+            today_high = float(dhan_index_ohlc.get("high", price) or price)
+            today_low = float(dhan_index_ohlc.get("low", price) or price)
+            opening_range_high = today_high
+            opening_range_low = today_low
         price_action_source = price_action_result.get("source", "Auto candles")
     else:
         price_action_source = "UNAVAILABLE (Dhan/Yahoo candles failed; manual defaults excluded)"
@@ -4422,7 +4495,17 @@ if auto_price_action:
 else:
     price_action_source = "Manual fallback"
 
-price_action_direction_usable = bool(price_action_auto_ok or price_action_manual_active)
+_price_action_current_session_available = bool(
+    locals().get("_price_action_current_session_available", price_action_manual_active)
+)
+_price_action_pivot_integrity = str(locals().get("_price_action_pivot_integrity", "MANUAL" if price_action_manual_active else "UNKNOWN"))
+_price_action_previous_session_date = str(locals().get("_price_action_previous_session_date", ""))
+# Previous-session candles are valid for pivots/readiness, but they are not a
+# live intraday directional witness before the current session has a candle.
+price_action_direction_usable = bool(
+    price_action_manual_active or (price_action_auto_ok and _price_action_current_session_available)
+)
+price_action_reference_ready = bool(price_action_auto_ok or price_action_manual_active)
 
 # Heavyweights
 if dhan_bundle.get("success") and heavyweight_ids:
@@ -4464,7 +4547,10 @@ if prefer_dhan and dhan_ready:
     else:
         option_chain = {"success": False, "message": "Expiry list unavailable: " + str(expiry_result.get("message", "Unknown Dhan expiry error"))}
 
-option_analysis = analyze_option_chain(option_chain) if option_chain.get("success") else {"success": False, "rows": [], "bias": 0}
+_option_market_open_v5084 = market_status()[0] == "Market Open"
+if isinstance(option_chain, dict):
+    option_chain["_market_open"] = bool(_option_market_open_v5084)
+option_analysis = analyze_option_chain(option_chain, market_open=_option_market_open_v5084) if option_chain.get("success") else {"success": False, "rows": [], "bias": 0, "snapshot_ready": False, "flow_state": "UNAVAILABLE"}
 
 # Aggregates
 if option_chain.get("success"):
@@ -4588,22 +4674,39 @@ heavy_bias = float(heavy_analysis.get("pressure", 0)) if heavy_analysis.get("suc
 # V50.8.3 central source registry: every status panel and department reads the
 # same truth instead of independently saying OI OK / UNKNOWN or VIX live/manual.
 _pa_registry_status = (
-    "AUTO_DHAN" if price_action_auto_ok and str(price_action_source).lower().startswith("dhan")
+    ("SESSION_CANDLE_PENDING" if _option_market_open_v5084 else "PREOPEN_REFERENCE")
+    if price_action_auto_ok and not _price_action_current_session_available
+    else "AUTO_DHAN" if price_action_auto_ok and str(price_action_source).lower().startswith("dhan")
     else "AUTO_YAHOO" if price_action_auto_ok
     else "MANUAL" if price_action_manual_active
     else "UNAVAILABLE"
 )
 source_registry = {
-    "nifty": {"ready": bool(dhan_bundle.get("success")), "source": nifty_source, "status": "LIVE" if str(nifty_source).lower().startswith("dhan") else "FALLBACK"},
+    "nifty": {
+        "ready": bool(dhan_bundle.get("success")), "source": nifty_source,
+        "status": ("LIVE" if _option_market_open_v5084 else "PREOPEN_REFERENCE") if str(nifty_source).lower().startswith("dhan") else "FALLBACK",
+    },
     "expiry": {"ready": bool(expiry_result.get("success")), "source": "DhanHQ", "status": "READY" if expiry_result.get("success") else "MISSING"},
-    "option_chain": {"ready": bool(option_chain.get("success")), "source": option_chain.get("source", "DhanHQ") if isinstance(option_chain, dict) else "DhanHQ", "status": "LIVE" if option_chain.get("success") else "MISSING"},
-    "oi": {"ready": bool(option_analysis.get("success")), "snapshot_ready": bool(option_analysis.get("snapshot_ready", False)), "status": "SNAPSHOT_READY" if option_analysis.get("snapshot_ready") else ("DAY_CHANGE_ONLY" if option_analysis.get("success") else "MISSING")},
+    "option_chain": {
+        "ready": bool(option_chain.get("success")),
+        "source": option_chain.get("source", "DhanHQ") if isinstance(option_chain, dict) else "DhanHQ",
+        "status": ("LIVE" if _option_market_open_v5084 else "PREOPEN_REFERENCE") if option_chain.get("success") else "MISSING",
+    },
+    "oi": {
+        "ready": bool(option_analysis.get("success")),
+        "snapshot_ready": bool(option_analysis.get("snapshot_ready", False)),
+        "status": "SNAPSHOT_READY" if option_analysis.get("snapshot_ready") else (("DAY_CHANGE_ONLY" if _option_market_open_v5084 else "PREOPEN_DAY_CHANGE_ONLY") if option_analysis.get("success") else "MISSING"),
+    },
     "price_action": {
-        "ready": bool(price_action_direction_usable), "automatic": bool(price_action_auto_ok),
+        "ready": bool(price_action_reference_ready), "direction_usable": bool(price_action_direction_usable),
+        "automatic": bool(price_action_auto_ok), "current_session_available": bool(_price_action_current_session_available),
         "source": price_action_source, "status": _pa_registry_status,
         "message": str(price_action_result.get("message", "")),
         "latest_candle_at": str(price_action_result.get("latest_candle_at", "")),
         "candle_age_seconds": float(price_action_result.get("candle_age_seconds", 0) or 0),
+        "previous_session_date": _price_action_previous_session_date,
+        "pivot_integrity": _price_action_pivot_integrity,
+        "pivot_formula": str(price_action_result.get("pivot_formula", "Traditional P=(H+L+C)/3")),
     },
     "vix": {
         "ready": bool(vix_live_ok or vix_source == "Manual"), "automatic": bool(vix_live_ok),
@@ -4640,6 +4743,7 @@ if V505_LIVE_STATE_READY:
             option_bias=option_bias,
             pcr=pcr,
             observed_at=datetime.now(IST),
+            market_open=bool(_option_market_open_v5084),
         )
     except Exception:
         live_movement = {"ready": False, "phase": "UNAVAILABLE", "label": "Movement memory error", "movement_bias": 0.0, "sample_count": 0}
@@ -6881,6 +6985,19 @@ def _v221_build_projection(snapshot_obj, price_report_obj=None):
     market = ms.get("market", {}) if isinstance(ms.get("market", {}), dict) else {}
     movement = ms.get("movement", {}) if isinstance(ms.get("movement", {}), dict) else {}
     source_health = ms.get("source_health", {}) if isinstance(ms.get("source_health", {}), dict) else {}
+    market_status_local = str(market.get("status", "")).strip().upper()
+
+    # Pre-open quotes, prior-session candles, and day OI changes are readiness
+    # references only. They cannot be promoted to a live confirmed direction.
+    if market_status_local and market_status_local != "MARKET OPEN":
+        return {
+            "raw": 0.0, "bullish": 50, "bearish": 50,
+            "direction": "PREOPEN REFERENCE", "probability": 50,
+            "movement_phase": "PREOPEN_REFERENCE",
+            "price_action_usable": False,
+            "recovery_confirmed": False, "pullback_confirmed": False,
+            "source": "PREOPEN_REFERENCE_ONLY",
+        }
 
     pa_usable = bool(source_health.get("price_action_usable", source_health.get("price_action_auto_ok", True)))
     pa = _v221_signed(sig.get("price_action_bias", 0)) if pa_usable else 0.0
@@ -7588,6 +7705,12 @@ try:
                     "volume": _r.get(f"{_prefix}_volume", 0),
                     "oi": _r.get(f"{_prefix}_oi", 0),
                     "oi_change": _r.get(f"{_prefix}_oi_change", 0),
+                    "flow_code": _r.get(f"{_prefix}_flow_code", ""),
+                    "flow_signal": _r.get(f"{_prefix}_flow_signal", ""),
+                    "flow_evidence_ready": bool(_r.get(f"{_prefix}_flow_evidence_ready", False)),
+                    "flow_basis": _r.get(f"{_prefix}_flow_basis", ""),
+                    "flow_price_delta": _r.get(f"{_prefix}_flow_price_delta", 0),
+                    "flow_oi_delta": _r.get(f"{_prefix}_flow_oi_delta", 0),
                     "bid_ask_spread": _r.get(f"{_prefix}_spread_pct", 0),
                 })
         _v24_candidate_report = CandidateDirector().build_report(
@@ -7614,6 +7737,10 @@ try:
                 "atr": atr5, "support": _near_support, "resistance": _near_resistance,
                 "source": price_action_source, "automatic": bool(price_action_auto_ok),
                 "used_for_direction": bool(price_action_direction_usable),
+                "current_session_available": bool(_price_action_current_session_available),
+                "previous_session_date": _price_action_previous_session_date,
+                "pivot_integrity": _price_action_pivot_integrity,
+                "pivot_formula": str(price_action_result.get("pivot_formula", "Traditional P=(H+L+C)/3")),
             },
             "option": {
                 "snapshot_id": option_analysis.get("snapshot_id", ""),
@@ -7647,7 +7774,11 @@ try:
         _did_quality_v24 = int(max(0, min(100, data_quality)))
         _did_snapshot_v24 = SnapshotManager().create_snapshot(_did_payload_v24, [], _did_quality_v24)
         _did_distributor_v24 = DataDistributor(_did_snapshot_v24)
-        _snapshot_id_v24 = _did_distributor_v24.snapshot_id
+        _payload_snapshot_id_v24 = _did_distributor_v24.snapshot_id
+        _snapshot_id_v24 = str(
+            (market_snapshot or {}).get("snapshot_id", "")
+            if isinstance(locals().get("market_snapshot", {}), dict) else ""
+        ) or str(_payload_snapshot_id_v24)
         # V43.1-V43.3 Experience Engine: complete older pending cases from the
         # new verified snapshot, then prepare historical evidence for CO. The
         # current AI judgement is registered only after AI_MASTER decides, so
@@ -7733,6 +7864,7 @@ try:
             "confidence": float(_did_snapshot_v24.quality_score),
             "details": {
                 "snapshot_id": _snapshot_id_v24,
+                "payload_snapshot_id": _payload_snapshot_id_v24,
                 "quality_score": _did_snapshot_v24.quality_score,
                 "rows_count": len(option_analysis.get("rows", [])) if isinstance(option_analysis, dict) else 0,
             },
@@ -7798,6 +7930,30 @@ try:
             "PROMOTION_BOARD": _promotion_board_department_v45,
             "LEARNING": _true_learning_department_v46,
         }
+        # V50.8.4: one evidence-integrity gate validates every DSP before the
+        # CO receives it. This is a verifier only, never a second decision brain.
+        _department_integrity_v5084 = audit_department_reports(
+            _branch_source_reports_v28,
+            context={
+                "snapshot_id": _snapshot_id_v24,
+                "market_open": bool(_market_open_v1951),
+                "source_registry": dict(source_registry or {}),
+                "option_analysis": option_analysis if isinstance(option_analysis, dict) else {},
+                "oi_sync_ok": bool((market_snapshot.get("oi_single_source", {}) or {}).get("sync_ok", False)) if isinstance(locals().get("market_snapshot", {}), dict) else False,
+                "price_action_usable": bool(price_action_direction_usable),
+                "price_action_reference_ready": bool(price_action_reference_ready),
+                "price_action_age_seconds": float(price_action_result.get("candle_age_seconds", 0) or 0),
+                "pivot_integrity": _price_action_pivot_integrity,
+                "price": float(price),
+                "support": _near_support,
+                "resistance": _near_resistance,
+                "heavyweight_count": len(_hw_rows_v24),
+                "expected_heavyweight_count": len(HEAVYWEIGHT_DEFAULT),
+                "institutional_state": _institutional_trace_v42.get("institutional_state", "INSTITUTIONAL_DATA_PARTIAL"),
+                "candidate_count": len(_candidate_rows_input_v24),
+            },
+        )
+        _branch_source_reports_v28 = dict(_department_integrity_v5084.get("reports", {}) or {})
         _co_case_v26 = AIOrganizationController().build_case_file(
             snapshot_id=_snapshot_id_v24,
             data_quality_score=float(_did_snapshot_v24.quality_score),
@@ -7841,6 +7997,7 @@ try:
             and option_analysis.get("success", False)
             and bool(_oi_lock_v24.get("sync_ok", False))
             and bool(price_action_direction_usable)
+            and bool((_department_integrity_v5084 or {}).get("critical_ok", False))
             and (not _market_open_quality_v24 or _flow_fresh_v24)
         )
         _v24_decision = AIMaster().decide(
@@ -8042,7 +8199,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8.3_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8.4_DSP_EVIDENCE_INTEGRITY",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8057,6 +8214,8 @@ try:
             "oi_sync_status": _oi_status_v505,
             "source_registry": dict(source_registry or {}),
             "movement": dict(live_movement or {}),
+            "department_integrity": dict(_department_integrity_v5084 or {}),
+            "branch_integrity_rows": list((_department_integrity_v5084 or {}).get("rows", []) or []),
             "strategy": {"type": _v24_decision.action, "plan_source": "V24_DEPARTMENT_PIPELINE"},
             "reasons": [
                 str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
@@ -8067,10 +8226,12 @@ try:
                 *( ["Automatic price action unavailable - directional PA score excluded."] if not price_action_auto_ok else [] ),
                 *( [f"India VIX source is {vix_source}; automatic VIX unavailable."] if not vix_live_ok else [] ),
                 *( ["Iron Condor figure is gross sold premium; hedge premiums are not available for net credit."] ),
+                *( [f"DSP integrity: {(_department_integrity_v5084 or {}).get('overall_status', 'UNKNOWN')} ({(_department_integrity_v5084 or {}).get('score', 0)}%)"] if (_department_integrity_v5084 or {}).get("overall_status") != "PASS" else [] ),
             ])),
             "blockers": list(dict.fromkeys([
                 *([f"Risk Engine: {_x}" for _x in (risk_engine_report.get("hard_blockers", []) or [])[:6]] if isinstance(locals().get("risk_engine_report", {}), dict) else []),
                 *(["Risk guidance is BLOCK TRADE."] if isinstance(locals().get("risk_engine_report", {}), dict) and str(risk_engine_report.get("guidance", "")).upper() == "BLOCK TRADE" else []),
+                *(["Critical DSP integrity hold: " + ", ".join((_department_integrity_v5084 or {}).get("critical_failures", []) or [])] if not (_department_integrity_v5084 or {}).get("critical_ok", False) else []),
             ])),
             "advice": str((_v24_decision.reasoning_report or {}).get("primary_reason", _v24_decision.reason)),
             "reasoning_report": dict(_v24_decision.reasoning_report or {}),
@@ -8084,7 +8245,8 @@ try:
             "strategy_rows": _v24_strategy_rows(),
             "candidate_rows": _v24_candidate_rows(),
             "data_department": {
-                "snapshot_id": _did_snapshot_v24.snapshot_id,
+                "snapshot_id": _snapshot_id_v24,
+                "payload_snapshot_id": _payload_snapshot_id_v24,
                 "quality_score": _did_snapshot_v24.quality_score,
                 "raw_signature": _did_snapshot_v24.raw_signature,
                 "source_registry": dict(source_registry or {}),
@@ -8114,8 +8276,9 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_8_2_BARRIER_INTEGRITY",
-                "pipeline_status": "READY",
+                "version": "V50_8_4_DSP_EVIDENCE_INTEGRITY",
+                "pipeline_status": "READY" if (_department_integrity_v5084 or {}).get("critical_ok", False) else "INTEGRITY_HOLD",
+                "department_integrity": dict(_department_integrity_v5084 or {}),
                 "pipeline_error": "",
                 "import_errors": {},
                 "market_psychology": {
@@ -8248,7 +8411,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8.3_DHAN_AUTO_FEEDS_PDF",
+            "version": "V50.8.4_DSP_EVIDENCE_INTEGRITY",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8273,7 +8436,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8.3_DHAN_AUTO_FEEDS_PDF",
+        "version": "V50.8.4_DSP_EVIDENCE_INTEGRITY",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8561,7 +8724,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.3 Dhan Auto Feeds</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.4 DSP Evidence Integrity</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -8723,7 +8886,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.8.3 Live Market Readiness Gate")
+st.markdown("### ✅ V50.8.4 Live Market + DSP Integrity Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -8823,9 +8986,19 @@ try:
                 _dept_display_v5081 = {
                     "candidate": "Candidate Liquidity / Strike Quality",
                 }.get(str(_dept_name_v505).lower(), str(_dept_name_v505).replace("_", " ").title())
+                _integrity_by_branch_v5084 = {
+                    str(_x.get("Branch", "")).lower().replace(" ", "_"): _x
+                    for _x in (AI_MASTER.get("branch_integrity_rows", []) or []) if isinstance(_x, dict)
+                }
+                _dept_integrity_key_v5084 = {
+                    "behaviour": "market_behaviour",
+                    "true_learning": "learning",
+                }.get(str(_dept_name_v505).lower(), str(_dept_name_v505).lower())
+                _integrity_row_v5084 = _integrity_by_branch_v5084.get(_dept_integrity_key_v5084, {})
                 _pdf_department_rows_v505.append({
                     "Department": _dept_display_v5081,
                     "Confidence": _dept_info_v505.get("confidence", 0),
+                    "Integrity": _integrity_row_v5084.get("Integrity", "CHECKED"),
                     "Summary": _dept_info_v505.get("summary", "-"),
                 })
         _pdf_option_rows_v505 = []
@@ -8834,17 +9007,23 @@ try:
                 _pdf_option_rows_v505.append({
                     "Strike": _row_v505.get("strike", "-"),
                     "CE LTP": _row_v505.get("ce_ltp", 0),
-                    "CE OI Chg": _row_v505.get("ce_oi_change", 0),
+                    "CE Day OI": _row_v505.get("ce_oi_change", 0),
+                    "CE Basis": _row_v505.get("ce_flow_basis", "-"),
+                    "CE dPx": _row_v505.get("ce_flow_price_delta", 0),
+                    "CE dOI": _row_v505.get("ce_flow_oi_delta", 0),
                     "CE Flow": _row_v505.get("ce_flow", _row_v505.get("ce_signal", "-")),
                     "PE LTP": _row_v505.get("pe_ltp", 0),
-                    "PE OI Chg": _row_v505.get("pe_oi_change", 0),
+                    "PE Day OI": _row_v505.get("pe_oi_change", 0),
+                    "PE Basis": _row_v505.get("pe_flow_basis", "-"),
+                    "PE dPx": _row_v505.get("pe_flow_price_delta", 0),
+                    "PE dOI": _row_v505.get("pe_flow_oi_delta", 0),
                     "PE Flow": _row_v505.get("pe_flow", _row_v505.get("pe_signal", "-")),
                 })
         _movement_pdf_v505 = AI_MASTER.get("movement", {}) if isinstance(AI_MASTER.get("movement", {}), dict) else {}
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.8.3"),
+                "Version": AI_MASTER.get("version", "V50.8.4"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),
@@ -8866,6 +9045,9 @@ try:
                 "Movement Phase": _movement_pdf_v505.get("phase", "UNAVAILABLE"),
                 "Movement Continuity": _movement_pdf_v505.get("continuity_status", "UNKNOWN"),
                 "Movement Recent Samples": _movement_pdf_v505.get("recent_sample_count", _movement_pdf_v505.get("sample_count", 0)),
+                "Movement Stored Samples": _movement_pdf_v505.get("sample_count", 0),
+                "DSP Integrity": (AI_MASTER.get("department_integrity", {}) or {}).get("overall_status", "UNKNOWN"),
+                "DSP Integrity Score": (AI_MASTER.get("department_integrity", {}) or {}).get("score", 0),
                 "Recovery From Low": _movement_pdf_v505.get("recovery_from_low", 0),
             },
             "source_rows": _pdf_source_rows_v505,
@@ -8874,6 +9056,7 @@ try:
             "candidate_rows": AI_MASTER.get("candidate_rows", []),
             "option_rows": _pdf_option_rows_v505,
             "department_rows": _pdf_department_rows_v505,
+            "branch_integrity_rows": AI_MASTER.get("branch_integrity_rows", []),
             "reasons": AI_MASTER.get("reasons", []),
             "warnings": list(dict.fromkeys([
                 *list(AI_MASTER.get("warnings", []) or []),
@@ -8954,6 +9137,20 @@ try:
     _render_v50_final_headquarters(_headquarters_ui_v50)
 except Exception as _headquarters_ui_err_v50:
     st.caption("Final AI Headquarters certificate unavailable: " + str(_headquarters_ui_err_v50))
+
+# V50.8.4: visible evidence certificate for every DSP branch.
+with st.expander("🧾 DSP Branch Evidence Integrity Certificate", expanded=False):
+    _dsp_integrity_ui_v5084 = AI_MASTER.get("department_integrity", {}) if isinstance(AI_MASTER, dict) else {}
+    _dsp_rows_ui_v5084 = list((_dsp_integrity_ui_v5084 or {}).get("rows", []) or [])
+    st.caption(
+        f"Overall: {(_dsp_integrity_ui_v5084 or {}).get('overall_status','UNKNOWN')} | "
+        f"Score: {(_dsp_integrity_ui_v5084 or {}).get('score',0)}% | "
+        f"Canonical Snapshot: {(_dsp_integrity_ui_v5084 or {}).get('snapshot_id','NA')}"
+    )
+    if _dsp_rows_ui_v5084:
+        _render_safe_table(_dsp_rows_ui_v5084, max_rows=20)
+    else:
+        st.info("DSP integrity certificate unavailable; execution remains fail-closed.")
 
 # V27: Visible command hierarchy and CO consolidated case file.
 st.markdown("### 🏛️ AI Organization — CO Command Case File")

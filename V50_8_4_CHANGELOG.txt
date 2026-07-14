@@ -1,0 +1,24 @@
+NIFTY SELLER AI V50.8.4 — DSP EVIDENCE INTEGRITY
+
+Base: V50.8.3 State Freshness & Persistence Integrity
+Architecture preserved: One Snapshot -> DSP evidence -> CO -> AI_MASTER -> one decision/advisor.
+
+Fixes
+1. One canonical option-flow classifier for current option analysis and legacy OI Flow Engine.
+2. First OI snapshot no longer compares current premium with zero. Day and snapshot evidence are explicitly separated.
+3. Option-chain PDF exposes the exact basis, premium delta and OI delta used for every CE/PE flow label.
+4. Snapshot-ready ratio comparison fixed (SNAPSHOT case mismatch).
+5. Pre-open quotes/candles/OI are labelled reference-only; no PULLBACK/RECOVERY confirmation before a live session candle.
+6. Pre-open movement samples are excluded from live movement continuity.
+7. Previous-session pivot date/provenance and traditional formula are exposed and audited.
+8. Single canonical market snapshot ID now flows through DSP, CO, AI_MASTER, UI and PDF; Department-0 payload ID remains diagnostic only.
+9. Every DSP report passes a non-decision Evidence Integrity Gate before CO. Critical failure causes fail-closed WAIT.
+10. BranchBoss respects integrity holds and uses minimum confidence floors for critical trading branches.
+11. Market Journey no longer prints the incomplete 'range pts' placeholder.
+12. Movement recent/stored counts and continuity are separately exposed.
+13. UI and PDF include a DSP Branch Evidence Integrity Certificate.
+
+14. Candidate DSP no longer treats positive OI alone as writing. It consumes the same canonical CE/PE flow code, basis and evidence-readiness used by Option Intelligence; buying/covering evidence is scored as seller risk and unconfirmed evidence remains neutral.
+15. A reproducible test suite covers option-flow truth tables, pre-open isolation, movement continuity, all 17 DSP integrity certificates, BranchBoss fail-closed behaviour, PDF generation, Candidate flow routing and primary DSP smoke execution.
+
+No rules, trading thresholds, strategy weights, ranks, SOP authority or execution authority were delegated to another brain.

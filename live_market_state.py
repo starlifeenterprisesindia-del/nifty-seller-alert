@@ -1,5 +1,5 @@
 """
-Nifty Seller AI - V50.8.3 live market state.
+Nifty Seller AI - V50.8.4 live market state.
 
 Purpose:
 - Preserve same-day compact price/snapshot memory across Streamlit reruns and
@@ -221,6 +221,7 @@ def update_live_market_state(
     option_bias: Any = 0.0,
     pcr: Any = 0.0,
     observed_at: Optional[datetime] = None,
+    market_open: bool = True,
 ) -> Dict[str, Any]:
     """Update compact same-day movement memory and return movement facts."""
     now = _now(observed_at)
@@ -236,6 +237,33 @@ def update_live_market_state(
 
     day = now.strftime("%Y-%m-%d")
     state_key = "v505_live_market_memory"
+
+    # Pre-open/closed quotes are useful for readiness but are not intraday
+    # movement evidence.  Do not append them to the 1/3/5-minute sequence.
+    if not bool(market_open):
+        existing = state.get(state_key, {}) if isinstance(state.get(state_key, {}), Mapping) else {}
+        existing_samples = list(existing.get("samples", []) or [])
+        return {
+            "ready": False,
+            "phase": "PREOPEN_REFERENCE",
+            "label": "Market closed/pre-open: live movement not started",
+            "movement_bias": 0.0,
+            "sample_count": len(existing_samples),
+            "recent_sample_count": 0,
+            "continuity_status": "PREOPEN_BLOCKED",
+            "previous_sample_age_seconds": None,
+            "last_move": 0.0,
+            "move_1m": None,
+            "move_3m": None,
+            "move_5m": None,
+            "session_low": round(price_f, 2),
+            "session_high": round(price_f, 2),
+            "recovery_from_low": 0.0,
+            "pullback_from_high": 0.0,
+            "session_range": 0.0,
+            "range_position_pct": 50.0,
+            "observed_at": now.isoformat(timespec="seconds"),
+        }
     session_memory = state.get(state_key)
     if not isinstance(session_memory, Mapping) or str(session_memory.get("date", "")) != day:
         session_memory = {"date": day, "samples": []}
@@ -250,6 +278,10 @@ def update_live_market_state(
         list(disk_memory.get("samples", []) or []),
         list(session_memory.get("samples", []) or []),
     )
+    # Remove any pre-09:15 samples written by older builds so the opening
+    # sequence starts from the actual cash-market session.
+    session_start = now.replace(hour=9, minute=15, second=0, microsecond=0).timestamp()
+    samples = [item for item in samples if _safe_float(item.get("ts"), 0.0) >= session_start]
     memory = {
         "date": day,
         "samples": samples,
@@ -336,6 +368,7 @@ def update_live_market_state(
         "recent_sample_count": recent_sample_count,
         "continuity_status": "LIVE_SEQUENCE" if continuity_ok else ("GAP_RESET" if len(samples) >= 2 else "FIRST_SAMPLE"),
         "previous_sample_age_seconds": round(previous_age, 1) if previous_sample is not None else None,
+        "maximum_continuity_gap_seconds": 120.0,
         "last_move": last_move,
         "move_1m": move_1m,
         "move_3m": move_3m,

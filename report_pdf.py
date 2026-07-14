@@ -1,4 +1,4 @@
-"""App-native PDF report generator for Nifty Seller AI V50.8.3."""
+"""App-native PDF report generator for Nifty Seller AI V50.8.4."""
 from __future__ import annotations
 
 from io import BytesIO
@@ -101,6 +101,7 @@ def build_ai_report_pdf(report: Mapping[str, Any]) -> bytes:
         ("Strategy Matrix", "strategy_rows"),
         ("Candidate Matrix", "candidate_rows"),
         ("Option Chain Analysis", "option_rows"),
+        ("DSP Branch Evidence Integrity", "branch_integrity_rows"),
         ("Department Status", "department_rows"),
     ):
         rows = _rows(report.get(key, []))

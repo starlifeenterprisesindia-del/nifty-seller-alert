@@ -180,7 +180,7 @@ def build_market_snapshot(ctx, fmt_time_func=None):
     refresh_time = created_at or datetime.now().strftime("%H:%M:%S")
 
     snapshot = {
-        "version": "V20.5 Single Snapshot Authority",
+        "version": "V50.8.4 Single Snapshot Authority",
         "created_at": created_at,
         "market": {
             "status": ctx.get("status", ctx.get("market_status_text", "")),
@@ -230,6 +230,10 @@ def build_market_snapshot(ctx, fmt_time_func=None):
             "pullback_from_high": _safe_float(movement.get("pullback_from_high", 0), 0),
             "movement_bias": _safe_float(movement.get("movement_bias", 0), 0),
             "sample_count": _safe_int(movement.get("sample_count", 0), 0),
+            "recent_sample_count": _safe_int(movement.get("recent_sample_count", movement.get("sample_count", 0)), 0),
+            "continuity_status": str(movement.get("continuity_status", "UNKNOWN")),
+            "previous_sample_age_seconds": movement.get("previous_sample_age_seconds"),
+            "maximum_continuity_gap_seconds": movement.get("maximum_continuity_gap_seconds"),
         },
         "risk": {
             "data_quality": _safe_int(ctx.get("data_quality", 0), 0),
