@@ -1,0 +1,26 @@
+NIFTY SELLER AI V50.8.5 — DEPLOYMENT
+
+1. Download and extract the V50.8.5 ZIP.
+2. Open the extracted folder.
+3. Upload ALL files and folders inside it to the GitHub repository root.
+   Upload tests/ too. It does not run during normal Streamlit use.
+4. app.py must be visible directly in the repository root; do not place the
+   whole release inside an extra outer folder.
+5. Keep existing .streamlit/secrets.toml / Streamlit Cloud secrets unchanged.
+6. Commit the upload and wait for Streamlit to redeploy.
+7. Confirm the page title reads V50.8.5 Institutional Journal + Short Outlook.
+8. Open FII/DII Journal and use Restore/Merge CSV if you have an older backup.
+9. Save one historical date, refresh/reopen the app, and confirm the row loads.
+10. During market hours, confirm the 15m/30m table is below AI FINAL AUTHORITY.
+11. Confirm prediction says SHADOW / INFO ONLY and AI_MASTER action remains the
+    sole execution authority.
+
+Do not upload:
+- .runtime_state/
+- __pycache__/
+- local .streamlit/secrets.toml
+
+Storage warning:
+A Streamlit redeploy may replace local runtime files. Download the FII/DII CSV
+backup regularly. The release can safely merge that backup without deleting
+newer rows.

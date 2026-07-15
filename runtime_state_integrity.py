@@ -65,6 +65,8 @@ PERSIST_KEYS = (
     "v46_true_learning_recommendations",
     "v46_true_learning_archive",
     "v49_master_intelligence_history",
+    "v5085_fii_dii_journal_records",
+    "v5085_short_horizon_forecasts",
 )
 
 LIST_LIMITS = {
@@ -78,6 +80,8 @@ LIST_LIMITS = {
     "v42_institutional_behaviour_history": 16,
     "v43_experience_records": 400,
     "v49_master_intelligence_history": 24,
+    "v5085_fii_dii_journal_records": 60,
+    "v5085_short_horizon_forecasts": 500,
 }
 
 _SEQUENCE_KEYS = {"v43_experience_sequence"}
@@ -179,6 +183,8 @@ def _record_identity(item: Any) -> str:
         "timestamp",
         "time",
         "created_at",
+        "Date",
+        "forecast_id",
     ):
         value = item.get(field)
         if value not in (None, ""):

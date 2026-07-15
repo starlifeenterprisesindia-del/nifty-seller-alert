@@ -1,0 +1,21 @@
+NIFTY SELLER AI V50.8.5 — TEST REPORT
+
+Static / automated results
+- Python compilation: PASS
+- Non-app module import smoke: 47/47 PASS
+- Pytest: 15/15 PASS
+- PDF generation with prediction table: PASS (%PDF output)
+
+Covered tests
+- V50.8.4 option-flow and DSP-integrity tests retained.
+- Shorter FII/DII session copy cannot erase 20-row history.
+- Partial FII/DII update preserves older non-missing fields.
+- Prediction rows total exactly 100%.
+- Prediction cannot mutate AI_MASTER final action.
+- Prediction contains no BUY/SELL/strike authority.
+- Movement continuity gap fails closed to UNAVAILABLE.
+
+Runtime limitation
+- Authenticated live DhanHQ and full Streamlit browser execution were not run
+  in this build environment because Streamlit/Dhan credentials were unavailable.
+  Deployment should be validated with two consecutive live refreshes.

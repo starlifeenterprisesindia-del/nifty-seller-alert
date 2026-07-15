@@ -1,0 +1,45 @@
+NIFTY SELLER AI V50.8.5 — INSTITUTIONAL JOURNAL + SHORT-HORIZON OUTLOOK
+Date: 14-07-2026
+Base: V50.8.4 DSP Evidence Integrity
+
+1) FII/DII protected journal
+- Storage raised from 30 to 60 trading-day rows.
+- Every save is mirrored atomically to data/fii_dii_journal.csv,
+  .runtime_state/fii_dii_journal.csv and .runtime_state/fii_dii_journal.json.
+- Existing rows are merged by Date; a shorter browser/session copy cannot
+  replace a longer history.
+- Missing fields do not erase previously saved fields.
+- Session/shared-state records are merged on load.
+- One-click Clear Journal was removed.
+- Verify/Repair Storage and safe CSV backup merge were added.
+- 5D, 10D, 15D and 30D institutional totals are available internally.
+- Missing institutional days remain unavailable, not artificial zero values.
+
+Important storage boundary:
+Local/runtime mirrors protect browser reconnects and normal app reruns while
+that deployment filesystem remains available. Streamlit redeployment can
+replace its filesystem. Keep the downloadable CSV backup and use Restore/Merge
+CSV after a redeploy unless a future external database is configured.
+
+2) Short-Horizon Market Prediction table
+- New separate table directly below AI FINAL AUTHORITY.
+- Primary horizon: next 15 minutes.
+- Confirmation horizon: next 30 minutes.
+- Shows UP %, DOWN %, RANGE %, dominant outcome, reliability and ATR-based zone.
+- Percentages always total 100.
+- Read-only SHADOW / INFORMATION ONLY architecture.
+- Runs only after AI_MASTER final judgement and uses the same snapshot evidence.
+- Cannot change action, execution permission, strategy, strike, SL or target.
+- Stale quote/option chain, OI hold, critical DSP integrity failure,
+  insufficient samples or movement continuity gap makes outlook unavailable.
+- Opening and lunch zones cap reliability.
+- One official forecast is stored per five-minute bucket.
+- 15m/30m outcomes are evaluated only near the requested time window;
+  late observations are marked MISSED_WINDOW rather than counted as accuracy.
+- Validation remains PROVISIONAL until enough completed cases exist.
+
+3) PDF and state integration
+- The app PDF now includes the Short-Horizon Prediction section.
+- FII/DII journal records and shadow forecast cases are included in bounded
+  runtime-state merge keys.
+- V50.8.4 DSP integrity and option-flow corrections remain intact.

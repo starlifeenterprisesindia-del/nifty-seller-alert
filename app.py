@@ -17,6 +17,23 @@ from option_flow_integrity import classify_option_flow
 from department_integrity import audit_department_reports
 
 try:
+    from institutional_journal import (
+        load_institutional_journal,
+        save_institutional_journal,
+        prepare_upsert_row,
+        journal_stats as persistent_journal_stats,
+    )
+    V5085_INSTITUTIONAL_JOURNAL_READY = True
+except Exception:
+    V5085_INSTITUTIONAL_JOURNAL_READY = False
+
+try:
+    from short_horizon_outlook import build_short_horizon_outlook
+    V5085_SHORT_OUTLOOK_READY = True
+except Exception:
+    V5085_SHORT_OUTLOOK_READY = False
+
+try:
     from live_market_state import (
         update_live_market_state,
         load_previous_snapshot,
@@ -208,7 +225,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_8_4_DSP_EVIDENCE_INTEGRITY_DIAGNOSTIC",
+        "version": "V50_8_5_INSTITUTIONAL_OUTLOOK_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1360,7 +1377,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8.4 DSP Evidence Integrity",
+    page_title="Nifty Seller AI V50.8.5 Institutional Journal + Short Outlook",
     page_icon="🧠",
     layout="wide",
 )
@@ -3373,11 +3390,17 @@ def v102_metric_card(label, value, delta=None):
     )
 
 def v102_load_fii_dii_journal():
-    """Load FII/DII journal and keep schema backward-compatible."""
+    """Load the redundant 60-trading-day institutional journal."""
+    if V5085_INSTITUTIONAL_JOURNAL_READY:
+        try:
+            return load_institutional_journal(st.session_state, max_rows=60)
+        except Exception:
+            pass
     cols = [
         "Date", "FII Cash Cr", "DII Cash Cr",
         "FII Index Futures Contracts", "FII Long %", "FII Short %",
-        "FII Index Futures Bias", "FII Options Bias", "Notes"
+        "FII Index Futures Bias", "FII Options Bias", "Source",
+        "Saved At", "Revision Status", "Notes"
     ]
     try:
         if FII_DII_STORE.exists():
@@ -3385,55 +3408,62 @@ def v102_load_fii_dii_journal():
             for col in cols:
                 if col not in df.columns:
                     df[col] = 0.0 if col in ["FII Index Futures Contracts", "FII Long %", "FII Short %"] else ""
-            if "Date" in df.columns:
-                df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
-            return df[cols]
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce").dt.date
+            return df[cols].dropna(subset=["Date"]).sort_values("Date").tail(60)
     except Exception:
         pass
     return pd.DataFrame(columns=cols)
 
 def v102_save_fii_dii_journal(df):
+    """Monotonic save: a shorter browser session cannot erase older rows."""
     try:
-        FII_DII_STORE.parent.mkdir(parents=True, exist_ok=True)
         df2 = df.copy()
-        if "Date" in df2.columns:
-            df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce").dt.date.astype(str)
-        df2.to_csv(FII_DII_STORE, index=False)
+        if "Source" not in df2.columns:
+            df2["Source"] = "MANUAL / LEGACY"
+        if "Saved At" not in df2.columns:
+            df2["Saved At"] = datetime.now(IST).isoformat(timespec="seconds")
+        else:
+            _saved_mask = df2["Saved At"].astype(str).str.strip().isin(["", "nan", "None"])
+            df2.loc[_saved_mask, "Saved At"] = datetime.now(IST).isoformat(timespec="seconds")
+        if "Revision Status" not in df2.columns:
+            df2["Revision Status"] = "CURRENT"
+        if V5085_INSTITUTIONAL_JOURNAL_READY:
+            return bool(save_institutional_journal(df2, st.session_state, max_rows=60))
+        FII_DII_STORE.parent.mkdir(parents=True, exist_ok=True)
+        df2["Date"] = pd.to_datetime(df2["Date"], errors="coerce").dt.date.astype(str)
+        df2.sort_values("Date").tail(60).to_csv(FII_DII_STORE, index=False)
         return True
     except Exception:
         return False
 
-def v102_journal_stats(df, lookback=30):
+
+def v102_journal_stats(df, lookback=60):
+    if V5085_INSTITUTIONAL_JOURNAL_READY:
+        try:
+            stats = dict(persistent_journal_stats(df, lookback=max(30, int(lookback))))
+            fii5 = float(stats.get("fii_5", 0) or 0)
+            dii5 = float(stats.get("dii_5", 0) or 0)
+            fii10 = float(stats.get("fii_10", 0) or 0)
+            bias = 0.0
+            bias += 35 if fii5 > 1000 else -35 if fii5 < -1000 else fii5 / 30.0
+            bias += 15 if dii5 > 1000 else -15 if dii5 < -1000 else dii5 / 70.0
+            bias += 20 if fii10 > 2000 else -20 if fii10 < -2000 else fii10 / 100.0
+            stats["bias"] = signed_clamp(bias)
+            stats["label"] = bias_label(stats["bias"]) if stats.get("rows", 0) else "No data"
+            return stats
+        except Exception:
+            pass
     if df is None or df.empty:
-        return {"rows": 0, "fii_5": 0.0, "dii_5": 0.0, "fii_10": 0.0, "dii_10": 0.0, "bias": 0.0, "label": "No data"}
+        return {"rows": 0, "fii_5": 0.0, "dii_5": 0.0, "fii_10": 0.0, "dii_10": 0.0, "fii_15": 0.0, "dii_15": 0.0, "fii_30": 0.0, "dii_30": 0.0, "bias": 0.0, "label": "No data"}
     d = df.copy()
     d["Date"] = pd.to_datetime(d["Date"], errors="coerce")
-    d = d.dropna(subset=["Date"]).sort_values("Date").tail(int(lookback))
+    d = d.dropna(subset=["Date"]).sort_values("Date").tail(max(30, int(lookback)))
     for col in ["FII Cash Cr", "DII Cash Cr"]:
-        d[col] = pd.to_numeric(d[col], errors="coerce").fillna(0.0)
-    last5 = d.tail(5)
-    last10 = d.tail(10)
-    fii5 = float(last5["FII Cash Cr"].sum()) if not last5.empty else 0.0
-    dii5 = float(last5["DII Cash Cr"].sum()) if not last5.empty else 0.0
-    fii10 = float(last10["FII Cash Cr"].sum()) if not last10.empty else 0.0
-    dii10 = float(last10["DII Cash Cr"].sum()) if not last10.empty else 0.0
-    bias = 0.0
-    bias += 35 if fii5 > 1000 else -35 if fii5 < -1000 else fii5 / 30.0
-    bias += 15 if dii5 > 1000 else -15 if dii5 < -1000 else dii5 / 70.0
-    bias += 20 if fii10 > 2000 else -20 if fii10 < -2000 else fii10 / 100.0
-    bias = signed_clamp(bias)
-    label = bias_label(bias)
-    return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "fii_10": fii10, "dii_10": dii10, "bias": bias, "label": label}
-
-
-
-
-# =========================================================
-# V13 STABILITY + LIVE UX HELPERS
-# =========================================================
-def v13_is_auth_error(*messages):
-    text = " ".join(str(m) for m in messages).lower()
-    return any(x in text for x in ["401", "authentication failed", "token invalid", "client id or token invalid"])
+        d[col] = pd.to_numeric(d[col], errors="coerce")
+    def _sum(col, n): return float(d.tail(n)[col].dropna().sum())
+    fii5, dii5, fii10, dii10 = _sum("FII Cash Cr",5), _sum("DII Cash Cr",5), _sum("FII Cash Cr",10), _sum("DII Cash Cr",10)
+    bias = signed_clamp((35 if fii5 > 1000 else -35 if fii5 < -1000 else fii5/30.0) + (15 if dii5 > 1000 else -15 if dii5 < -1000 else dii5/70.0) + (20 if fii10 > 2000 else -20 if fii10 < -2000 else fii10/100.0))
+    return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "fii_10": fii10, "dii_10": dii10, "fii_15": _sum("FII Cash Cr",15), "dii_15": _sum("DII Cash Cr",15), "fii_30": _sum("FII Cash Cr",30), "dii_30": _sum("DII Cash Cr",30), "bias": bias, "label": bias_label(bias)}
 
 
 def v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result):
@@ -3530,7 +3560,8 @@ def v135_fut_bias_score(long_pct, short_pct, manual_bias="Neutral"):
 
 def v135_safe_float_from_row(row, key, default=0.0):
     try:
-        return float((row or {}).get(key, default) or default)
+        value = float((row or {}).get(key, default) or default)
+        return value if pd.notna(value) else float(default)
     except Exception:
         return default
 
@@ -4028,7 +4059,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8.4 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.5 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -4253,18 +4284,21 @@ with st.sidebar.expander("5️⃣ FII / DII — Date-wise Manual", expanded=True
             "FII Short %": fii_short_pct,
             "FII Index Futures Bias": fii_index_futures_bias,
             "FII Options Bias": "Neutral",
+            "Source": "DATE_WISE_MANUAL",
+            "Saved At": datetime.now(IST).isoformat(timespec="seconds"),
+            "Revision Status": "CURRENT",
             "Notes": "Saved from date-wise manual fields",
         }])
         _save_df = pd.concat([_quick_journal_df, _new_row], ignore_index=True)
         _save_df["Date"] = pd.to_datetime(_save_df["Date"], errors="coerce")
-        _save_df = _save_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
+        _save_df = _save_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(60)
         if v102_save_fii_dii_journal(_save_df):
             st.success("Saved. Ab date change karoge to usi date ka data load hoga.")
         else:
             st.error("Save failed.")
     st.caption("Bug fix: har date ka data alag save/load hoga; 02-07 aur 03-07 mix nahi honge.")
 
-with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=False):
+with st.sidebar.expander("5B 📒 FII/DII Journal — 60 Trading Day Protected Storage", expanded=False):
     fii_journal_df = v102_load_fii_dii_journal()
     journal_date = st.date_input("Date", value=v134_latest_journal_date(fii_journal_df), key="v134_journal_date")
     _journal_existing = v134_journal_row_by_date(fii_journal_df, journal_date)
@@ -4296,19 +4330,23 @@ with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=
             "FII Short %": journal_short_pct,
             "FII Index Futures Bias": journal_fut_bias,
             "FII Options Bias": journal_opt_bias,
+            "Source": "JOURNAL_MANUAL",
+            "Saved At": datetime.now(IST).isoformat(timespec="seconds"),
+            "Revision Status": "CURRENT",
             "Notes": journal_notes,
         }])
         fii_journal_df = pd.concat([fii_journal_df, new_row], ignore_index=True)
         fii_journal_df["Date"] = pd.to_datetime(fii_journal_df["Date"], errors="coerce")
-        fii_journal_df = fii_journal_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(30)
+        fii_journal_df = fii_journal_df.dropna(subset=["Date"]).drop_duplicates(subset=["Date"], keep="last").sort_values("Date").tail(60)
         if v102_save_fii_dii_journal(fii_journal_df):
-            st.success("Saved. Last 30 trading days retained.")
+            st.success("Saved in protected mirrors. Last 60 trading days retained.")
         else:
             st.error("Save failed. Use download backup.")
-    if col_j2.button("Clear Journal"):
-        fii_journal_df = fii_journal_df.iloc[0:0]
-        v102_save_fii_dii_journal(fii_journal_df)
-        st.warning("Journal cleared.")
+    if col_j2.button("Verify / Repair Storage"):
+        if v102_save_fii_dii_journal(fii_journal_df):
+            st.success("CSV + runtime mirrors verified. Existing rows were merged, not replaced.")
+        else:
+            st.error("Storage verification failed. Download the CSV backup now.")
     journal_stats = v102_journal_stats(fii_journal_df)
     st.caption(f"Rows: {journal_stats['rows']} | 5D FII: ₹{journal_stats['fii_5']:,.0f} Cr | 5D DII: ₹{journal_stats['dii_5']:,.0f} Cr")
     if not fii_journal_df.empty:
@@ -4318,6 +4356,18 @@ with st.sidebar.expander("5B 📒 FII/DII Journal — 30 Day Storage", expanded=
             file_name="fii_dii_journal_backup.csv",
             mime="text/csv",
         )
+    _fii_restore_file = st.file_uploader("Restore / merge FII-DII CSV backup", type=["csv"], key="v5085_fii_restore")
+    if _fii_restore_file is not None and st.button("Merge Backup Safely", key="v5085_merge_fii_backup"):
+        try:
+            _restore_df = pd.read_csv(_fii_restore_file)
+            _merged_restore = pd.concat([fii_journal_df, _restore_df], ignore_index=True)
+            if v102_save_fii_dii_journal(_merged_restore):
+                st.success("Backup merged by Date. Existing history was not deleted.")
+            else:
+                st.error("Backup merge failed.")
+        except Exception as _restore_error:
+            st.error("Backup file could not be read: " + str(_restore_error))
+    st.caption("Protection: no one-click clear button. Missing days stay unavailable; they are not converted to zero.")
 
 with st.sidebar.expander("6️⃣ News Risk", expanded=True):
     manual_news_risk = st.selectbox("Manual fallback", ["Low", "Medium", "High", "Critical"])
@@ -8199,7 +8249,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8.4_DSP_EVIDENCE_INTEGRITY",
+            "version": "V50.8.5_INSTITUTIONAL_OUTLOOK",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8276,7 +8326,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_8_4_DSP_EVIDENCE_INTEGRITY",
+                "version": "V50_8_5_INSTITUTIONAL_OUTLOOK",
                 "pipeline_status": "READY" if (_department_integrity_v5084 or {}).get("critical_ok", False) else "INTEGRITY_HOLD",
                 "department_integrity": dict(_department_integrity_v5084 or {}),
                 "pipeline_error": "",
@@ -8411,7 +8461,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8.4_DSP_EVIDENCE_INTEGRITY",
+            "version": "V50.8.5_INSTITUTIONAL_OUTLOOK",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8436,7 +8486,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8.4_DSP_EVIDENCE_INTEGRITY",
+        "version": "V50.8.5_INSTITUTIONAL_OUTLOOK",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8455,6 +8505,41 @@ except Exception as _v24_pipeline_error:
         ),
     })
     AI_MASTER.setdefault("warnings", []).append("V24 department pipeline blocked: " + _v504_runtime_reason)
+
+
+# =========================================================
+# V50.8.5 SHORT-HORIZON OUTLOOK — READ ONLY AFTER AI_MASTER
+# =========================================================
+# Golden Rule 22 lock: this block runs only after final AI_MASTER judgement.
+# It cannot alter action, execution permission, strategy, candidate, SL or target.
+try:
+    if V5085_SHORT_OUTLOOK_READY:
+        _outlook_quote_age_v5085 = v5083_payload_age_seconds(dhan_bundle) if "v5083_payload_age_seconds" in globals() else None
+        _outlook_option_age_v5085 = v5083_payload_age_seconds(option_chain) if "v5083_payload_age_seconds" in globals() else None
+        _short_outlook_v5085 = build_short_horizon_outlook(
+            ai_master=AI_MASTER if isinstance(AI_MASTER, dict) else {},
+            market_snapshot=market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {},
+            movement=AI_MASTER.get("movement", live_movement if isinstance(locals().get("live_movement", {}), dict) else {}),
+            current_price=float(price),
+            atr_points=float(atr5),
+            observed_at=datetime.now(IST),
+            market_open=bool(str(market_text) == "Market Open"),
+            state=st.session_state,
+            quote_age_seconds=_outlook_quote_age_v5085,
+            option_age_seconds=_outlook_option_age_v5085,
+        )
+    else:
+        _short_outlook_v5085 = {
+            "status": "MODULE_MISSING", "rows": [],
+            "authority_note": "Outlook module unavailable; AI_MASTER remains unaffected.",
+        }
+except Exception as _outlook_error_v5085:
+    _short_outlook_v5085 = {
+        "status": "ERROR", "rows": [],
+        "freshness_reasons": [str(_outlook_error_v5085)],
+        "authority_note": "Outlook failed safely; AI_MASTER remains unaffected.",
+    }
+AI_MASTER["short_horizon_outlook"] = _short_outlook_v5085
 
 
 # =========================================================
@@ -8724,7 +8809,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.4 DSP Evidence Integrity</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.5 Institutional Journal + Short Outlook</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -8886,7 +8971,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.8.4 Live Market + DSP Integrity Gate")
+st.markdown("### ✅ V50.8.5 Live Market + DSP Integrity Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -8961,6 +9046,25 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+st.markdown("### 🔭 Short-Horizon Market Prediction — Shadow / Information Only")
+_outlook_ui_v5085 = AI_MASTER.get("short_horizon_outlook", {}) if isinstance(AI_MASTER, dict) else {}
+_outlook_rows_v5085 = list((_outlook_ui_v5085 or {}).get("rows", []) or [])
+if _outlook_rows_v5085:
+    _render_safe_table(_outlook_rows_v5085, max_rows=2)
+else:
+    st.info("15m/30m outlook unavailable until fresh continuous market evidence is ready.")
+_val15_v5085 = (_outlook_ui_v5085 or {}).get("validation_15m", {}) or {}
+_val30_v5085 = (_outlook_ui_v5085 or {}).get("validation_30m", {}) or {}
+st.caption(
+    f"15m completed: {_val15_v5085.get('completed',0)} | accuracy: {_val15_v5085.get('accuracy','PROVISIONAL')} | "
+    f"30m completed: {_val30_v5085.get('completed',0)} | accuracy: {_val30_v5085.get('accuracy','PROVISIONAL')}"
+)
+if (_outlook_ui_v5085 or {}).get("supporting_evidence"):
+    st.caption("Dominant evidence: " + " | ".join((_outlook_ui_v5085 or {}).get("supporting_evidence", [])[:3]))
+if (_outlook_ui_v5085 or {}).get("conflicts"):
+    st.warning("Prediction conflict: " + " | ".join((_outlook_ui_v5085 or {}).get("conflicts", [])[:2]))
+st.caption((_outlook_ui_v5085 or {}).get("authority_note", "Information only — AI_MASTER controls execution."))
+
 try:
     if not _v204_brain_sync.get("fresh", True):
         st.warning("⚠️ Brain Sync caution: " + " | ".join(_v204_brain_sync.get("stale_reasons", []) or ["Data freshness check failed"]))
@@ -9023,7 +9127,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.8.4"),
+                "Version": AI_MASTER.get("version", "V50.8.5"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),
@@ -9051,6 +9155,7 @@ try:
                 "Recovery From Low": _movement_pdf_v505.get("recovery_from_low", 0),
             },
             "source_rows": _pdf_source_rows_v505,
+            "outlook_rows": (AI_MASTER.get("short_horizon_outlook", {}) or {}).get("rows", []),
             "evidence_rows": AI_MASTER.get("evidence_rows", []),
             "strategy_rows": AI_MASTER.get("strategy_rows", []),
             "candidate_rows": AI_MASTER.get("candidate_rows", []),
@@ -9515,7 +9620,7 @@ with st.expander("🏛️ FII / DII Smart Money", expanded=False):
     st.write(f"Smart Money Bias: **{smart_money_bias:+.0f}/100 ({bias_label(smart_money_bias)})**")
     if locals().get('fii_short_pct', 0) >= 70 and fii_today > 0:
         st.warning("FII cash buying hai, lekin index futures short % high hai — mixed/caution signal.")
-    st.caption(f"Journal storage: last 30 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
+    st.caption(f"Journal storage: protected last 60 trading days | saved rows: {_fii_stats.get('rows', 0)} | 10D FII ₹{_fii_stats.get('fii_10', 0):,.0f} Cr | 10D DII ₹{_fii_stats.get('dii_10', 0):,.0f} Cr")
     if locals().get("fii_journal_df", pd.DataFrame()).shape[0] > 0:
         _render_safe_table(locals().get("fii_journal_df").sort_values("Date", ascending=False).head(10))
 
@@ -9568,3 +9673,5 @@ st.markdown(
     "<div class='small-note'>V20 Clean Edition: duplicate/debug UI removed; trading screen is focused and mobile friendly. Disclaimer: Decision-support only. OI/price labels are probabilistic inferences, not proof of buyer/seller identity. Use hedges, live chart confirmation, liquidity checks and strict risk limits.</div>",
     unsafe_allow_html=True,
 )
+
+# Compatibility lineage marker: V50.8.4_DSP_EVIDENCE_INTEGRITY
