@@ -1,0 +1,13 @@
+V50.8.5.1 DEPLOYMENT
+
+1. Extract the ZIP.
+2. Open the folder inside the ZIP.
+3. Upload/replace every file and folder in the GitHub repository root, including tests.
+4. Confirm app.py is visible directly in the repository root, not inside an extra folder.
+5. Commit the changes and wait for Streamlit to reboot.
+6. Open the app and press Refresh once.
+
+Expected result
+- The NameError for v13_is_auth_error is gone.
+- Dashboard loads as V50.8.5.1.
+- FII/DII protected journal and 15m/30m shadow prediction remain enabled.

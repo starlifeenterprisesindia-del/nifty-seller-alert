@@ -225,7 +225,7 @@ def _v504_diagnostic_command_hierarchy(reason, *, stage, import_errors=None):
             "training_status": "BLOCKED", "lesson": "Restore complete project files and rerun diagnostics.",
         }
     return {
-        "version": "V50_8_5_INSTITUTIONAL_OUTLOOK_DIAGNOSTIC",
+        "version": "V50_8_5_1_RUNTIME_HOTFIX_DIAGNOSTIC",
         "pipeline_status": stage,
         "pipeline_error": str(reason)[:700],
         "import_errors": import_errors,
@@ -1377,7 +1377,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8.5 Institutional Journal + Short Outlook",
+    page_title="Nifty Seller AI V50.8.5.1 Runtime Hotfix",
     page_icon="🧠",
     layout="wide",
 )
@@ -3466,6 +3466,25 @@ def v102_journal_stats(df, lookback=60):
     return {"rows": len(d), "fii_5": fii5, "dii_5": dii5, "fii_10": fii10, "dii_10": dii10, "fii_15": _sum("FII Cash Cr",15), "dii_15": _sum("DII Cash Cr",15), "fii_30": _sum("FII Cash Cr",30), "dii_30": _sum("DII Cash Cr",30), "bias": bias, "label": bias_label(bias)}
 
 
+# =========================================================
+# V13 STABILITY + LIVE UX HELPERS
+# =========================================================
+def v13_is_auth_error(*messages):
+    """Return True when Dhan responses indicate an expired/invalid login token."""
+    text = " ".join(str(message) for message in messages if message is not None).lower()
+    auth_markers = (
+        "401",
+        "authentication failed",
+        "token invalid",
+        "invalid token",
+        "token expired",
+        "access token expired",
+        "client id or token invalid",
+        "unauthorized",
+    )
+    return any(marker in text for marker in auth_markers)
+
+
 def v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result):
     messages = [
         (dhan_bundle or {}).get("message", ""),
@@ -4059,7 +4078,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8.5 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.5.1 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -8249,7 +8268,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8.5_INSTITUTIONAL_OUTLOOK",
+            "version": "V50.8.5.1_RUNTIME_HOTFIX",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8461,7 +8480,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8.5_INSTITUTIONAL_OUTLOOK",
+            "version": "V50.8.5.1_RUNTIME_HOTFIX",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8486,7 +8505,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8.5_INSTITUTIONAL_OUTLOOK",
+        "version": "V50.8.5.1_RUNTIME_HOTFIX",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8809,7 +8828,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.5 Institutional Journal + Short Outlook</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.5.1 Runtime Hotfix</div>", unsafe_allow_html=True)
 
 
 # =========================================================

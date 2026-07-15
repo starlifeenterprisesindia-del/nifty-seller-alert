@@ -1,0 +1,21 @@
+NIFTY SELLER AI V50.8.5.1 — HOTFIX TEST REPORT
+
+Result
+- Python compilation: PASS
+- Full automated test suite: 17/17 PASS
+- V50.8.4 DSP integrity tests retained: PASS
+- V50.8.5 journal and short-outlook tests retained: PASS
+- New runtime regression checks: PASS
+  - v13_is_auth_error exists
+  - helper is defined before v13_source_text uses it
+  - 401/expired-token messages are detected
+  - normal Dhan live status is not misclassified
+- Function inventory comparison against V50.8.4: no legacy top-level helper remains missing
+
+Root cause verified
+- v13_is_auth_error was absent from V50.8.5 app.py, while v13_source_text called it.
+- The helper has been restored without changing decision logic.
+
+Live limitation
+- Authenticated DhanHQ market data is not available in this build environment.
+- After deployment, dashboard startup and one live refresh should be checked on Streamlit.

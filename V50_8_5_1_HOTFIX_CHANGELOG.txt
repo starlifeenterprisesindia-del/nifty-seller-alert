@@ -1,0 +1,14 @@
+NIFTY SELLER AI V50.8.5.1 — RUNTIME HOTFIX
+
+Root cause
+- During the V50.8.5 FII/DII journal edit, the existing v13_is_auth_error helper was accidentally removed while v13_source_text continued calling it.
+- Streamlit therefore stopped at app.py line 3477 with NameError before the dashboard could render.
+
+Correction
+- Restored v13_is_auth_error before v13_source_text.
+- Kept the original authentication checks and added safe recognition for invalid/expired/unauthorized token messages.
+- Added a regression test that verifies the helper exists, is defined before use, and correctly classifies authentication messages.
+
+Scope
+- No AI rule, threshold, weight, strategy, candidate, prediction percentage, FII/DII logic, CO authority, or AI_MASTER authority was changed.
+- This is a minimal runtime repair on top of V50.8.5.
