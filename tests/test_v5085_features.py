@@ -90,12 +90,14 @@ def test_outlook_is_read_only_and_probabilities_sum_to_100(tmp_path, monkeypatch
     )
     assert result["status"] == "AVAILABLE"
     assert master["final_action"] == original_action == "WAIT"
-    assert len(result["rows"]) == 2
-    for row in result["rows"]:
-        assert row["UP %"] + row["DOWN %"] + row["RANGE %"] == 100
+    assert len(result["rows"]) >= 10
+    for key in ("horizon_15m", "horizon_30m"):
+        row = result[key]
+        assert row["up_probability"] + row["down_probability"] + row["range_probability"] == 100
         assert "BUY" not in str(row).upper()
         assert "SELL" not in str(row).upper()
     assert result["authority_note"].startswith("Information only")
+    assert result["authority_contract"]["feedback_to_ai_master"] is False
 
 
 def test_outlook_fails_closed_on_continuity_gap(tmp_path, monkeypatch):
@@ -109,4 +111,5 @@ def test_outlook_fails_closed_on_continuity_gap(tmp_path, monkeypatch):
         market_open=True, state={}, quote_age_seconds=2, option_age_seconds=1,
     )
     assert result["status"] == "UNAVAILABLE"
-    assert all(row["Most Likely"] == "UNAVAILABLE" for row in result["rows"])
+    assert result["horizon_15m"] == {}
+    assert any("UNAVAILABLE" in str(row) for row in result["rows"])

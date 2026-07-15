@@ -1,6 +1,7 @@
 import os
 import gc
 import importlib
+from copy import deepcopy
 from io import StringIO
 from datetime import datetime, timedelta
 from urllib.parse import quote
@@ -28,10 +29,10 @@ except Exception:
     V5085_INSTITUTIONAL_JOURNAL_READY = False
 
 try:
-    from short_horizon_outlook import build_short_horizon_outlook
-    V5085_SHORT_OUTLOOK_READY = True
+    from short_horizon_outlook import build_market_path_forecast
+    V5086_MARKET_PATH_READY = True
 except Exception:
-    V5085_SHORT_OUTLOOK_READY = False
+    V5086_MARKET_PATH_READY = False
 
 try:
     from live_market_state import (
@@ -1377,7 +1378,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8.5.1 Runtime Hotfix",
+    page_title="Nifty Seller AI V50.8.6 Market Path Forecast",
     page_icon="🧠",
     layout="wide",
 )
@@ -4078,7 +4079,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8.5.1 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.6 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -8268,7 +8269,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8.5.1_RUNTIME_HOTFIX",
+            "version": "V50.8.6_MARKET_PATH_FORECAST",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8345,7 +8346,7 @@ try:
             },
             "v24_trace": _v24_decision.trace,
             "command_hierarchy": {
-                "version": "V50_8_5_INSTITUTIONAL_OUTLOOK",
+                "version": "V50_8_6_MARKET_PATH_FORECAST",
                 "pipeline_status": "READY" if (_department_integrity_v5084 or {}).get("critical_ok", False) else "INTEGRITY_HOLD",
                 "department_integrity": dict(_department_integrity_v5084 or {}),
                 "pipeline_error": "",
@@ -8480,7 +8481,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8.5.1_RUNTIME_HOTFIX",
+            "version": "V50.8.6_MARKET_PATH_FORECAST",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8505,7 +8506,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8.5.1_RUNTIME_HOTFIX",
+        "version": "V50.8.6_MARKET_PATH_FORECAST",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8527,38 +8528,63 @@ except Exception as _v24_pipeline_error:
 
 
 # =========================================================
-# V50.8.5 SHORT-HORIZON OUTLOOK — READ ONLY AFTER AI_MASTER
+# V50.8.6 MARKET PATH FORECAST — READ ONLY AFTER AI_MASTER
 # =========================================================
 # Golden Rule 22 lock: this block runs only after final AI_MASTER judgement.
-# It cannot alter action, execution permission, strategy, candidate, SL or target.
+# It receives deep copies, performs zero data fetches and cannot alter action,
+# execution permission, strategy, candidate, SL or target.
 try:
-    if V5085_SHORT_OUTLOOK_READY:
-        _outlook_quote_age_v5085 = v5083_payload_age_seconds(dhan_bundle) if "v5083_payload_age_seconds" in globals() else None
-        _outlook_option_age_v5085 = v5083_payload_age_seconds(option_chain) if "v5083_payload_age_seconds" in globals() else None
-        _short_outlook_v5085 = build_short_horizon_outlook(
-            ai_master=AI_MASTER if isinstance(AI_MASTER, dict) else {},
-            market_snapshot=market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {},
-            movement=AI_MASTER.get("movement", live_movement if isinstance(locals().get("live_movement", {}), dict) else {}),
+    _forecast_locked_keys_v5086 = (
+        "final_action", "execution_status", "confidence", "decision_confidence",
+        "direction_confidence", "strategy", "strategy_scores", "ce_plan", "pe_plan",
+        "candidate_rows", "strategy_rows",
+    )
+    _forecast_authority_before_v5086 = {
+        _k: deepcopy(AI_MASTER.get(_k)) for _k in _forecast_locked_keys_v5086
+    } if isinstance(AI_MASTER, dict) else {}
+    if V5086_MARKET_PATH_READY:
+        _forecast_quote_age_v5086 = v5083_payload_age_seconds(dhan_bundle) if "v5083_payload_age_seconds" in globals() else None
+        _forecast_option_age_v5086 = v5083_payload_age_seconds(option_chain) if "v5083_payload_age_seconds" in globals() else None
+        _market_path_v5086 = build_market_path_forecast(
+            ai_master=deepcopy(AI_MASTER if isinstance(AI_MASTER, dict) else {}),
+            market_snapshot=deepcopy(market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {}),
+            movement=deepcopy(AI_MASTER.get("movement", live_movement if isinstance(locals().get("live_movement", {}), dict) else {})),
             current_price=float(price),
             atr_points=float(atr5),
             observed_at=datetime.now(IST),
             market_open=bool(str(market_text) == "Market Open"),
             state=st.session_state,
-            quote_age_seconds=_outlook_quote_age_v5085,
-            option_age_seconds=_outlook_option_age_v5085,
+            quote_age_seconds=_forecast_quote_age_v5086,
+            option_age_seconds=_forecast_option_age_v5086,
+            support_level=float(nearest_support) if locals().get("nearest_support") is not None else None,
+            resistance_level=float(nearest_resistance) if locals().get("nearest_resistance") is not None else None,
+            support_source=str((_support_barrier_v5082 or {}).get("source", "Verified support")) if isinstance(locals().get("_support_barrier_v5082", {}), dict) else "Verified support",
+            resistance_source=str((_resistance_barrier_v5082 or {}).get("source", "Verified resistance")) if isinstance(locals().get("_resistance_barrier_v5082", {}), dict) else "Verified resistance",
         )
     else:
-        _short_outlook_v5085 = {
+        _market_path_v5086 = {
             "status": "MODULE_MISSING", "rows": [],
-            "authority_note": "Outlook module unavailable; AI_MASTER remains unaffected.",
+            "authority_note": "Market Path module unavailable; AI_MASTER remains unaffected.",
         }
-except Exception as _outlook_error_v5085:
-    _short_outlook_v5085 = {
+    _forecast_authority_after_v5086 = {
+        _k: deepcopy(AI_MASTER.get(_k)) for _k in _forecast_locked_keys_v5086
+    } if isinstance(AI_MASTER, dict) else {}
+    if _forecast_authority_before_v5086 != _forecast_authority_after_v5086:
+        # Defensive fail-closed certificate. The forecast is discarded rather
+        # than allowing any suspected feedback into the final authority.
+        _market_path_v5086 = {
+            "status": "AUTHORITY_GUARD_FAIL",
+            "rows": [],
+            "freshness_reasons": ["AI_MASTER locked fields changed during forecast build"],
+            "authority_note": "Forecast discarded; AI_MASTER final decision remains authoritative.",
+        }
+except Exception as _forecast_error_v5086:
+    _market_path_v5086 = {
         "status": "ERROR", "rows": [],
-        "freshness_reasons": [str(_outlook_error_v5085)],
-        "authority_note": "Outlook failed safely; AI_MASTER remains unaffected.",
+        "freshness_reasons": [str(_forecast_error_v5086)],
+        "authority_note": "Market Path forecast failed safely; AI_MASTER remains unaffected.",
     }
-AI_MASTER["short_horizon_outlook"] = _short_outlook_v5085
+AI_MASTER["market_path_forecast"] = _market_path_v5086
 
 
 # =========================================================
@@ -8828,7 +8854,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.5.1 Runtime Hotfix</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.6 Market Path Forecast</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -9065,24 +9091,35 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
-st.markdown("### 🔭 Short-Horizon Market Prediction — Shadow / Information Only")
-_outlook_ui_v5085 = AI_MASTER.get("short_horizon_outlook", {}) if isinstance(AI_MASTER, dict) else {}
-_outlook_rows_v5085 = list((_outlook_ui_v5085 or {}).get("rows", []) or [])
-if _outlook_rows_v5085:
-    _render_safe_table(_outlook_rows_v5085, max_rows=2)
+st.markdown("### 🧭 MARKET PATH FORECAST — 15m Primary / 30m Confirmation")
+_market_path_ui_v5086 = AI_MASTER.get("market_path_forecast", {}) if isinstance(AI_MASTER, dict) else {}
+_market_path_rows_v5086 = list((_market_path_ui_v5086 or {}).get("rows", []) or [])
+if _market_path_rows_v5086:
+    _render_safe_table(_market_path_rows_v5086, max_rows=20)
 else:
-    st.info("15m/30m outlook unavailable until fresh continuous market evidence is ready.")
-_val15_v5085 = (_outlook_ui_v5085 or {}).get("validation_15m", {}) or {}
-_val30_v5085 = (_outlook_ui_v5085 or {}).get("validation_30m", {}) or {}
+    st.info("Market Path Forecast unavailable until fresh continuous same-snapshot evidence is ready.")
+_val15_v5086 = (_market_path_ui_v5086 or {}).get("validation_15m", {}) or {}
+_val30_v5086 = (_market_path_ui_v5086 or {}).get("validation_30m", {}) or {}
 st.caption(
-    f"15m completed: {_val15_v5085.get('completed',0)} | accuracy: {_val15_v5085.get('accuracy','PROVISIONAL')} | "
-    f"30m completed: {_val30_v5085.get('completed',0)} | accuracy: {_val30_v5085.get('accuracy','PROVISIONAL')}"
+    f"15m completed: {_val15_v5086.get('completed',0)} | direction accuracy: {_val15_v5086.get('accuracy','PROVISIONAL')} | zone accuracy: {_val15_v5086.get('zone_accuracy','PROVISIONAL')} | "
+    f"30m completed: {_val30_v5086.get('completed',0)} | direction accuracy: {_val30_v5086.get('accuracy','PROVISIONAL')} | zone accuracy: {_val30_v5086.get('zone_accuracy','PROVISIONAL')}"
 )
-if (_outlook_ui_v5085 or {}).get("supporting_evidence"):
-    st.caption("Dominant evidence: " + " | ".join((_outlook_ui_v5085 or {}).get("supporting_evidence", [])[:3]))
-if (_outlook_ui_v5085 or {}).get("conflicts"):
-    st.warning("Prediction conflict: " + " | ".join((_outlook_ui_v5085 or {}).get("conflicts", [])[:2]))
-st.caption((_outlook_ui_v5085 or {}).get("authority_note", "Information only — AI_MASTER controls execution."))
+if (_market_path_ui_v5086 or {}).get("likely_path_summary"):
+    st.info((_market_path_ui_v5086 or {}).get("likely_path_summary"))
+if (_market_path_ui_v5086 or {}).get("supporting_evidence"):
+    st.caption("Dominant approved evidence: " + " | ".join((_market_path_ui_v5086 or {}).get("supporting_evidence", [])[:3]))
+if (_market_path_ui_v5086 or {}).get("conflicts"):
+    st.warning("Forecast conflict: " + " | ".join((_market_path_ui_v5086 or {}).get("conflicts", [])[:2]))
+_authority_contract_v5086 = (_market_path_ui_v5086 or {}).get("authority_contract", {}) or {}
+if _authority_contract_v5086:
+    _authority_ok_v5086 = bool(_authority_contract_v5086.get("same_snapshot")) and bool(_authority_contract_v5086.get("authority_intact")) and not bool(_authority_contract_v5086.get("feedback_to_ai_master"))
+    st.caption(
+        ("✅ One-Brain Authority Lock PASS — " if _authority_ok_v5086 else "⚠️ One-Brain Authority Lock HOLD — ")
+        + str((_market_path_ui_v5086 or {}).get("authority_note", "Information only — AI_MASTER controls execution."))
+    )
+else:
+    st.caption((_market_path_ui_v5086 or {}).get("authority_note", "Information only — AI_MASTER controls execution."))
+
 
 try:
     if not _v204_brain_sync.get("fresh", True):
@@ -9146,7 +9183,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.8.5"),
+                "Version": AI_MASTER.get("version", "V50.8.6"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),
@@ -9174,7 +9211,10 @@ try:
                 "Recovery From Low": _movement_pdf_v505.get("recovery_from_low", 0),
             },
             "source_rows": _pdf_source_rows_v505,
-            "outlook_rows": (AI_MASTER.get("short_horizon_outlook", {}) or {}).get("rows", []),
+            "market_path_rows": (AI_MASTER.get("market_path_forecast", {}) or {}).get("rows", []),
+            "market_path_summary": (AI_MASTER.get("market_path_forecast", {}) or {}).get("likely_path_summary", ""),
+            "market_path_authority_note": (AI_MASTER.get("market_path_forecast", {}) or {}).get("authority_note", ""),
+            "market_path_authority_contract": (AI_MASTER.get("market_path_forecast", {}) or {}).get("authority_contract", {}),
             "evidence_rows": AI_MASTER.get("evidence_rows", []),
             "strategy_rows": AI_MASTER.get("strategy_rows", []),
             "candidate_rows": AI_MASTER.get("candidate_rows", []),

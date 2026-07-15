@@ -1,0 +1,35 @@
+V50.8.6 DEPLOYMENT
+
+1. Extract the production ZIP.
+2. Open the extracted folder.
+3. Upload ALL files and folders to the GitHub repository root.
+4. Upload the tests folder too. It does not run during normal Streamlit usage.
+5. app.py must be visible directly on the repository main page; do not upload
+   an extra outer folder around the project.
+6. Commit the changes and wait for Streamlit to redeploy.
+7. Open the Streamlit logs and confirm there is no traceback.
+8. Open the app and confirm the visible title is:
+   Nifty Seller AI V50.8.6 Market Path Forecast
+9. Confirm table order:
+   AI FINAL AUTHORITY
+   MARKET PATH FORECAST
+   Signal Reliability Table
+   Smart Strategy Matrix
+   AI Candidate Matrix
+10. In live market hours, confirm the Market Path table shows:
+   - the same snapshot/current Nifty as AI FINAL AUTHORITY
+   - verified support and resistance
+   - 15m and 30m probabilities/zones
+   - One-Brain Authority Lock PASS
+11. Download one PDF and confirm the Market Path Forecast section is present.
+
+LIVE VALIDATION
+- For the first 20 completed cases, reliability is intentionally capped.
+- Do not treat UP/DOWN percentages as a trade instruction.
+- Final trade permission remains controlled only by AI FINAL AUTHORITY.
+- Compare the 15m/30m actual outcomes and zone accuracy for at least 2-3 weeks.
+
+ROLLBACK
+- Keep the V50.8.5.1 production ZIP as rollback backup.
+- V50.8.6 uses the same forecast state key, so existing shadow records can be
+  carried forward while the deployment filesystem remains available.

@@ -1,14 +1,26 @@
-"""Read-only 15/30 minute market outlook derived after AI_MASTER judgement.
+"""Read-only Market Path Forecast derived strictly after AI_MASTER judgement.
 
-This module is deliberately *not* a decision engine. It cannot issue BUY/SELL,
-choose strikes, change confidence, or feed its output back into AI_MASTER. It
-only expresses the already-approved snapshot evidence as calibrated-looking
-UP/DOWN/RANGE percentages and records shadow outcomes for validation.
+V50.8.6 authority contract
+--------------------------
+This module is *not* a decision engine and it never fetches market data.  It
+receives an immutable copy of the already-final AI_MASTER judgement plus the
+same verified refresh snapshot.  It may express that evidence as 15/30 minute
+UP/DOWN/RANGE probabilities, likely path zones and exhaustion risk, but it
+cannot:
+
+* issue BUY / SELL CE / SELL PE / IRON CONDOR;
+* choose a strike, hedge, stop loss or target;
+* change AI_MASTER action, confidence, strategy scores or execution readiness;
+* feed any forecast output back into AI_MASTER or a DSP department.
+
+The forecast is intentionally saved in shadow mode so its 15m/30m outcomes can
+be calibrated without affecting live decisions.
 """
 from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import hashlib
 import json
 import math
 import os
@@ -23,9 +35,23 @@ except Exception:  # pragma: no cover
 
 _STORE = Path(os.environ.get("NIFTY_OUTLOOK_STORE", ".runtime_state/short_horizon_outlook.json"))
 _LOCK = Path(os.environ.get("NIFTY_OUTLOOK_LOCK", ".runtime_state/short_horizon_outlook.lock"))
+# Keep the old state key so V50.8.5 shadow cases survive the upgrade.
 _STATE_KEY = "v5085_short_horizon_forecasts"
-_MAX_RECORDS = 500
+_MAX_RECORDS = 750
 _THREAD_LOCK = threading.RLock()
+_LOCKED_AUTHORITY_FIELDS = (
+    "final_action",
+    "execution_status",
+    "confidence",
+    "decision_confidence",
+    "direction_confidence",
+    "strategy",
+    "strategy_scores",
+    "ce_plan",
+    "pe_plan",
+    "candidate_rows",
+    "strategy_rows",
+)
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -51,6 +77,18 @@ def _epoch(value: Any) -> float:
         return 0.0
 
 
+def _stable_hash(value: Any) -> str:
+    try:
+        raw = json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
+    except Exception:
+        raw = repr(value)
+    return hashlib.sha256(raw.encode("utf-8", errors="ignore")).hexdigest()[:16]
+
+
+def _authority_fingerprint(master: Mapping[str, Any]) -> str:
+    return _stable_hash({key: deepcopy(master.get(key)) for key in _LOCKED_AUTHORITY_FIELDS})
+
+
 def _read() -> list[dict[str, Any]]:
     try:
         if not _STORE.exists():
@@ -66,7 +104,11 @@ def _write(rows: list[dict[str, Any]]) -> None:
     _STORE.parent.mkdir(parents=True, exist_ok=True)
     tmp = _STORE.with_name(f"{_STORE.name}.{os.getpid()}.{threading.get_ident()}.tmp")
     tmp.write_text(
-        json.dumps({"schema_version": 1, "updated_at": _iso(), "records": rows[-_MAX_RECORDS:]}, separators=(",", ":"), default=str),
+        json.dumps(
+            {"schema_version": 2, "updated_at": _iso(), "records": rows[-_MAX_RECORDS:]},
+            separators=(",", ":"),
+            default=str,
+        ),
         encoding="utf-8",
     )
     os.replace(tmp, _STORE)
@@ -109,9 +151,9 @@ def _merge_records(*groups: Any) -> list[dict[str, Any]]:
 
 
 def _probabilities(direction_score: float, range_score: float) -> tuple[int, int, int]:
-    range_p = _clamp(range_score, 12.0, 72.0)
+    range_p = _clamp(range_score, 12.0, 74.0)
     directional_mass = 100.0 - range_p
-    # Stable sigmoid; score +/-100 maps to a strong but never absolute split.
+    # +/-100 can create a strong view but never an artificial 100% certainty.
     up_share = 1.0 / (1.0 + math.exp(-_clamp(direction_score, -100, 100) / 24.0))
     up = directional_mass * up_share
     down = directional_mass - up
@@ -128,12 +170,22 @@ def _dominant(up: int, down: int, range_p: int) -> str:
     return ordered[0][0]
 
 
+def _leader_margin(up: int, down: int, range_p: int) -> int:
+    ordered = sorted((up, down, range_p), reverse=True)
+    return int(ordered[0] - ordered[1])
+
+
 def _extract_conflicts(master: Mapping[str, Any]) -> list[str]:
     warnings = [str(x) for x in list(master.get("warnings", []) or []) + list(master.get("blockers", []) or [])]
     return [x for x in warnings if "conflict" in x.lower() or "hold" in x.lower()][:5]
 
 
-def _freshness_ok(master: Mapping[str, Any], movement: Mapping[str, Any], quote_age: Optional[float], option_age: Optional[float]) -> tuple[bool, list[str]]:
+def _freshness_ok(
+    master: Mapping[str, Any],
+    movement: Mapping[str, Any],
+    quote_age: Optional[float],
+    option_age: Optional[float],
+) -> tuple[bool, list[str]]:
     reasons: list[str] = []
     if str(master.get("data_flow_status", "")).upper() != "FRESH":
         reasons.append("data flow not fresh")
@@ -153,7 +205,265 @@ def _freshness_ok(master: Mapping[str, Any], movement: Mapping[str, Any], quote_
     return not reasons, reasons
 
 
-def _build_row(
+def _direction_bias_label(direction_score: float, dominant: str) -> str:
+    if dominant.startswith("RANGE") or dominant.endswith("/RANGE"):
+        if direction_score >= 18:
+            return "RANGE / UPSIDE LEAN"
+        if direction_score <= -18:
+            return "RANGE / DOWNSIDE LEAN"
+        return "RANGE / TWO-WAY"
+    if direction_score >= 48:
+        return "BULLISH"
+    if direction_score >= 15:
+        return "EARLY BULLISH"
+    if direction_score <= -48:
+        return "BEARISH"
+    if direction_score <= -15:
+        return "EARLY BEARISH"
+    return "BALANCED / UNCLEAR"
+
+
+def _movement_budget(horizon: int, atr_points: float, movement: Mapping[str, Any]) -> float:
+    atr = max(abs(atr_points), 1.0)
+    m1 = abs(_num(movement.get("move_1m"), 0.0))
+    m3 = abs(_num(movement.get("move_3m"), 0.0))
+    m5 = abs(_num(movement.get("move_5m"), 0.0))
+    velocity = max(m1 * 2.2, m3 * 0.95, m5 * 0.70)
+    if horizon == 15:
+        budget = atr * 0.62 + velocity * 0.38
+        return _clamp(budget, 10.0, max(35.0, atr * 1.15))
+    budget = atr * 0.92 + velocity * 0.46
+    return _clamp(budget, 16.0, max(55.0, atr * 1.65))
+
+
+def _active_leg_points(direction_score: float, movement: Mapping[str, Any], atr_points: float) -> float:
+    m1 = _num(movement.get("move_1m"), 0.0)
+    m3 = _num(movement.get("move_3m"), 0.0)
+    m5 = _num(movement.get("move_5m"), 0.0)
+    atr = max(abs(atr_points), 1.0)
+    if direction_score >= 0:
+        displacement = max(0.0, _num(movement.get("recovery_from_low"), 0.0))
+        impulse = max(max(m1, 0.0) * 2.0, max(m3, 0.0) * 1.15, max(m5, 0.0), displacement * 0.34)
+    else:
+        displacement = max(0.0, _num(movement.get("pullback_from_high"), 0.0))
+        impulse = max(max(-m1, 0.0) * 2.0, max(-m3, 0.0) * 1.15, max(-m5, 0.0), displacement * 0.34)
+    return _clamp(impulse, 0.0, atr * 1.8)
+
+
+def _move_consumed_pct(direction_score: float, movement: Mapping[str, Any], atr_points: float, horizon: int) -> float:
+    active = _active_leg_points(direction_score, movement, atr_points)
+    denominator = max(14.0, abs(atr_points) * (1.12 if horizon == 15 else 1.55))
+    return _clamp(active / denominator * 100.0, 0.0, 95.0)
+
+
+def _barrier_geometry(
+    *,
+    current_price: float,
+    support_level: Optional[float],
+    resistance_level: Optional[float],
+) -> dict[str, Optional[float]]:
+    support = _num(support_level, 0.0)
+    resistance = _num(resistance_level, 0.0)
+    if support <= 0 or support > current_price:
+        support = 0.0
+    if resistance <= 0 or resistance < current_price:
+        resistance = 0.0
+    return {
+        "support": support or None,
+        "resistance": resistance or None,
+        "support_distance": round(current_price - support, 2) if support else None,
+        "resistance_distance": round(resistance - current_price, 2) if resistance else None,
+    }
+
+
+def _reversal_risk(
+    *,
+    dominant: str,
+    budget: float,
+    consumed_pct: float,
+    barriers: Mapping[str, Optional[float]],
+    conflicts: list[str],
+    movement: Mapping[str, Any],
+    market_snapshot: Mapping[str, Any],
+) -> int:
+    risk = 18.0 + consumed_pct * 0.48 + len(conflicts) * 8.0
+    direction = "UP" if dominant.startswith("UP") else "DOWN" if dominant.startswith("DOWN") else "RANGE"
+    directional_distance = (
+        barriers.get("resistance_distance") if direction == "UP"
+        else barriers.get("support_distance") if direction == "DOWN"
+        else min(
+            [x for x in (barriers.get("support_distance"), barriers.get("resistance_distance")) if x is not None],
+            default=None,
+        )
+    )
+    if directional_distance is not None:
+        ratio = _num(directional_distance) / max(budget, 1.0)
+        if ratio <= 0.35:
+            risk += 30
+        elif ratio <= 0.70:
+            risk += 19
+        elif ratio <= 1.0:
+            risk += 10
+
+    phase = str(movement.get("phase", "")).upper()
+    if phase in {"RANGE", "NORMAL"}:
+        risk += 6
+    if phase.startswith("STRONG_") and consumed_pct < 65:
+        risk -= 6
+
+    snapshot_risk = market_snapshot.get("risk", {}) if isinstance(market_snapshot.get("risk", {}), Mapping) else {}
+    news = _num(snapshot_risk.get("news_risk"), 0)
+    shock = _num(snapshot_risk.get("shock_risk"), 0)
+    gamma = _num(snapshot_risk.get("gamma_risk"), 0)
+    risk += max(0.0, news - 35.0) * 0.12
+    risk += max(0.0, shock - 45.0) * 0.08
+    risk += max(0.0, gamma - 55.0) * 0.05
+    return int(round(_clamp(risk, 5.0, 95.0)))
+
+
+def _invalidation_text(
+    *,
+    dominant: str,
+    current_price: float,
+    atr_points: float,
+    barriers: Mapping[str, Optional[float]],
+) -> tuple[str, float, str]:
+    buffer_points = max(3.0, abs(atr_points) * 0.08)
+    fallback = max(10.0, abs(atr_points) * 0.34)
+    if dominant.startswith("UP"):
+        support = barriers.get("support")
+        level = (_num(support) - buffer_points) if support else current_price - fallback
+        return f"Below {level:.0f}", level, "BELOW"
+    if dominant.startswith("DOWN"):
+        resistance = barriers.get("resistance")
+        level = (_num(resistance) + buffer_points) if resistance else current_price + fallback
+        return f"Above {level:.0f}", level, "ABOVE"
+    support = barriers.get("support")
+    resistance = barriers.get("resistance")
+    if support and resistance:
+        return f"Outside {support:.0f}–{resistance:.0f}", current_price, "OUTSIDE"
+    return f"Outside {current_price-fallback:.0f}–{current_price+fallback:.0f}", current_price, "OUTSIDE"
+
+
+def _zone_plan(
+    *,
+    horizon: int,
+    dominant: str,
+    direction_score: float,
+    current_price: float,
+    atr_points: float,
+    movement: Mapping[str, Any],
+    barriers: Mapping[str, Optional[float]],
+) -> dict[str, Any]:
+    budget = _movement_budget(horizon, atr_points, movement)
+    consumed_pct = _move_consumed_pct(direction_score, movement, atr_points, horizon)
+    # Even after a large move, do not claim zero room.  The remaining factor is
+    # deliberately bounded because this is a probabilistic destination zone.
+    remaining_factor = _clamp(1.0 - consumed_pct * 0.0058, 0.38, 1.0)
+    remaining = budget * remaining_factor
+    strength = _clamp(abs(direction_score) / 100.0, 0.0, 1.0)
+
+    if dominant.startswith("UP"):
+        low_move = max(4.0, remaining * (0.32 + strength * 0.10))
+        high_move = max(low_move + 3.0, remaining * (0.72 + strength * 0.22))
+        resistance_distance = barriers.get("resistance_distance")
+        if resistance_distance is not None and _num(resistance_distance) <= high_move * 1.15:
+            high_move = min(high_move, _num(resistance_distance) + abs(atr_points) * 0.10)
+            low_move = min(low_move, max(3.0, _num(resistance_distance) * 0.55))
+        likely_low = current_price + low_move
+        likely_high = current_price + max(low_move + 2.0, high_move)
+        stretch_low = likely_high
+        stretch_high = likely_high + max(5.0, remaining * 0.36)
+        expected = f"+{low_move:.0f} to +{max(low_move, high_move):.0f} pts"
+    elif dominant.startswith("DOWN"):
+        low_move = max(4.0, remaining * (0.32 + strength * 0.10))
+        high_move = max(low_move + 3.0, remaining * (0.72 + strength * 0.22))
+        support_distance = barriers.get("support_distance")
+        if support_distance is not None and _num(support_distance) <= high_move * 1.15:
+            high_move = min(high_move, _num(support_distance) + abs(atr_points) * 0.10)
+            low_move = min(low_move, max(3.0, _num(support_distance) * 0.55))
+        likely_low = current_price - max(low_move, high_move)
+        likely_high = current_price - low_move
+        stretch_high = likely_low
+        stretch_low = likely_low - max(5.0, remaining * 0.36)
+        expected = f"-{low_move:.0f} to -{max(low_move, high_move):.0f} pts"
+    else:
+        half = max(5.0, remaining * 0.48)
+        likely_low = current_price - half
+        likely_high = current_price + half
+        stretch_extension = max(5.0, remaining * 0.28)
+        stretch_low = likely_low - stretch_extension
+        stretch_high = likely_high + stretch_extension
+        expected = f"±{half:.0f} pts"
+
+    return {
+        "budget": round(budget, 2),
+        "remaining": round(remaining, 2),
+        "consumed_pct": int(round(consumed_pct)),
+        "expected_move": expected,
+        "likely_low": round(min(likely_low, likely_high), 2),
+        "likely_high": round(max(likely_low, likely_high), 2),
+        "stretch_low": round(min(stretch_low, stretch_high), 2),
+        "stretch_high": round(max(stretch_low, stretch_high), 2),
+    }
+
+
+def _path_label(
+    *,
+    dominant: str,
+    reversal_risk: int,
+    barriers: Mapping[str, Optional[float]],
+    zone: Mapping[str, Any],
+    direction_score: float,
+) -> str:
+    if dominant.startswith("UP"):
+        resistance_distance = barriers.get("resistance_distance")
+        directional_budget = _num(zone.get("budget"), 0.0)
+        if reversal_risk >= 68:
+            return "UP → REVERSAL RISK"
+        if resistance_distance is not None and _num(resistance_distance) <= max(8.0, directional_budget * 0.90):
+            return "UP → STALL / BREAKOUT TEST"
+        return "UP → CONTINUATION"
+    if dominant.startswith("DOWN"):
+        support_distance = barriers.get("support_distance")
+        directional_budget = _num(zone.get("budget"), 0.0)
+        if reversal_risk >= 68:
+            return "DOWN → SUPPORT BOUNCE RISK"
+        if support_distance is not None and _num(support_distance) <= max(8.0, directional_budget * 0.90):
+            return "DOWN → SUPPORT / BREAKDOWN TEST"
+        return "DOWN → CONTINUATION"
+    if direction_score >= 12:
+        return "RANGE → UPSIDE BREAK TEST"
+    if direction_score <= -12:
+        return "RANGE → DOWNSIDE BREAK TEST"
+    return "TWO-WAY WHIPSAW / RANGE"
+
+
+def _forecast_status(
+    *,
+    dominant: str,
+    reliability: float,
+    reversal_risk: int,
+    margin: int,
+    recent_samples: int,
+    previous_dominant: str,
+) -> str:
+    current_primary = dominant.split("/")[0]
+    previous_primary = str(previous_dominant or "").split("/")[0]
+    if previous_primary and previous_primary != current_primary and margin >= 10:
+        return "FORECAST SHIFT"
+    if reliability < 45:
+        return "LOW RELIABILITY"
+    if reversal_risk >= 70:
+        return "EXHAUSTION RISK"
+    if "/" in dominant or margin < 10:
+        return "BUILDING"
+    if reliability >= 60 and recent_samples >= 5 and margin >= 15:
+        return "CONFIRMED PATH"
+    return "EARLY OUTLOOK"
+
+
+def _build_horizon(
     *,
     horizon: int,
     direction_score: float,
@@ -161,22 +471,125 @@ def _build_row(
     reliability: float,
     current_price: float,
     atr_points: float,
+    movement: Mapping[str, Any],
+    market_snapshot: Mapping[str, Any],
+    barriers: Mapping[str, Optional[float]],
+    conflicts: list[str],
+    previous_dominant: str,
 ) -> dict[str, Any]:
     up, down, range_p = _probabilities(direction_score, range_score)
-    scale = 0.48 if horizon == 15 else 0.78
-    half_width = max(10.0 if horizon == 15 else 16.0, abs(atr_points) * scale)
-    centre_shift = direction_score / 100.0 * half_width * 0.35
-    centre = current_price + centre_shift
+    dominant = _dominant(up, down, range_p)
+    margin = _leader_margin(up, down, range_p)
+    zone = _zone_plan(
+        horizon=horizon,
+        dominant=dominant,
+        direction_score=direction_score,
+        current_price=current_price,
+        atr_points=atr_points,
+        movement=movement,
+        barriers=barriers,
+    )
+    reversal = _reversal_risk(
+        dominant=dominant,
+        budget=_num(zone.get("budget"), 1.0),
+        consumed_pct=_num(zone.get("consumed_pct"), 0.0),
+        barriers=barriers,
+        conflicts=conflicts,
+        movement=movement,
+        market_snapshot=market_snapshot,
+    )
+    invalidation_text, invalidation_level, invalidation_mode = _invalidation_text(
+        dominant=dominant,
+        current_price=current_price,
+        atr_points=atr_points,
+        barriers=barriers,
+    )
+    rel = int(round(_clamp(reliability, 0, 100)))
+    status = _forecast_status(
+        dominant=dominant,
+        reliability=rel,
+        reversal_risk=reversal,
+        margin=margin,
+        recent_samples=int(_num(movement.get("recent_sample_count", 0))),
+        previous_dominant=previous_dominant,
+    )
     return {
-        "Horizon": f"Next {horizon}m",
-        "UP %": up,
-        "DOWN %": down,
-        "RANGE %": range_p,
-        "Most Likely": _dominant(up, down, range_p),
-        "Reliability %": int(round(_clamp(reliability, 0, 100))),
-        "Expected Zone": f"{centre-half_width:.0f}–{centre+half_width:.0f}",
-        "Status": "SHADOW / INFO ONLY",
+        "horizon_minutes": horizon,
+        "market_bias": _direction_bias_label(direction_score, dominant),
+        "up_probability": up,
+        "down_probability": down,
+        "range_probability": range_p,
+        "dominant": dominant,
+        "leader_margin": margin,
+        "direction_score": round(direction_score, 2),
+        "expected_move": zone["expected_move"],
+        "likely_low": zone["likely_low"],
+        "likely_high": zone["likely_high"],
+        "stretch_low": zone["stretch_low"],
+        "stretch_high": zone["stretch_high"],
+        "invalidation_text": invalidation_text,
+        "invalidation_level": round(invalidation_level, 2),
+        "invalidation_mode": invalidation_mode,
+        "reversal_risk": reversal,
+        "move_consumed": zone["consumed_pct"],
+        "reliability": rel,
+        "status": status,
+        "path": _path_label(
+            dominant=dominant,
+            reversal_risk=reversal,
+            barriers=barriers,
+            zone=zone,
+            direction_score=direction_score,
+        ),
+        "budget_points": zone["budget"],
+        "remaining_budget_points": zone["remaining"],
     }
+
+
+def _comparison_rows(
+    h15: Mapping[str, Any],
+    h30: Mapping[str, Any],
+    *,
+    current_price: float,
+    barriers: Mapping[str, Optional[float]],
+    support_source: str,
+    resistance_source: str,
+) -> list[dict[str, Any]]:
+    def zone(row: Mapping[str, Any], prefix: str) -> str:
+        return f"{_num(row.get(prefix + '_low')):.0f}–{_num(row.get(prefix + '_high')):.0f}"
+
+    support = barriers.get("support")
+    resistance = barriers.get("resistance")
+    support_text = f"{_num(support):.0f} ({support_source})" if support else "Not available"
+    resistance_text = f"{_num(resistance):.0f} ({resistance_source})" if resistance else "Not available"
+    return [
+        {"Field": "Current Nifty", "Next 15 Minutes": f"{current_price:.2f}", "Next 30 Minutes": f"{current_price:.2f}"},
+        {"Field": "Verified Support", "Next 15 Minutes": support_text, "Next 30 Minutes": support_text},
+        {"Field": "Verified Resistance", "Next 15 Minutes": resistance_text, "Next 30 Minutes": resistance_text},
+        {"Field": "Market Bias", "Next 15 Minutes": h15.get("market_bias"), "Next 30 Minutes": h30.get("market_bias")},
+        {"Field": "UP Probability", "Next 15 Minutes": f"{h15.get('up_probability')}%", "Next 30 Minutes": f"{h30.get('up_probability')}%"},
+        {"Field": "DOWN Probability", "Next 15 Minutes": f"{h15.get('down_probability')}%", "Next 30 Minutes": f"{h30.get('down_probability')}%"},
+        {"Field": "RANGE Probability", "Next 15 Minutes": f"{h15.get('range_probability')}%", "Next 30 Minutes": f"{h30.get('range_probability')}%"},
+        {"Field": "Expected Remaining Move", "Next 15 Minutes": h15.get("expected_move"), "Next 30 Minutes": h30.get("expected_move")},
+        {"Field": "Likely Zone", "Next 15 Minutes": zone(h15, "likely"), "Next 30 Minutes": zone(h30, "likely")},
+        {"Field": "Stretch Zone", "Next 15 Minutes": zone(h15, "stretch"), "Next 30 Minutes": zone(h30, "stretch")},
+        {"Field": "Invalidation", "Next 15 Minutes": h15.get("invalidation_text"), "Next 30 Minutes": h30.get("invalidation_text")},
+        {"Field": "Reversal Risk", "Next 15 Minutes": f"{h15.get('reversal_risk')}%", "Next 30 Minutes": f"{h30.get('reversal_risk')}%"},
+        {"Field": "Move Consumed", "Next 15 Minutes": f"{h15.get('move_consumed')}%", "Next 30 Minutes": f"{h30.get('move_consumed')}%"},
+        {"Field": "Reliability", "Next 15 Minutes": f"{h15.get('reliability')}%", "Next 30 Minutes": f"{h30.get('reliability')}%"},
+        {"Field": "Most Likely Path", "Next 15 Minutes": h15.get("path"), "Next 30 Minutes": h30.get("path")},
+        {"Field": "Forecast Status", "Next 15 Minutes": h15.get("status"), "Next 30 Minutes": h30.get("status")},
+    ]
+
+
+def _unavailable_rows(reason: str) -> list[dict[str, Any]]:
+    return [
+        {"Field": "Market Bias", "Next 15 Minutes": "UNAVAILABLE", "Next 30 Minutes": "UNAVAILABLE"},
+        {"Field": "UP / DOWN / RANGE", "Next 15 Minutes": "- / - / -", "Next 30 Minutes": "- / - / -"},
+        {"Field": "Expected Remaining Move", "Next 15 Minutes": "-", "Next 30 Minutes": "-"},
+        {"Field": "Likely / Stretch Zone", "Next 15 Minutes": "-", "Next 30 Minutes": "-"},
+        {"Field": "Forecast Status", "Next 15 Minutes": reason, "Next 30 Minutes": reason},
+    ]
 
 
 def _classify_move(delta: float, threshold: float) -> str:
@@ -202,14 +615,14 @@ def _resolve(rows: list[dict[str, Any]], *, now: datetime, price: float) -> list
                     continue
                 elapsed = ts - created
                 if elapsed >= horizon * 60:
-                    # A result is valid only near the requested horizon. If the
-                    # app was closed for much longer, do not pretend the later
-                    # price was the exact 15m/30m outcome.
                     if elapsed <= horizon * 60 + 360:
                         delta = round(price - start, 2)
                         outcome = _classify_move(delta, threshold)
                         probs = row.get(f"probabilities_{horizon}m", {}) if isinstance(row.get(f"probabilities_{horizon}m", {}), Mapping) else {}
                         predicted = max(("UP", "DOWN", "RANGE"), key=lambda k: _num(probs.get(k), 0))
+                        expected = row.get(f"path_{horizon}m", {}) if isinstance(row.get(f"path_{horizon}m", {}), Mapping) else {}
+                        likely_low = _num(expected.get("likely_low"), 0)
+                        likely_high = _num(expected.get("likely_high"), 0)
                         row[result_key] = {
                             "resolved_at": _iso(now),
                             "end_price": round(price, 2),
@@ -217,6 +630,7 @@ def _resolve(rows: list[dict[str, Any]], *, now: datetime, price: float) -> list
                             "actual": outcome,
                             "predicted": predicted,
                             "correct": predicted == outcome,
+                            "end_in_likely_zone": bool(likely_low > 0 and likely_low <= price <= likely_high),
                             "elapsed_seconds": round(elapsed, 1),
                         }
                     else:
@@ -237,14 +651,39 @@ def _accuracy(rows: list[dict[str, Any]], horizon: int) -> dict[str, Any]:
         and str((r.get(f"result_{horizon}m") or {}).get("actual", "")) in {"UP", "DOWN", "RANGE"}
     ]
     if not results:
-        return {"completed": 0, "accuracy": None, "status": "PROVISIONAL"}
+        return {"completed": 0, "accuracy": None, "zone_accuracy": None, "status": "PROVISIONAL"}
     correct = sum(1 for r in results if bool(r.get("correct")))
+    zone_correct = sum(1 for r in results if bool(r.get("end_in_likely_zone")))
     accuracy = round(correct / len(results) * 100.0, 1)
+    zone_accuracy = round(zone_correct / len(results) * 100.0, 1)
     status = "VALIDATING" if len(results) < 50 else "CALIBRATION_READY"
-    return {"completed": len(results), "accuracy": accuracy, "status": status}
+    return {"completed": len(results), "accuracy": accuracy, "zone_accuracy": zone_accuracy, "status": status}
 
 
-def build_short_horizon_outlook(
+def _latest_previous_dominant(records: list[dict[str, Any]], horizon: int) -> str:
+    for row in reversed(records):
+        path = row.get(f"path_{horizon}m", {}) if isinstance(row.get(f"path_{horizon}m", {}), Mapping) else {}
+        dominant = str(path.get("dominant", ""))
+        if dominant:
+            return dominant
+        probs = row.get(f"probabilities_{horizon}m", {}) if isinstance(row.get(f"probabilities_{horizon}m", {}), Mapping) else {}
+        if probs:
+            return max(("UP", "DOWN", "RANGE"), key=lambda k: _num(probs.get(k), 0))
+    return ""
+
+
+def _calibration_reliability_cap(completed: int, horizon: int) -> int:
+    """Prevent unvalidated shadow forecasts from displaying false certainty."""
+    if completed < 20:
+        return 62 if horizon == 15 else 56
+    if completed < 50:
+        return 70 if horizon == 15 else 64
+    if completed < 100:
+        return 78 if horizon == 15 else 72
+    return 88 if horizon == 15 else 82
+
+
+def build_market_path_forecast(
     *,
     ai_master: Mapping[str, Any],
     market_snapshot: Mapping[str, Any],
@@ -256,27 +695,40 @@ def build_short_horizon_outlook(
     state: MutableMapping[str, Any],
     quote_age_seconds: Optional[float] = None,
     option_age_seconds: Optional[float] = None,
+    support_level: Optional[float] = None,
+    resistance_level: Optional[float] = None,
+    support_source: str = "Verified support",
+    resistance_source: str = "Verified resistance",
 ) -> dict[str, Any]:
-    """Create a read-only outlook and update shadow validation history."""
+    """Build a post-AI_MASTER, read-only 15m/30m market path forecast."""
+    master = deepcopy(dict(ai_master))
+    snapshot = deepcopy(dict(market_snapshot))
+    movement_copy = deepcopy(dict(movement))
+    authority_before = _authority_fingerprint(master)
+    snapshot_id = str(master.get("snapshot_id", "NA"))
+    snapshot_match = snapshot_id == str(snapshot.get("snapshot_id", snapshot_id))
+
     with _FileLock():
         records = _merge_records(_read(), state.get(_STATE_KEY, []))
         records = _resolve(records, now=observed_at, price=current_price)
 
-        projection = ai_master.get("projection", {}) if isinstance(ai_master.get("projection", {}), Mapping) else {}
+        projection = master.get("projection", {}) if isinstance(master.get("projection", {}), Mapping) else {}
         raw = _num(projection.get("raw"), 0.0)
         if raw == 0:
             bullish = _num(projection.get("bullish"), 50.0)
             raw = (bullish - 50.0) * 2.0
-        move_bias = _num(movement.get("movement_bias"), 0.0)
-        phase = str(movement.get("phase", "NORMAL")).upper()
-        conflicts = _extract_conflicts(ai_master)
-        fresh_ok, freshness_reasons = _freshness_ok(ai_master, movement, quote_age_seconds, option_age_seconds)
+        move_bias = _num(movement_copy.get("movement_bias"), 0.0)
+        phase = str(movement_copy.get("phase", "NORMAL")).upper()
+        conflicts = _extract_conflicts(master)
+        fresh_ok, freshness_reasons = _freshness_ok(master, movement_copy, quote_age_seconds, option_age_seconds)
 
-        integrity = ai_master.get("department_integrity", {}) if isinstance(ai_master.get("department_integrity", {}), Mapping) else {}
+        integrity = master.get("department_integrity", {}) if isinstance(master.get("department_integrity", {}), Mapping) else {}
         integrity_score = _num(integrity.get("score"), 70)
-        data_conf = _num(ai_master.get("data_confidence"), 0)
-        direction_conf = _num(ai_master.get("direction_confidence"), 50)
-        base_rel = data_conf * 0.40 + integrity_score * 0.25 + direction_conf * 0.20 + (15 if fresh_ok else 0)
+        data_conf = _num(master.get("data_confidence"), 0)
+        direction_conf = _num(master.get("direction_confidence"), 50)
+        recent_samples = int(_num(movement_copy.get("recent_sample_count", 0)))
+        sample_score = _clamp(recent_samples / 8.0 * 100.0, 0.0, 100.0)
+        base_rel = data_conf * 0.35 + integrity_score * 0.25 + direction_conf * 0.20 + sample_score * 0.10 + (10 if fresh_ok else 0)
         base_rel -= len(conflicts) * 6
         if phase == "RANGE":
             base_rel -= 5
@@ -288,8 +740,10 @@ def build_short_horizon_outlook(
         if not market_open:
             base_rel = 0
 
-        dir15 = _clamp(raw * 0.62 + move_bias * 0.38, -100, 100)
-        dir30 = _clamp(raw * 0.78 + move_bias * 0.22, -100, 100)
+        # Direction always starts with the final AI_MASTER projection.  Movement
+        # is only a short-term timing adjustment; barriers never invent direction.
+        dir15 = _clamp(raw * 0.72 + move_bias * 0.28, -100, 100)
+        dir30 = _clamp(raw * 0.84 + move_bias * 0.16, -100, 100)
         range15 = 25 + len(conflicts) * 6 - abs(dir15) * 0.16
         range30 = 30 + len(conflicts) * 5 - abs(dir30) * 0.13
         if phase == "RANGE":
@@ -298,58 +752,155 @@ def build_short_horizon_outlook(
         elif phase in {"RECOVERY", "PULLBACK_DOWN"}:
             range15 -= 4
 
-        status = "AVAILABLE" if market_open and fresh_ok else "UNAVAILABLE"
-        if status == "AVAILABLE":
-            row15 = _build_row(horizon=15, direction_score=dir15, range_score=range15, reliability=base_rel, current_price=current_price, atr_points=atr_points)
-            row30 = _build_row(horizon=30, direction_score=dir30, range_score=range30, reliability=base_rel - 8, current_price=current_price, atr_points=atr_points)
-            rows_ui = [row15, row30]
+        barriers = _barrier_geometry(
+            current_price=current_price,
+            support_level=support_level,
+            resistance_level=resistance_level,
+        )
+        status = "AVAILABLE" if market_open and fresh_ok and snapshot_match else "UNAVAILABLE"
+        if not snapshot_match:
+            freshness_reasons.append("snapshot ID mismatch")
 
-            # One official shadow forecast per five-minute bucket. A rerun can
-            # update the visible table, but it never overwrites the saved case.
+        if status == "AVAILABLE":
+            previous15 = _latest_previous_dominant(records, 15)
+            previous30 = _latest_previous_dominant(records, 30)
+            validation15_pre = _accuracy(records, 15)
+            validation30_pre = _accuracy(records, 30)
+            reliability15 = min(base_rel, _calibration_reliability_cap(int(validation15_pre.get("completed", 0)), 15))
+            reliability30 = min(base_rel - 8, _calibration_reliability_cap(int(validation30_pre.get("completed", 0)), 30))
+            horizon15 = _build_horizon(
+                horizon=15,
+                direction_score=dir15,
+                range_score=range15,
+                reliability=reliability15,
+                current_price=current_price,
+                atr_points=atr_points,
+                movement=movement_copy,
+                market_snapshot=snapshot,
+                barriers=barriers,
+                conflicts=conflicts,
+                previous_dominant=previous15,
+            )
+            horizon30 = _build_horizon(
+                horizon=30,
+                direction_score=dir30,
+                range_score=range30,
+                reliability=reliability30,
+                current_price=current_price,
+                atr_points=atr_points,
+                movement=movement_copy,
+                market_snapshot=snapshot,
+                barriers=barriers,
+                conflicts=conflicts,
+                previous_dominant=previous30,
+            )
+            if int(validation15_pre.get("completed", 0)) < 20 and horizon15.get("status") == "CONFIRMED PATH":
+                horizon15["status"] = "EARLY OUTLOOK / PROVISIONAL"
+            if int(validation30_pre.get("completed", 0)) < 20 and horizon30.get("status") == "CONFIRMED PATH":
+                horizon30["status"] = "EARLY OUTLOOK / PROVISIONAL"
+            rows_ui = _comparison_rows(
+                horizon15,
+                horizon30,
+                current_price=current_price,
+                barriers=barriers,
+                support_source=str(support_source),
+                resistance_source=str(resistance_source),
+            )
+
             bucket = observed_at.replace(minute=(observed_at.minute // 5) * 5, second=0, microsecond=0)
-            forecast_id = f"SHORT_OUTLOOK:{bucket.isoformat()}"
+            forecast_id = f"MARKET_PATH:{bucket.isoformat()}"
             if not any(str(r.get("forecast_id")) == forecast_id for r in records):
                 forecast = {
                     "forecast_id": forecast_id,
-                    "snapshot_id": str(ai_master.get("snapshot_id", "NA")),
+                    "snapshot_id": snapshot_id,
                     "created_at": _iso(observed_at),
                     "updated_at": _iso(observed_at),
                     "start_price": round(current_price, 2),
                     "validation_threshold": round(max(5.0, abs(atr_points) * 0.12), 2),
-                    "probabilities_15m": {"UP": row15["UP %"], "DOWN": row15["DOWN %"], "RANGE": row15["RANGE %"]},
-                    "probabilities_30m": {"UP": row30["UP %"], "DOWN": row30["DOWN %"], "RANGE": row30["RANGE %"]},
-                    "reliability_15m": row15["Reliability %"],
-                    "reliability_30m": row30["Reliability %"],
+                    "probabilities_15m": {
+                        "UP": horizon15["up_probability"],
+                        "DOWN": horizon15["down_probability"],
+                        "RANGE": horizon15["range_probability"],
+                    },
+                    "probabilities_30m": {
+                        "UP": horizon30["up_probability"],
+                        "DOWN": horizon30["down_probability"],
+                        "RANGE": horizon30["range_probability"],
+                    },
+                    "path_15m": horizon15,
+                    "path_30m": horizon30,
+                    "reliability_15m": horizon15["reliability"],
+                    "reliability_30m": horizon30["reliability"],
+                    "support_level": barriers.get("support"),
+                    "resistance_level": barriers.get("resistance"),
+                    "support_source": str(support_source),
+                    "resistance_source": str(resistance_source),
                     "authority": "READ_ONLY_AFTER_AI_MASTER",
+                    "authority_fingerprint": authority_before,
                 }
                 records.append(forecast)
         else:
-            rows_ui = [
-                {"Horizon": "Next 15m", "UP %": "-", "DOWN %": "-", "RANGE %": "-", "Most Likely": "UNAVAILABLE", "Reliability %": 0, "Expected Zone": "-", "Status": " / ".join(freshness_reasons) or "MARKET CLOSED"},
-                {"Horizon": "Next 30m", "UP %": "-", "DOWN %": "-", "RANGE %": "-", "Most Likely": "UNAVAILABLE", "Reliability %": 0, "Expected Zone": "-", "Status": " / ".join(freshness_reasons) or "MARKET CLOSED"},
-            ]
+            horizon15 = {}
+            horizon30 = {}
+            rows_ui = _unavailable_rows(" / ".join(freshness_reasons) or "MARKET CLOSED")
 
         records = _merge_records(records)
         state[_STATE_KEY] = records
         _write(records)
 
-    # Evidence text is descriptive and uses existing AI_MASTER fields only.
-    evidence_rows = ai_master.get("evidence_rows", []) if isinstance(ai_master.get("evidence_rows", []), list) else []
+    # A second fingerprint proves the local immutable copy was not altered by
+    # forecast calculations.  The caller also passes a deepcopy, so the live
+    # AI_MASTER object has no feedback path from this module.
+    authority_after = _authority_fingerprint(master)
+    authority_intact = authority_before == authority_after
+
+    evidence_rows = master.get("evidence_rows", []) if isinstance(master.get("evidence_rows", []), list) else []
     sorted_evidence = sorted(
         [r for r in evidence_rows if isinstance(r, Mapping)],
         key=lambda r: abs(_num(r.get("Bias"), 0)),
         reverse=True,
     )
     supporting = [f"{r.get('Signal')}: {_num(r.get('Bias')):+.0f}" for r in sorted_evidence[:3]]
+    likely_path = ""
+    if horizon15 and horizon30:
+        likely_path = (
+            f"15m {horizon15.get('path')} toward {horizon15.get('likely_low'):.0f}–{horizon15.get('likely_high'):.0f}; "
+            f"30m {horizon30.get('path')} toward {horizon30.get('likely_low'):.0f}–{horizon30.get('likely_high'):.0f}."
+        )
+
     return {
-        "version": "V50.8.5_SHORT_HORIZON_SHADOW",
+        "version": "V50.8.6_MARKET_PATH_FORECAST_SHADOW",
         "status": status,
-        "snapshot_id": str(ai_master.get("snapshot_id", "NA")),
+        "snapshot_id": snapshot_id,
         "rows": rows_ui,
+        "horizon_15m": horizon15,
+        "horizon_30m": horizon30,
+        "likely_path_summary": likely_path,
         "supporting_evidence": supporting,
         "conflicts": conflicts,
         "freshness_reasons": freshness_reasons,
         "validation_15m": _accuracy(records, 15),
         "validation_30m": _accuracy(records, 30),
-        "authority_note": "Information only — AI_MASTER controls execution; outlook cannot change action, strategy, strike, SL or target.",
+        "barrier_context": {
+            "support_level": barriers.get("support"),
+            "support_source": str(support_source),
+            "resistance_level": barriers.get("resistance"),
+            "resistance_source": str(resistance_source),
+        },
+        "authority_contract": {
+            "mode": "READ_ONLY_AFTER_AI_MASTER",
+            "same_snapshot": bool(snapshot_match),
+            "authority_intact": bool(authority_intact),
+            "independent_data_fetches": 0,
+            "can_change_execution": False,
+            "feedback_to_ai_master": False,
+            "locked_fields": list(_LOCKED_AUTHORITY_FIELDS),
+        },
+        "authority_note": "Information only — same snapshot, one AI_MASTER, zero feedback; forecast cannot change action, strategy, strike, SL or target.",
     }
+
+
+# Compatibility wrapper for earlier tests/imports.  It delegates to the one and
+# only forecast implementation; it does not create a second engine.
+def build_short_horizon_outlook(**kwargs: Any) -> dict[str, Any]:
+    return build_market_path_forecast(**kwargs)

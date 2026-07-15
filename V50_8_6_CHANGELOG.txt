@@ -1,0 +1,80 @@
+NIFTY SELLER AI V50.8.6 — MARKET PATH FORECAST
+
+BASE
+- Built directly on V50.8.5.1 Runtime Hotfix.
+- FII/DII durable journal, DSP evidence integrity, option-flow corrections,
+  shared-state persistence and runtime auth hotfix remain preserved.
+
+NEW MARKET PATH FORECAST TABLE
+- Added a separate MARKET PATH FORECAST table directly below AI FINAL AUTHORITY.
+- Next 15 Minutes is the primary forecast.
+- Next 30 Minutes is the confirmation forecast.
+- The table shows:
+  * current Nifty
+  * verified support and resistance with source
+  * market bias
+  * UP / DOWN / RANGE probabilities
+  * expected remaining move in points
+  * likely destination zone
+  * stretch zone
+  * invalidation level
+  * reversal risk
+  * move consumed percentage
+  * reliability
+  * most likely path
+  * forecast status
+
+PATH BEHAVIOUR LABELS
+- UP -> CONTINUATION
+- UP -> STALL / BREAKOUT TEST
+- UP -> REVERSAL RISK
+- DOWN -> CONTINUATION
+- DOWN -> SUPPORT / BREAKDOWN TEST
+- DOWN -> SUPPORT BOUNCE RISK
+- RANGE -> UPSIDE BREAK TEST
+- RANGE -> DOWNSIDE BREAK TEST
+- TWO-WAY WHIPSAW / RANGE
+
+ONE-BRAIN AUTHORITY LOCK
+- Forecast runs only after final AI_MASTER judgement.
+- AI_MASTER and market snapshot are passed as deep copies.
+- Forecast performs zero independent market-data fetches.
+- Direction starts from the final AI_MASTER projection.
+- Live movement can only make a bounded timing adjustment.
+- Support/resistance can cap zones and raise reversal risk, but cannot invent a
+  separate direction.
+- Forecast cannot issue BUY, SELL CE, SELL PE or IRON CONDOR.
+- Forecast cannot choose strike, hedge, SL or target.
+- Forecast cannot modify action, execution status, confidence, strategy scores,
+  candidates or plans.
+- App compares locked AI_MASTER fields before and after forecast creation. Any
+  detected mutation discards the forecast and keeps the final judgement safe.
+- The UI displays One-Brain Authority Lock PASS/HOLD.
+
+SAFETY AND FRESHNESS
+- Forecast is unavailable when market is closed, quote/option-chain is stale,
+  OI sync is not ready, movement continuity resets, recent samples are
+  insufficient, critical DSP integrity fails or snapshot IDs do not match.
+- Opening shock and lunch-zone reliability remain capped.
+- Unvalidated forecasts are reliability-capped to prevent false certainty:
+  * under 20 completed cases: 15m max 62%, 30m max 56%
+  * under 50 completed cases: 15m max 70%, 30m max 64%
+  * under 100 completed cases: 15m max 78%, 30m max 72%
+- A forecast cannot show CONFIRMED PATH during the initial provisional stage.
+
+SHADOW LEARNING
+- One official forecast is stored per five-minute bucket.
+- 15m and 30m outcomes are resolved separately.
+- Direction accuracy and end-in-likely-zone accuracy are retained.
+- Existing V50.8.5 shadow history state key is preserved for migration.
+- Forecast history remains read-only with respect to live decision logic.
+
+PDF
+- Full PDF report now includes the Market Path Forecast comparison table,
+  likely-path summary and One-Brain authority note.
+
+NOT CHANGED
+- No new decision brain.
+- No change to AI_MASTER action thresholds or final execution gates.
+- No forecast feedback into Strategy, Candidate, CO, DSP or AI_MASTER.
+- No background refresh loop or extra market API call.

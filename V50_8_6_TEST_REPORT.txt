@@ -1,0 +1,41 @@
+NIFTY SELLER AI V50.8.6 — TEST REPORT
+
+TEST DATE
+- 15 July 2026
+
+RESULTS
+- Python compilation: PASS
+- Automated pytest suite: 26/26 PASS
+- Non-app module import audit: 47/47 PASS
+- PDF generation smoke test: PASS
+- PDF signature: %PDF confirmed
+- Market Path probability total: PASS (UP + DOWN + RANGE = 100)
+- Bullish likely-zone direction test: PASS
+- Bearish likely-zone direction test: PASS
+- Nearby barrier zone-cap test: PASS
+- Move-consumed / reversal-risk test: PASS
+- Snapshot mismatch fail-closed test: PASS
+- Stale/gap forecast unavailable test: PASS
+- Provisional reliability-cap test: PASS
+- One-Brain immutable AI_MASTER test: PASS
+- Zero independent data-fetch static audit: PASS
+- App deep-copy authority guard static test: PASS
+- UI order test: PASS
+- Legacy V50.8.5 forecast history compatibility wrapper: PASS
+- V50.8.5.1 auth-error runtime regression tests: PASS
+
+ONE-BRAIN VERIFICATION
+- Forecast receives deep copies of AI_MASTER, snapshot and movement.
+- Locked authority fields are fingerprinted inside the forecast module.
+- Locked fields are copied and compared before/after in app.py.
+- Forecast output contains no execution permission, strike, hedge, SL or target.
+- Forecast module imports neither requests nor yfinance and has no API fetch.
+- Forecast is attached after AI_MASTER judgement under market_path_forecast.
+- No AI_MASTER or DSP code reads market_path_forecast as an input.
+
+LIMITATION
+- A full authenticated Streamlit/DhanHQ browser run could not be executed in
+  this local build environment because the Streamlit executable and user Dhan
+  credentials are unavailable here.
+- The deployed live-market test must confirm quote ages, snapshot match,
+  support/resistance sources, visual layout and PDF output.

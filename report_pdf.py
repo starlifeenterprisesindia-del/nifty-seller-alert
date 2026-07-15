@@ -1,4 +1,4 @@
-"""App-native PDF report generator for Nifty Seller AI V50.8.5."""
+"""App-native PDF report generator for Nifty Seller AI V50.8.6."""
 from __future__ import annotations
 
 from io import BytesIO
@@ -97,7 +97,7 @@ def build_ai_report_pdf(report: Mapping[str, Any]) -> bytes:
 
     for title, key in (
         ("Source and Readiness Status", "source_rows"),
-        ("Short-Horizon Prediction — Shadow / Information Only", "outlook_rows"),
+        ("Market Path Forecast — 15m Primary / 30m Confirmation", "market_path_rows"),
         ("Signal Reliability", "evidence_rows"),
         ("Strategy Matrix", "strategy_rows"),
         ("Candidate Matrix", "candidate_rows"),
@@ -109,6 +109,14 @@ def build_ai_report_pdf(report: Mapping[str, Any]) -> bytes:
         if not rows:
             continue
         story += [Spacer(1, 3 * mm), Paragraph(title, styles["Section"]), _table(rows)]
+        if key == "market_path_rows":
+            summary_text = _text(report.get("market_path_summary", ""))
+            authority_text = _text(report.get("market_path_authority_note", ""))
+            if summary_text and summary_text != "-":
+                story.append(Spacer(1, 1.5 * mm))
+                story.append(Paragraph(f"<b>Likely Path:</b> {summary_text}", styles["Small"]))
+            if authority_text and authority_text != "-":
+                story.append(Paragraph(f"<b>One-Brain Authority Lock:</b> {authority_text}", styles["Small"]))
         if key in {"option_rows", "department_rows"}:
             story.append(PageBreak())
 
