@@ -1378,7 +1378,7 @@ HEAVYWEIGHT_DEFAULT = {
 }
 
 st.set_page_config(
-    page_title="Nifty Seller AI V50.8.6 Market Path Forecast",
+    page_title="Nifty Seller AI V50.8.7 Market Path Availability",
     page_icon="🧠",
     layout="wide",
 )
@@ -4079,7 +4079,7 @@ v161_init_refresh_state()
 client_id, access_token = dhan_credentials()
 dhan_ready = bool(client_id and access_token)
 
-st.sidebar.title("🏛️ V50.8.6 AI HEADQUARTERS")
+st.sidebar.title("🏛️ V50.8.7 AI HEADQUARTERS")
 st.sidebar.caption("ONE BRAIN • CO CONTROL • DATA OWNERSHIP")
 st.sidebar.markdown("**👑 AI_MASTER — Final Authority**")
 st.sidebar.caption("🎖️ CO — Consolidates verified branch case file")
@@ -8269,7 +8269,7 @@ try:
         _direction_conf_v505 = int(max(0, min(100, _projection_v505.get("probability", 50))))
 
         AI_MASTER.update({
-            "version": "V50.8.6_MARKET_PATH_FORECAST",
+            "version": "V50.8.7_MARKET_PATH_AVAILABILITY",
             "created_at": fmt_time(),
             "snapshot_id": _snapshot_id_v24,
             "short_snapshot_id": str(_snapshot_id_v24)[-8:],
@@ -8481,7 +8481,7 @@ try:
     else:
         _v504_import_reason = "Department imports unavailable: " + (V24_DEPARTMENT_IMPORT_ERROR or "unknown import failure")
         AI_MASTER.update({
-            "version": "V50.8.6_MARKET_PATH_FORECAST",
+            "version": "V50.8.7_MARKET_PATH_AVAILABILITY",
             "final_action": "WAIT",
             "execution_status": "WAIT",
             "confidence": 0,
@@ -8506,7 +8506,7 @@ except Exception as _v24_pipeline_error:
     # when the department/CO pipeline failed. Surface the exact runtime stage.
     _v504_runtime_reason = f"{type(_v24_pipeline_error).__name__}: {_v24_pipeline_error}"
     AI_MASTER.update({
-        "version": "V50.8.6_MARKET_PATH_FORECAST",
+        "version": "V50.8.7_MARKET_PATH_AVAILABILITY",
         "final_action": "WAIT",
         "execution_status": "WAIT",
         "confidence": 0,
@@ -8528,7 +8528,7 @@ except Exception as _v24_pipeline_error:
 
 
 # =========================================================
-# V50.8.6 MARKET PATH FORECAST — READ ONLY AFTER AI_MASTER
+# V50.8.7 MARKET PATH AVAILABILITY — READ ONLY AFTER AI_MASTER
 # =========================================================
 # Golden Rule 22 lock: this block runs only after final AI_MASTER judgement.
 # It receives deep copies, performs zero data fetches and cannot alter action,
@@ -8545,6 +8545,22 @@ try:
     if V5086_MARKET_PATH_READY:
         _forecast_quote_age_v5086 = v5083_payload_age_seconds(dhan_bundle) if "v5083_payload_age_seconds" in globals() else None
         _forecast_option_age_v5086 = v5083_payload_age_seconds(option_chain) if "v5083_payload_age_seconds" in globals() else None
+        _forecast_oi_status_v5087 = str(((source_registry or {}).get("oi", {}) or {}).get("status", "MISSING")) if isinstance(locals().get("source_registry", {}), dict) else "MISSING"
+        _forecast_pa_context_v5087 = {
+            "success": bool((price_action_result or {}).get("success", False)) if isinstance(locals().get("price_action_result", {}), dict) else False,
+            "current_session_available": bool((price_action_result or {}).get("current_session_available", False)) if isinstance(locals().get("price_action_result", {}), dict) else False,
+            "current_session_candle_count": int(_v221_num((price_action_result or {}).get("current_session_candle_count", 0), 0)) if isinstance(locals().get("price_action_result", {}), dict) else 0,
+            "candle_age_seconds": float(_v221_num((price_action_result or {}).get("candle_age_seconds", 999999), 999999)) if isinstance(locals().get("price_action_result", {}), dict) else 999999,
+            "source": str((price_action_result or {}).get("source", "Price action unavailable")) if isinstance(locals().get("price_action_result", {}), dict) else "Price action unavailable",
+        }
+        try:
+            _forecast_support_v5087 = float(locals().get("nearest_support")) if locals().get("nearest_support") is not None else None
+        except (TypeError, ValueError):
+            _forecast_support_v5087 = None
+        try:
+            _forecast_resistance_v5087 = float(locals().get("nearest_resistance")) if locals().get("nearest_resistance") is not None else None
+        except (TypeError, ValueError):
+            _forecast_resistance_v5087 = None
         _market_path_v5086 = build_market_path_forecast(
             ai_master=deepcopy(AI_MASTER if isinstance(AI_MASTER, dict) else {}),
             market_snapshot=deepcopy(market_snapshot if isinstance(locals().get("market_snapshot", {}), dict) else {}),
@@ -8556,8 +8572,10 @@ try:
             state=st.session_state,
             quote_age_seconds=_forecast_quote_age_v5086,
             option_age_seconds=_forecast_option_age_v5086,
-            support_level=float(nearest_support) if locals().get("nearest_support") is not None else None,
-            resistance_level=float(nearest_resistance) if locals().get("nearest_resistance") is not None else None,
+            option_evidence_status=_forecast_oi_status_v5087,
+            price_action_context=deepcopy(_forecast_pa_context_v5087),
+            support_level=_forecast_support_v5087,
+            resistance_level=_forecast_resistance_v5087,
             support_source=str((_support_barrier_v5082 or {}).get("source", "Verified support")) if isinstance(locals().get("_support_barrier_v5082", {}), dict) else "Verified support",
             resistance_source=str((_resistance_barrier_v5082 or {}).get("source", "Verified resistance")) if isinstance(locals().get("_resistance_barrier_v5082", {}), dict) else "Verified resistance",
         )
@@ -8579,10 +8597,17 @@ try:
             "authority_note": "Forecast discarded; AI_MASTER final decision remains authoritative.",
         }
 except Exception as _forecast_error_v5086:
+    _forecast_error_text_v5087 = f"{type(_forecast_error_v5086).__name__}: {_forecast_error_v5086}"
     _market_path_v5086 = {
-        "status": "ERROR", "rows": [],
-        "freshness_reasons": [str(_forecast_error_v5086)],
-        "authority_note": "Market Path forecast failed safely; AI_MASTER remains unaffected.",
+        "status": "ERROR",
+        "availability_mode": "UNAVAILABLE",
+        "rows": [
+            {"Field": "Market Bias", "Next 15 Minutes": "UNAVAILABLE", "Next 30 Minutes": "UNAVAILABLE"},
+            {"Field": "Forecast Status", "Next 15 Minutes": _forecast_error_text_v5087, "Next 30 Minutes": _forecast_error_text_v5087},
+        ],
+        "freshness_reasons": [_forecast_error_text_v5087],
+        "hard_block_reasons": [_forecast_error_text_v5087],
+        "authority_note": "Market Path forecast failed safely; AI_MASTER remains unaffected. Exact diagnostic is shown in the table.",
     }
 AI_MASTER["market_path_forecast"] = _market_path_v5086
 
@@ -8854,7 +8879,7 @@ vix_range = v132_vix_range_engine(price, vix)
 source_text = v13_source_text(dhan_ready, option_chain, nifty_source, dhan_bundle, expiry_result)
 
 # V19.2: Top duplicate refresh controls removed. Use sidebar Refresh Control only.
-st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.6 Market Path Forecast</div>", unsafe_allow_html=True)
+st.markdown("<div class='main-title'>🏛️ Nifty Seller AI V50.8.7 Market Path Availability</div>", unsafe_allow_html=True)
 
 
 # =========================================================
@@ -9016,7 +9041,7 @@ elif _v504_core_ready and _v504_market_open and not _v504_flow_fresh:
     _v504_gate_state = "HOLD_SNAPSHOT_FRESHNESS"
 else:
     _v504_gate_state = "HOLD_DATA_OR_PIPELINE_INCOMPLETE"
-st.markdown("### ✅ V50.8.5 Live Market + DSP Integrity Gate")
+st.markdown("### ✅ V50.8.7 Live Market + DSP Integrity Gate")
 _render_safe_table([{
     "Gate": _v504_gate_state,
     "Market": market_text,
@@ -9094,10 +9119,23 @@ st.markdown(f"""
 st.markdown("### 🧭 MARKET PATH FORECAST — 15m Primary / 30m Confirmation")
 _market_path_ui_v5086 = AI_MASTER.get("market_path_forecast", {}) if isinstance(AI_MASTER, dict) else {}
 _market_path_rows_v5086 = list((_market_path_ui_v5086 or {}).get("rows", []) or [])
+_market_path_mode_v5087 = str((_market_path_ui_v5086 or {}).get("availability_mode", (_market_path_ui_v5086 or {}).get("status", "UNAVAILABLE"))).upper()
+if _market_path_mode_v5087 == "LIMITED":
+    _limited_reasons_v5087 = list((_market_path_ui_v5086 or {}).get("degradation_reasons", []) or [])
+    st.warning(
+        "LIMITED forecast — probabilities and zones are informational with capped reliability. "
+        + (" | ".join(_limited_reasons_v5087[:3]) if _limited_reasons_v5087 else "Recoverable evidence gap detected.")
+    )
+elif _market_path_mode_v5087 in {"UNAVAILABLE", "ERROR", "AUTHORITY_GUARD_FAIL", "MODULE_MISSING"}:
+    _hard_reasons_v5087 = list((_market_path_ui_v5086 or {}).get("hard_block_reasons", (_market_path_ui_v5086 or {}).get("freshness_reasons", [])) or [])
+    st.info(
+        "Forecast unavailable — "
+        + (" | ".join(_hard_reasons_v5087[:3]) if _hard_reasons_v5087 else "fresh same-snapshot evidence is not ready.")
+    )
 if _market_path_rows_v5086:
-    _render_safe_table(_market_path_rows_v5086, max_rows=20)
+    _render_safe_table(_market_path_rows_v5086, max_rows=24)
 else:
-    st.info("Market Path Forecast unavailable until fresh continuous same-snapshot evidence is ready.")
+    st.info("Market Path Forecast has no display rows; AI_MASTER remains unaffected.")
 _val15_v5086 = (_market_path_ui_v5086 or {}).get("validation_15m", {}) or {}
 _val30_v5086 = (_market_path_ui_v5086 or {}).get("validation_30m", {}) or {}
 st.caption(
@@ -9183,7 +9221,7 @@ try:
         _pdf_payload_v505 = {
             "generated_at": datetime.now(IST).strftime("%d-%m-%Y %H:%M:%S IST"),
             "summary": {
-                "Version": AI_MASTER.get("version", "V50.8.6"),
+                "Version": AI_MASTER.get("version", "V50.8.7"),
                 "Snapshot": AI_MASTER.get("snapshot_id", "NA"),
                 "Market": market_text,
                 "Nifty": round(float(price), 2),

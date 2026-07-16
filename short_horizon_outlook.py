@@ -1,6 +1,6 @@
 """Read-only Market Path Forecast derived strictly after AI_MASTER judgement.
 
-V50.8.6 authority contract
+V50.8.7 authority contract
 --------------------------
 This module is *not* a decision engine and it never fetches market data.  It
 receives an immutable copy of the already-final AI_MASTER judgement plus the
@@ -180,29 +180,112 @@ def _extract_conflicts(master: Mapping[str, Any]) -> list[str]:
     return [x for x in warnings if "conflict" in x.lower() or "hold" in x.lower()][:5]
 
 
-def _freshness_ok(
+def _candle_fallback_status(price_action_context: Optional[Mapping[str, Any]]) -> tuple[bool, dict[str, Any]]:
+    """Return whether fresh current-session 5m candle structure can support a limited forecast.
+
+    This is only a continuity fallback. It never replaces the authoritative live
+    snapshot and it cannot upgrade a LIMITED forecast to FULL.
+    """
+    ctx = price_action_context if isinstance(price_action_context, Mapping) else {}
+    success = bool(ctx.get("success", ctx.get("ready", False)))
+    current_session = bool(ctx.get("current_session_available", False))
+    candle_count = int(_num(ctx.get("current_session_candle_count", 0), 0))
+    candle_age = _num(ctx.get("candle_age_seconds", 999999.0), 999999.0)
+    source = str(ctx.get("source", "Dhan 5m candles"))
+    ok = bool(success and current_session and candle_count >= 2 and 0 <= candle_age <= 720)
+    return ok, {
+        "ok": ok,
+        "source": source,
+        "current_session_candle_count": candle_count,
+        "candle_age_seconds": round(candle_age, 1),
+    }
+
+
+def _availability_assessment(
     master: Mapping[str, Any],
     movement: Mapping[str, Any],
     quote_age: Optional[float],
     option_age: Optional[float],
-) -> tuple[bool, list[str]]:
-    reasons: list[str] = []
+    *,
+    observed_at: datetime,
+    market_open: bool,
+    option_evidence_status: str,
+    price_action_context: Optional[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Classify forecast evidence as FULL, LIMITED or UNAVAILABLE.
+
+    Hard failures protect the one-brain contract. Recoverable evidence gaps such
+    as a refresh continuity reset or day-change-only OI now produce a capped,
+    clearly labelled LIMITED forecast instead of a blank table.
+    """
+    hard: list[str] = []
+    limited: list[str] = []
+    if not market_open:
+        hard.append("market closed")
     if str(master.get("data_flow_status", "")).upper() != "FRESH":
-        reasons.append("data flow not fresh")
+        hard.append("data flow not fresh")
     if str(master.get("oi_sync_status", "")).upper() not in {"OK", "SNAPSHOT_READY"}:
-        reasons.append("OI sync not ready")
+        hard.append("OI sync not ready")
     if quote_age is not None and quote_age > 12:
-        reasons.append("quote stale")
+        hard.append("quote stale")
     if option_age is not None and option_age > 12:
-        reasons.append("option chain stale")
-    if int(_num(movement.get("recent_sample_count", 0))) < 2:
-        reasons.append("insufficient recent movement samples")
-    if str(movement.get("continuity_status", "")).upper() in {"GAP_RESET", "PREOPEN_BLOCKED"}:
-        reasons.append("movement continuity reset")
+        hard.append("option chain stale")
+
     integrity = master.get("department_integrity", {}) if isinstance(master.get("department_integrity", {}), Mapping) else {}
     if not bool(integrity.get("critical_ok", True)):
-        reasons.append("critical DSP integrity hold")
-    return not reasons, reasons
+        hard.append("critical DSP integrity hold")
+
+    recent_samples = int(_num(movement.get("recent_sample_count", 0), 0))
+    continuity = str(movement.get("continuity_status", "UNKNOWN")).upper()
+    candle_ok, candle_details = _candle_fallback_status(price_action_context)
+    minute_of_day = observed_at.hour * 60 + observed_at.minute
+    opening_shock = 9 * 60 + 15 <= minute_of_day < 9 * 60 + 20
+
+    if continuity == "PREOPEN_BLOCKED":
+        hard.append("pre-open movement blocked")
+    elif continuity == "GAP_RESET":
+        if candle_ok and recent_samples >= 1 and not opening_shock:
+            limited.append("live movement continuity reset; fresh 5m candle fallback used")
+        else:
+            hard.append("movement continuity reset without sufficient candle fallback")
+    elif continuity not in {"LIVE_SEQUENCE", "FIRST_SAMPLE"}:
+        if candle_ok and recent_samples >= 1 and not opening_shock:
+            limited.append(f"movement continuity {continuity or 'UNKNOWN'}; fresh 5m candle fallback used")
+        elif recent_samples < 2:
+            hard.append("movement continuity unavailable")
+
+    if recent_samples < 2:
+        if candle_ok and not opening_shock:
+            limited.append("insufficient refresh samples; current-session 5m candle structure used")
+        else:
+            hard.append("insufficient recent movement samples")
+
+    option_mode = str(option_evidence_status or "SNAPSHOT_READY").upper()
+    if option_mode in {"MISSING", "FAILED", "UNAVAILABLE"}:
+        hard.append("option evidence unavailable")
+    elif option_mode in {"DAY_CHANGE_ONLY", "PREOPEN_DAY_CHANGE_ONLY"}:
+        limited.append("option evidence is day-change-only; fresh second snapshot pending")
+    elif option_mode not in {"SNAPSHOT_READY", "LIVE", "OK"}:
+        limited.append(f"option evidence mode {option_mode}")
+
+    # During the first five minutes, a broken refresh sequence must not be
+    # converted into an apparently precise forecast from one forming candle.
+    if opening_shock and continuity != "LIVE_SEQUENCE":
+        hard.append("opening shock requires continuous live movement")
+
+    # De-duplicate while preserving explanation order.
+    hard = list(dict.fromkeys(hard))
+    limited = [x for x in dict.fromkeys(limited) if x not in hard]
+    mode = "UNAVAILABLE" if hard else ("LIMITED" if limited else "FULL")
+    return {
+        "mode": mode,
+        "hard_reasons": hard,
+        "limited_reasons": limited,
+        "candle_fallback": candle_details,
+        "recent_samples": recent_samples,
+        "continuity_status": continuity,
+        "option_evidence_status": option_mode,
+    }
 
 
 def _direction_bias_label(direction_score: float, dominant: str) -> str:
@@ -421,7 +504,7 @@ def _path_label(
         directional_budget = _num(zone.get("budget"), 0.0)
         if reversal_risk >= 68:
             return "UP → REVERSAL RISK"
-        if resistance_distance is not None and _num(resistance_distance) <= max(8.0, directional_budget * 0.90):
+        if resistance_distance is not None and _num(resistance_distance) <= max(8.0, directional_budget * 1.05):
             return "UP → STALL / BREAKOUT TEST"
         return "UP → CONTINUATION"
     if dominant.startswith("DOWN"):
@@ -429,7 +512,7 @@ def _path_label(
         directional_budget = _num(zone.get("budget"), 0.0)
         if reversal_risk >= 68:
             return "DOWN → SUPPORT BOUNCE RISK"
-        if support_distance is not None and _num(support_distance) <= max(8.0, directional_budget * 0.90):
+        if support_distance is not None and _num(support_distance) <= max(8.0, directional_budget * 1.05):
             return "DOWN → SUPPORT / BREAKDOWN TEST"
         return "DOWN → CONTINUATION"
     if direction_score >= 12:
@@ -554,6 +637,8 @@ def _comparison_rows(
     barriers: Mapping[str, Optional[float]],
     support_source: str,
     resistance_source: str,
+    evidence_mode: str = "FULL",
+    evidence_note: str = "Fresh continuous same-snapshot evidence",
 ) -> list[dict[str, Any]]:
     def zone(row: Mapping[str, Any], prefix: str) -> str:
         return f"{_num(row.get(prefix + '_low')):.0f}–{_num(row.get(prefix + '_high')):.0f}"
@@ -564,6 +649,8 @@ def _comparison_rows(
     resistance_text = f"{_num(resistance):.0f} ({resistance_source})" if resistance else "Not available"
     return [
         {"Field": "Current Nifty", "Next 15 Minutes": f"{current_price:.2f}", "Next 30 Minutes": f"{current_price:.2f}"},
+        {"Field": "Evidence Mode", "Next 15 Minutes": evidence_mode, "Next 30 Minutes": evidence_mode},
+        {"Field": "Evidence Note", "Next 15 Minutes": evidence_note, "Next 30 Minutes": evidence_note},
         {"Field": "Verified Support", "Next 15 Minutes": support_text, "Next 30 Minutes": support_text},
         {"Field": "Verified Resistance", "Next 15 Minutes": resistance_text, "Next 30 Minutes": resistance_text},
         {"Field": "Market Bias", "Next 15 Minutes": h15.get("market_bias"), "Next 30 Minutes": h30.get("market_bias")},
@@ -695,6 +782,8 @@ def build_market_path_forecast(
     state: MutableMapping[str, Any],
     quote_age_seconds: Optional[float] = None,
     option_age_seconds: Optional[float] = None,
+    option_evidence_status: str = "SNAPSHOT_READY",
+    price_action_context: Optional[Mapping[str, Any]] = None,
     support_level: Optional[float] = None,
     resistance_level: Optional[float] = None,
     support_source: str = "Verified support",
@@ -720,7 +809,23 @@ def build_market_path_forecast(
         move_bias = _num(movement_copy.get("movement_bias"), 0.0)
         phase = str(movement_copy.get("phase", "NORMAL")).upper()
         conflicts = _extract_conflicts(master)
-        fresh_ok, freshness_reasons = _freshness_ok(master, movement_copy, quote_age_seconds, option_age_seconds)
+        availability = _availability_assessment(
+            master,
+            movement_copy,
+            quote_age_seconds,
+            option_age_seconds,
+            observed_at=observed_at,
+            market_open=market_open,
+            option_evidence_status=option_evidence_status,
+            price_action_context=price_action_context,
+        )
+        hard_reasons = list(availability.get("hard_reasons", []) or [])
+        limited_reasons = list(availability.get("limited_reasons", []) or [])
+        if not snapshot_match:
+            hard_reasons.append("snapshot ID mismatch")
+        hard_reasons = list(dict.fromkeys(hard_reasons))
+        availability_mode = "UNAVAILABLE" if hard_reasons else ("LIMITED" if limited_reasons else "FULL")
+        freshness_reasons = hard_reasons + limited_reasons
 
         integrity = master.get("department_integrity", {}) if isinstance(master.get("department_integrity", {}), Mapping) else {}
         integrity_score = _num(integrity.get("score"), 70)
@@ -728,8 +833,13 @@ def build_market_path_forecast(
         direction_conf = _num(master.get("direction_confidence"), 50)
         recent_samples = int(_num(movement_copy.get("recent_sample_count", 0)))
         sample_score = _clamp(recent_samples / 8.0 * 100.0, 0.0, 100.0)
-        base_rel = data_conf * 0.35 + integrity_score * 0.25 + direction_conf * 0.20 + sample_score * 0.10 + (10 if fresh_ok else 0)
+        evidence_bonus = 10 if availability_mode == "FULL" else (4 if availability_mode == "LIMITED" else 0)
+        base_rel = data_conf * 0.35 + integrity_score * 0.25 + direction_conf * 0.20 + sample_score * 0.10 + evidence_bonus
         base_rel -= len(conflicts) * 6
+        if availability_mode == "LIMITED":
+            # Honest reliability reduction: a limited forecast is useful for
+            # path awareness but must never look like full confirmation.
+            base_rel -= 8 + min(12, max(0, len(limited_reasons) - 1) * 4)
         if phase == "RANGE":
             base_rel -= 5
         hour_min = observed_at.hour * 60 + observed_at.minute
@@ -740,12 +850,21 @@ def build_market_path_forecast(
         if not market_open:
             base_rel = 0
 
-        # Direction always starts with the final AI_MASTER projection.  Movement
+        # Direction always starts with the final AI_MASTER projection. Movement
         # is only a short-term timing adjustment; barriers never invent direction.
-        dir15 = _clamp(raw * 0.72 + move_bias * 0.28, -100, 100)
-        dir30 = _clamp(raw * 0.84 + move_bias * 0.16, -100, 100)
+        # When continuity is limited, reduce movement timing weight so a stale or
+        # discontinuous refresh cannot overpower the one final AI_MASTER view.
+        if availability_mode == "LIMITED":
+            dir15 = _clamp(raw * 0.88 + move_bias * 0.12, -100, 100)
+            dir30 = _clamp(raw * 0.92 + move_bias * 0.08, -100, 100)
+        else:
+            dir15 = _clamp(raw * 0.72 + move_bias * 0.28, -100, 100)
+            dir30 = _clamp(raw * 0.84 + move_bias * 0.16, -100, 100)
         range15 = 25 + len(conflicts) * 6 - abs(dir15) * 0.16
         range30 = 30 + len(conflicts) * 5 - abs(dir30) * 0.13
+        if availability_mode == "LIMITED":
+            range15 += 8
+            range30 += 10
         if phase == "RANGE":
             range15 += 20
             range30 += 16
@@ -757,17 +876,18 @@ def build_market_path_forecast(
             support_level=support_level,
             resistance_level=resistance_level,
         )
-        status = "AVAILABLE" if market_open and fresh_ok and snapshot_match else "UNAVAILABLE"
-        if not snapshot_match:
-            freshness_reasons.append("snapshot ID mismatch")
+        status = "UNAVAILABLE" if availability_mode == "UNAVAILABLE" else ("LIMITED" if availability_mode == "LIMITED" else "AVAILABLE")
 
-        if status == "AVAILABLE":
+        if status in {"AVAILABLE", "LIMITED"}:
             previous15 = _latest_previous_dominant(records, 15)
             previous30 = _latest_previous_dominant(records, 30)
             validation15_pre = _accuracy(records, 15)
             validation30_pre = _accuracy(records, 30)
             reliability15 = min(base_rel, _calibration_reliability_cap(int(validation15_pre.get("completed", 0)), 15))
             reliability30 = min(base_rel - 8, _calibration_reliability_cap(int(validation30_pre.get("completed", 0)), 30))
+            if availability_mode == "LIMITED":
+                reliability15 = min(reliability15, 54)
+                reliability30 = min(reliability30, 48)
             horizon15 = _build_horizon(
                 horizon=15,
                 direction_score=dir15,
@@ -798,6 +918,16 @@ def build_market_path_forecast(
                 horizon15["status"] = "EARLY OUTLOOK / PROVISIONAL"
             if int(validation30_pre.get("completed", 0)) < 20 and horizon30.get("status") == "CONFIRMED PATH":
                 horizon30["status"] = "EARLY OUTLOOK / PROVISIONAL"
+            horizon15["evidence_mode"] = availability_mode
+            horizon30["evidence_mode"] = availability_mode
+            if availability_mode == "LIMITED":
+                horizon15["status"] = "LIMITED OUTLOOK / LOW RELIABILITY"
+                horizon30["status"] = "LIMITED CONFIRMATION / LOW RELIABILITY"
+            evidence_note = (
+                "; ".join(limited_reasons)
+                if limited_reasons
+                else "Fresh continuous same-snapshot evidence"
+            )
             rows_ui = _comparison_rows(
                 horizon15,
                 horizon30,
@@ -805,6 +935,8 @@ def build_market_path_forecast(
                 barriers=barriers,
                 support_source=str(support_source),
                 resistance_source=str(resistance_source),
+                evidence_mode=availability_mode,
+                evidence_note=evidence_note,
             )
 
             bucket = observed_at.replace(minute=(observed_at.minute // 5) * 5, second=0, microsecond=0)
@@ -837,12 +969,17 @@ def build_market_path_forecast(
                     "resistance_source": str(resistance_source),
                     "authority": "READ_ONLY_AFTER_AI_MASTER",
                     "authority_fingerprint": authority_before,
+                    "availability_mode": availability_mode,
+                    "degradation_reasons": list(limited_reasons),
+                    "option_evidence_status": str(availability.get("option_evidence_status", option_evidence_status)),
+                    "movement_continuity_status": str(availability.get("continuity_status", "UNKNOWN")),
+                    "candle_fallback": deepcopy(availability.get("candle_fallback", {})),
                 }
                 records.append(forecast)
         else:
             horizon15 = {}
             horizon30 = {}
-            rows_ui = _unavailable_rows(" / ".join(freshness_reasons) or "MARKET CLOSED")
+            rows_ui = _unavailable_rows(" / ".join(hard_reasons) or "MARKET CLOSED")
 
         records = _merge_records(records)
         state[_STATE_KEY] = records
@@ -863,14 +1000,16 @@ def build_market_path_forecast(
     supporting = [f"{r.get('Signal')}: {_num(r.get('Bias')):+.0f}" for r in sorted_evidence[:3]]
     likely_path = ""
     if horizon15 and horizon30:
+        mode_prefix = "LIMITED evidence — " if availability_mode == "LIMITED" else ""
         likely_path = (
-            f"15m {horizon15.get('path')} toward {horizon15.get('likely_low'):.0f}–{horizon15.get('likely_high'):.0f}; "
+            f"{mode_prefix}15m {horizon15.get('path')} toward {horizon15.get('likely_low'):.0f}–{horizon15.get('likely_high'):.0f}; "
             f"30m {horizon30.get('path')} toward {horizon30.get('likely_low'):.0f}–{horizon30.get('likely_high'):.0f}."
         )
 
     return {
-        "version": "V50.8.6_MARKET_PATH_FORECAST_SHADOW",
+        "version": "V50.8.7_MARKET_PATH_AVAILABILITY_SHADOW",
         "status": status,
+        "availability_mode": availability_mode,
         "snapshot_id": snapshot_id,
         "rows": rows_ui,
         "horizon_15m": horizon15,
@@ -879,6 +1018,9 @@ def build_market_path_forecast(
         "supporting_evidence": supporting,
         "conflicts": conflicts,
         "freshness_reasons": freshness_reasons,
+        "hard_block_reasons": hard_reasons,
+        "degradation_reasons": limited_reasons,
+        "availability_details": availability,
         "validation_15m": _accuracy(records, 15),
         "validation_30m": _accuracy(records, 30),
         "barrier_context": {

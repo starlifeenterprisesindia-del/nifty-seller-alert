@@ -1,0 +1,51 @@
+NIFTY SELLER AI V50.8.7 — TEST REPORT
+
+TEST DATE
+- 16 July 2026
+
+RESULTS
+- Python compilation: PASS (55 project/test Python files)
+- Automated pytest suite: 32/32 PASS
+- Non-app module import audit: 47/47 PASS
+- PDF generation smoke test: PASS
+- PDF signature: %PDF confirmed
+- ZIP source compilation: PASS
+
+V50.8.7 AVAILABILITY TESTS
+- GAP_RESET + fresh current-session Dhan 5m candles: LIMITED forecast PASS
+- DAY_CHANGE_ONLY option evidence: LIMITED forecast PASS
+- Limited 15m reliability cap <=54%: PASS
+- Limited 30m reliability cap <=48%: PASS
+- Limited forecast table not blank: PASS
+- Limited path barrier awareness: PASS
+- 09:15–09:20 one-candle opening shock remains UNAVAILABLE: PASS
+- Stale option-chain hard block: PASS
+- LIVE_SEQUENCE + SNAPSHOT_READY upgrades to FULL: PASS
+- Snapshot mismatch fail-closed: PASS
+- Exact runtime diagnostic table static check: PASS
+- V50.8.7 UI/gate version static check: PASS
+
+ONE-BRAIN VERIFICATION
+- AI_MASTER input remains unchanged after forecast construction: PASS
+- Deep-copy forecast call: PASS
+- Zero independent forecast data fetches: PASS
+- Forecast cannot change execution: PASS
+- Forecast feedback_to_ai_master remains False: PASS
+- Forecast is attached only after final AI_MASTER judgement: PASS
+- No DSP/CO/Strategy module reads Market Path output as input: PASS
+
+REGRESSION
+- V50.8.6 bullish/bearish destination tests: PASS
+- Move-consumed and reversal-risk tests: PASS
+- Provisional calibration caps: PASS
+- PDF Market Path table test: PASS
+- V50.8.5 FII/DII journal tests: PASS
+- V50.8.5.1 auth-error runtime regression tests: PASS
+- V50.8.4 DSP/option-flow integrity tests: PASS
+
+LIMITATION
+- A full authenticated Streamlit Cloud + DhanHQ browser run could not be
+  executed in this local environment because user credentials and the live
+  Streamlit deployment are unavailable here.
+- The deployment check must confirm actual quote/OC ages, limited-to-full
+  transition, mobile layout and PDF output during market hours.

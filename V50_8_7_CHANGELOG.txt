@@ -1,0 +1,94 @@
+NIFTY SELLER AI V50.8.7 — MARKET PATH AVAILABILITY FIX
+
+BASE
+- Built directly on V50.8.6 Market Path Forecast One-Brain Production.
+- V50.8.5.1 runtime auth hotfix, FII/DII journal, shared-state integrity,
+  option-flow correction, DSP integrity and PDF reporting remain preserved.
+
+PROBLEM FIXED
+- V50.8.6 treated every movement GAP_RESET as a hard forecast failure.
+- A fresh Dhan quote, fresh option chain and strong AI_MASTER evidence could be
+  available, but the Market Path table remained blank/unavailable after a
+  phone/browser refresh gap.
+- DAY_CHANGE_ONLY option evidence was not separately represented in forecast
+  availability and reliability.
+- Live forecast exceptions displayed only a generic safe-failure message, which
+  made the exact runtime cause difficult to diagnose.
+
+THREE-LEVEL FORECAST AVAILABILITY
+1. FULL
+   - Fresh quote and option chain.
+   - Same authoritative snapshot.
+   - OI sync ready.
+   - Continuous live movement sequence.
+   - Critical DSP integrity pass.
+
+2. LIMITED
+   - Fresh same-snapshot core data is valid, but one or more recoverable evidence
+     gaps exist.
+   - Examples:
+     * live movement continuity GAP_RESET after a browser/refresh gap;
+     * only DAY_CHANGE_ONLY OI while the fresh second intraday snapshot is pending;
+     * too few refresh samples, with fresh current-session Dhan 5m candle
+       structure available as continuity fallback.
+   - The table now displays probabilities, expected move and zones instead of
+     becoming blank.
+   - It is clearly labelled LIMITED and reliability is capped.
+
+3. UNAVAILABLE
+   - Reserved for hard failures only:
+     * market closed/pre-open block;
+     * stale quote or stale option chain;
+     * OI sync failure;
+     * snapshot mismatch;
+     * critical DSP integrity hold;
+     * no usable movement evidence and no fresh candle fallback;
+     * opening-shock period without a continuous live sequence.
+
+LIMITED MODE SAFETY
+- 15m reliability maximum: 54%.
+- 30m reliability maximum: 48%.
+- RANGE probability is increased to represent additional uncertainty.
+- Discontinuous movement has reduced timing weight.
+- AI_MASTER final projection remains the primary directional source.
+- Current-session 5m candles are only a continuity fallback; they cannot create
+  a FULL forecast or a separate direction.
+- Status is shown as LIMITED OUTLOOK / LOW RELIABILITY.
+
+OPENING SAFETY
+- 09:15–09:20 remains strict.
+- One forming candle or a broken refresh sequence cannot produce a precise
+  forecast during opening shock.
+- A continuous live movement sequence is still required in that window.
+
+BARRIER / PATH DISPLAY
+- Nearby barrier recognition was slightly widened so a resistance/support near
+  the expected movement budget is labelled STALL / BREAKOUT TEST or SUPPORT /
+  BREAKDOWN TEST rather than normal continuation.
+- Evidence Mode and Evidence Note are now visible inside the Market Path table.
+
+ONE-BRAIN AUTHORITY PRESERVED
+- Forecast still runs only after final AI_MASTER judgement.
+- It receives deep copies and performs zero independent market-data fetches.
+- It cannot change action, strategy, candidate, strike, hedge, SL or target.
+- Limited or full forecast output is never fed back into DSP, CO or AI_MASTER.
+- Locked AI_MASTER fields are compared before and after forecast construction.
+
+RUNTIME DIAGNOSTICS
+- Unexpected forecast exceptions now produce a safe UNAVAILABLE table containing
+  the exact exception type/message.
+- AI_MASTER remains unaffected.
+- Support/resistance inputs are safely converted so malformed optional barrier
+  values cannot crash the whole forecast block.
+
+UI / VERSION
+- Visible version updated to V50.8.7 Market Path Availability.
+- Stale V50.8.5 DSP Integrity Gate heading corrected to V50.8.7.
+- LIMITED and UNAVAILABLE reasons are shown above the table.
+
+NOT CHANGED
+- No second brain.
+- No new API fetch.
+- No change to AI_MASTER decision thresholds or execution permission.
+- No change to Strategy Matrix or Candidate Matrix scoring.
+- Forecast remains information-only shadow validation.

@@ -1,0 +1,40 @@
+V50.8.7 DEPLOYMENT
+
+1. Keep the current V50.8.6 ZIP as rollback backup.
+2. Extract the V50.8.7 production ZIP.
+3. Open the extracted folder and upload ALL files/folders to the GitHub
+   repository root, including the tests folder.
+4. app.py must be visible directly on the repository main page. Do not upload an
+   extra outer project folder.
+5. Commit changes and wait for Streamlit redeployment.
+6. Check logs and confirm there is no traceback.
+7. Confirm the visible title:
+   Nifty Seller AI V50.8.7 Market Path Availability
+8. Confirm the gate heading shows V50.8.7, not V50.8.5.
+9. Confirm table order:
+   AI FINAL AUTHORITY
+   MARKET PATH FORECAST
+   Signal Reliability Table
+   Smart Strategy Matrix
+   AI Candidate Matrix
+
+LIVE CHECK
+- After a browser/phone refresh gap with fresh Dhan data, the forecast should
+  show LIMITED instead of remaining blank when fresh current-session 5m candle
+  structure is available.
+- If OI shows DAY_CHANGE_ONLY, the table should state that a fresh second
+  snapshot is pending and cap reliability.
+- When movement continuity becomes LIVE_SEQUENCE and OI becomes SNAPSHOT_READY,
+  Evidence Mode should upgrade to FULL.
+- Stale quote/OC, snapshot mismatch or OI sync failure must still show
+  UNAVAILABLE.
+- During 09:15–09:20, a broken sequence may remain UNAVAILABLE by design.
+- One-Brain Authority Lock must show PASS.
+- Download one PDF and confirm the Market Path section includes Evidence Mode,
+  Evidence Note, probabilities, zones and authority note.
+
+IMPORTANT
+- LIMITED percentages are early path awareness, not trade permission.
+- SELL CE/SELL PE permission remains controlled only by AI FINAL AUTHORITY.
+- Continue 15m/30m shadow validation for 2–3 weeks before treating accuracy as
+  calibrated.
